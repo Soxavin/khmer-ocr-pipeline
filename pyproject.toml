@@ -9,6 +9,7 @@ dependencies = [
     "pillow>=10.0",
     "streamlit>=1.35",
     "opencv-python-headless>=4.8",
+    "surya-ocr>=0.7",
 ]
 
 [project.optional-dependencies]
