@@ -89,3 +89,10 @@ def test_stamp_removal_changes_red_region():
     blob_region = output[40:60, 40:60]
     mean_red_channel = blob_region[:, :, 0].mean()
     assert mean_red_channel < 242, f"Red channel mean in blob region is {mean_red_channel:.1f}, expected < 242 after inpainting"
+
+
+def test_sharpen_changes_pixels():
+    ingest_r = _make_ingest_result()  # gradient image — not flat, so sharpening has effect
+    original = ingest_r.page_images[0].copy()
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=True, normalise=False))
+    assert not np.array_equal(r.page_images[0], original)

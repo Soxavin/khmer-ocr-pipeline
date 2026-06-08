@@ -58,7 +58,8 @@ def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
 
 
 def _sharpen(bgr: np.ndarray) -> np.ndarray:
-    raise NotImplementedError
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+    return cv2.filter2D(bgr, ddepth=-1, kernel=kernel)
 
 
 def _normalise(bgr: np.ndarray) -> np.ndarray:
