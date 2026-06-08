@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Any
-import numpy as np
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
 
@@ -17,9 +16,10 @@ def _get_predictors():
         from surya.recognition import RecognitionPredictor
         from surya.table_rec import TableRecPredictor
         manager = SuryaInferenceManager()
-        _layout_pred = LayoutPredictor(manager)
-        _rec_pred = RecognitionPredictor(manager)
-        _table_pred = TableRecPredictor(manager)
+        layout = LayoutPredictor(manager)
+        rec = RecognitionPredictor(manager)
+        table = TableRecPredictor(manager)
+        _layout_pred, _rec_pred, _table_pred = layout, rec, table
     return _layout_pred, _rec_pred, _table_pred
 
 
