@@ -24,18 +24,18 @@ def ingest(source: bytes, source_name: str, dpi: int = DEFAULT_DPI) -> IngestRes
 
 
 def _ingest_pdf(data: bytes, source_name: str, dpi: int) -> IngestResult:
-    doc = fitz.open(stream=data, filetype="pdf")
-    page_count = len(doc)
-    if page_count > MAX_PAGES:
-        raise ValueError(
-            f"Document has {page_count} pages; limit is {MAX_PAGES} for this prototype."
-        )
-    mat = fitz.Matrix(dpi / 72, dpi / 72)
-    images: list[np.ndarray] = []
-    for page in doc:
-        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
-        images.append(arr.copy())
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        page_count = len(doc)
+        if page_count > MAX_PAGES:
+            raise ValueError(
+                f"Document has {page_count} pages; limit is {MAX_PAGES} for this prototype."
+            )
+        mat = fitz.Matrix(dpi / 72, dpi / 72)
+        images: list[np.ndarray] = []
+        for page in doc:
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+            arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+            images.append(arr.copy())
     return IngestResult(
         source_name=source_name,
         page_images=images,
