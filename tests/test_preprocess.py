@@ -96,3 +96,10 @@ def test_sharpen_changes_pixels():
     original = ingest_r.page_images[0].copy()
     r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=True, normalise=False))
     assert not np.array_equal(r.page_images[0], original)
+
+
+def test_normalise_changes_pixels():
+    ingest_r = _make_ingest_result()  # gradient image — CLAHE has something to work with
+    original = ingest_r.page_images[0].copy()
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=True))
+    assert not np.array_equal(r.page_images[0], original)
