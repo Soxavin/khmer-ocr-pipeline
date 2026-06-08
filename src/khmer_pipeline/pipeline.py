@@ -1,5 +1,5 @@
 from __future__ import annotations
-from .ingest import ingest
+from .ingest import ingest, DEFAULT_DPI
 from .preprocess import preprocess
 from .surya import run_surya
 from .postprocess import postprocess
@@ -7,7 +7,7 @@ from .export import export
 from .models import ExportResult
 
 
-def run(source: bytes, source_name: str, dpi: int = 200) -> ExportResult:
+def run(source: bytes, source_name: str, dpi: int = DEFAULT_DPI) -> ExportResult:
     ingest_result = ingest(source, source_name, dpi=dpi)
     preprocess_result = preprocess(ingest_result)
     surya_result = run_surya(preprocess_result)

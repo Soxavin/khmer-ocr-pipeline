@@ -17,6 +17,7 @@ class PreprocessResult:
     source_name: str
     page_images: list[np.ndarray]       # RGB uint8, cleaned
     dpi: int                            # preserved from IngestResult
+    page_count: int
 
 
 @dataclass

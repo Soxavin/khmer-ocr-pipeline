@@ -24,7 +24,11 @@ def ingest(source: bytes, source_name: str, dpi: int = DEFAULT_DPI) -> IngestRes
 
 
 def _ingest_pdf(data: bytes, source_name: str, dpi: int) -> IngestResult:
-    with fitz.open(stream=data, filetype="pdf") as doc:
+    try:
+        doc_cm = fitz.open(stream=data, filetype="pdf")
+    except Exception as e:
+        raise ValueError(f"Could not open PDF '{source_name}': {e}") from e
+    with doc_cm as doc:
         page_count = len(doc)
         if page_count > MAX_PAGES:
             raise ValueError(
