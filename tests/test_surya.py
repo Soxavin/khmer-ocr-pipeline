@@ -1,7 +1,6 @@
 from __future__ import annotations
 from unittest.mock import MagicMock, patch
 import numpy as np
-import pytest
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
 from khmer_pipeline.surya import run_surya
 
