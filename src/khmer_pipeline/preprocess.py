@@ -38,7 +38,23 @@ def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
 
 
 def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
-    raise NotImplementedError
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+
+    mask_red1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
+    mask_red2 = cv2.inRange(hsv, np.array([160, 100, 100]), np.array([180, 255, 255]))
+    mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+    mask_blue = cv2.inRange(hsv, np.array([100, 100, 100]), np.array([130, 255, 255]))
+
+    combined = cv2.bitwise_or(mask_red, mask_blue)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    dilated = cv2.dilate(combined, kernel, iterations=2)
+
+    if cv2.countNonZero(dilated) == 0:
+        return bgr
+
+    return cv2.inpaint(bgr, dilated, 5, cv2.INPAINT_TELEA)
 
 
 def _sharpen(bgr: np.ndarray) -> np.ndarray:

@@ -62,3 +62,22 @@ def test_preprocess_all_flags_false_is_passthrough():
 def test_preprocess_default_config_does_not_raise():
     # Smoke test: default config (all True) must not raise
     preprocess(_make_ingest_result())
+
+
+def _make_red_blob_image() -> IngestResult:
+    """100x100 off-white image with a 20x20 red square in the centre (RGB)."""
+    img = np.full((100, 100, 3), 240, dtype=np.uint8)
+    img[40:60, 40:60] = [255, 0, 0]  # red in RGB
+    return IngestResult(
+        source_name="stamp_test.pdf",
+        page_images=[img],
+        dpi=200,
+        page_count=1,
+    )
+
+
+def test_stamp_removal_changes_red_region():
+    ingest_r = _make_red_blob_image()
+    original = ingest_r.page_images[0].copy()
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=True, sharpen=False, normalise=False))
+    assert not np.array_equal(r.page_images[0], original)
