@@ -46,7 +46,7 @@ def _process_page(
     text_blocks = [_serialize_block(b) for b in ocr_result.blocks]
     ocr_text = _build_ocr_text(ocr_result.blocks)
 
-    table_bboxes = [b for b in layout_result.bboxes if b.label in ("Table", "TableOfContents")]
+    table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
     if table_bboxes:
         crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
         table_results = table_pred(crops, mode="full")
@@ -76,6 +76,8 @@ def _serialize_block(b) -> dict[str, Any]:
 
 
 def _serialize_table(t) -> dict[str, Any]:
+    # In mode="full", rows/cols/cells are empty; html is populated.
+    # If mode="simple" is ever used, rows/cols/cells are Pydantic v2 models with .model_dump().
     return {
         "rows": [r.model_dump() for r in t.rows],
         "cols": [c.model_dump() for c in t.cols],
