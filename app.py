@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.preprocess import preprocess
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
+from khmer_pipeline.postprocess import postprocess
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -39,7 +40,7 @@ def _draw_layout(img_array: np.ndarray, blocks: list[dict]) -> np.ndarray:
 
 st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
 st.title("Khmer Document Extraction Pipeline")
-st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR")
+st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process")
 
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
@@ -68,15 +69,18 @@ if uploaded is not None:
 
         surya_result = run_surya(preprocess_result, on_page=_on_page)
 
+        st.write("Running post-processing...")
+        postprocess_result = postprocess(surya_result)
+
         status.update(
-            label=f"Done — {ingest_result.page_count} page(s) processed from {ingest_result.source_name}",
+            label=f"Stages 1–4 complete — {ingest_result.page_count} page(s) from {ingest_result.source_name}",
             state="complete",
         )
 
     st.subheader(f"{ingest_result.page_count} page(s) from `{ingest_result.source_name}`")
 
-    for i, (orig, proc, surya_page) in enumerate(
-        zip(ingest_result.page_images, preprocess_result.page_images, surya_result.pages)
+    for i, (orig, proc, surya_page, post_page) in enumerate(
+        zip(ingest_result.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
     ):
         st.caption(
             f"Page {i + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
@@ -101,5 +105,13 @@ if uploaded is not None:
             with st.expander(f"Tables — page {i + 1} ({len(surya_page.tables)} detected)"):
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
-                    if tbl.get("html"):
-                        st.markdown(_safe_html(tbl["html"]), unsafe_allow_html=True)
+
+        with st.expander(f"Post-processing — page {i + 1}"):
+            if post_page.qwen_used:
+                st.markdown("**⚡ Qwen correction applied**")
+            else:
+                st.markdown("**✓ rule-based only**")
+            if post_page.corrected_text:
+                st.write(post_page.corrected_text)
+            if post_page.correction_diff:
+                st.code(post_page.correction_diff, language="diff")

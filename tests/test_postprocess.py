@@ -45,14 +45,9 @@ def test_raw_ocr_text_never_modified():
 
 
 def test_rules_apply_correctly():
-    saved = dict(pp.RULE_BASED_CORRECTIONS)
-    pp.RULE_BASED_CORRECTIONS["WRONG"] = "RIGHT"
-    try:
+    with patch.dict(pp.RULE_BASED_CORRECTIONS, {"WRONG": "RIGHT"}):
         result = pp._apply_rules("some WRONG text")
-        assert result == "some RIGHT text"
-    finally:
-        pp.RULE_BASED_CORRECTIONS.clear()
-        pp.RULE_BASED_CORRECTIONS.update(saved)
+    assert result == "some RIGHT text"
 
 
 # --- _detect_errors: foreign script checks ---
@@ -134,3 +129,29 @@ def test_qwen_not_called_when_no_errors():
         mock_get.return_value = (MagicMock(), MagicMock())
         pp.postprocess(_make_surya_result(ocr_text=clean))
     mock_gen.assert_not_called()
+
+
+def test_multi_page_each_page_corrected_independently():
+    # page 0: clean Khmer; page 1: has Sinhala → triggers Qwen; verify per-page independence
+    from khmer_pipeline.models import SuryaPageResult
+
+    def _make_page(idx, text):
+        return SuryaPageResult(
+            page_index=idx, text_blocks=[], tables=[], ocr_text=text
+        )
+
+    clean_text = "ចំណូល " + _KHMER_NUM_3
+    dirty_text = "text " + _SINHALA_KA + " here"
+    multi = SuryaResult(
+        source_name="multi.pdf",
+        pages=[_make_page(0, clean_text), _make_page(1, dirty_text)],
+    )
+    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
+         patch("khmer_pipeline.postprocess.generate", return_value="fixed") as mock_gen:
+        mock_get.return_value = (MagicMock(), MagicMock())
+        r = pp.postprocess(multi)
+
+    assert len(r.pages) == 2
+    assert r.pages[0].qwen_used is False
+    assert r.pages[1].qwen_used is True
+    mock_gen.assert_called_once()

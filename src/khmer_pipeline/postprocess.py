@@ -44,8 +44,8 @@ def _detect_errors(text: str) -> bool:
     for ch in text:
         cp = ord(ch)
         if (0x0D80 <= cp <= 0x0DFF or   # Sinhala
-                0x0E80 <= cp <= 0x0EFF or   # Lao
                 0x0E00 <= cp <= 0x0E7F or   # Thai
+                0x0E80 <= cp <= 0x0EFF or   # Lao
                 0x1000 <= cp <= 0x109F or   # Myanmar
                 0x0600 <= cp <= 0x06FF or   # Arabic
                 0x4E00 <= cp <= 0x9FFF or   # CJK Unified Ideographs
@@ -82,6 +82,9 @@ def _qwen_correct(text: str) -> str:
         f"Wrong: \"{text}\"\n"
         "Correct:"
     )
+    if generate is None:
+        warnings.warn("mlx_lm not installed; Qwen correction unavailable")
+        return text
     try:
         model, tokenizer = _get_qwen()
         return generate(model, tokenizer, prompt=prompt, max_tokens=512, verbose=False)
