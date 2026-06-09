@@ -71,6 +71,12 @@ def _process_page(
     if table_bboxes:
         crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
         table_results = table_pred(crops)
+        for t, crop in zip(table_results, crops):
+            if t.cells:
+                cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
+                cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
+                for cell, line in zip(t.cells, cell_ocr.text_lines):
+                    cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
         tables = []
         for t in table_results:
             tbl = _serialize_table(t)

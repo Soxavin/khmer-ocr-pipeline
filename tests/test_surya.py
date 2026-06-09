@@ -39,6 +39,7 @@ def _make_layout_bbox_mock(label: str = "Text") -> MagicMock:
 
 def _make_cell_mock(bbox: list) -> MagicMock:
     cell = MagicMock()
+    cell.bbox = bbox
     cell.model_dump.return_value = {
         "polygon": [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]],
         "confidence": 0.9,
@@ -46,6 +47,7 @@ def _make_cell_mock(bbox: list) -> MagicMock:
         "row_id": 0,
         "col_id": 0,
         "cell_id": 0,
+        "text_lines": None,
     }
     return cell
 
@@ -191,3 +193,34 @@ def test_phantom_cells_outside_bbox_are_discarded():
     cells = r.pages[0].tables[0]["cells"]
     assert len(cells) == 1
     assert cells[0]["bbox"] == [10.0, 10.0, 50.0, 40.0]
+
+
+def test_table_cells_get_ocr_text():
+    """rec_pred must be called with cell bboxes and text_lines set on each cell."""
+    layout_bboxes = [_make_layout_bbox_mock("Table")]
+    layout_bboxes[0].bbox = [10.0, 60.0, 200.0, 150.0]
+    layout_result = MagicMock()
+    layout_result.bboxes = layout_bboxes
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    cell = _make_cell_mock([5.0, 5.0, 40.0, 20.0])
+
+    table_result = MagicMock()
+    table_result.rows = []
+    table_result.cols = []
+    table_result.cells = [cell]
+    table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
+    table_pred = MagicMock(return_value=[table_result])
+
+    ocr_result = MagicMock()
+    ocr_result.text_lines = [_make_text_line_mock(0)]
+    rec_pred = MagicMock(return_value=[ocr_result])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        run_surya(_make_preprocess_result(n_pages=1))
+
+    # rec_pred called once for cell OCR (no non-table bboxes on this page)
+    assert rec_pred.call_count == 1
+    assert cell.text_lines is not None
+    assert cell.text_lines[0]["text"] == "ខ្មែរ 0"

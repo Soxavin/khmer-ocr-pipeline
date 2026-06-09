@@ -105,6 +105,21 @@ if uploaded is not None:
             with st.expander(f"Tables — page {i + 1} ({len(surya_page.tables)} detected)"):
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
+                    cells = tbl["cells"]
+                    if cells and any(c.get("text_lines") for c in cells):
+                        max_row = max(c["row_id"] for c in cells) + 1
+                        max_col = max((c.get("col_id") or 0) for c in cells) + 1
+                        grid = [[""] * max_col for _ in range(max_row)]
+                        for c in cells:
+                            r = c["row_id"]
+                            col = c.get("col_id") or 0
+                            if c.get("text_lines"):
+                                text = " ".join(
+                                    t["text"] for t in c["text_lines"] if t.get("text")
+                                ).strip()
+                                if 0 <= r < max_row and 0 <= col < max_col:
+                                    grid[r][col] = text
+                        st.dataframe(grid)
 
         with st.expander(f"Post-processing — page {i + 1}"):
             if post_page.qwen_used:
