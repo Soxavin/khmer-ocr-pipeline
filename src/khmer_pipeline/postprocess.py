@@ -52,10 +52,12 @@ def _detect_errors(text: str) -> bool:
                 0x3040 <= cp <= 0x30FF):    # Hiragana/Katakana
             return True
 
-    # Check B: Arabic numerals present but no Khmer numerals
+    # Check B: Arabic numerals present but no Khmer numerals, only when Khmer text exists.
+    # Pure Latin/ASCII strings (dates, headers) must not trigger even with many digits.
+    has_khmer = any(0x1780 <= ord(ch) <= 0x17FF for ch in text)
     arabic_count = sum(1 for ch in text if 0x30 <= ord(ch) <= 0x39)
     khmer_count = sum(1 for ch in text if 0x17E0 <= ord(ch) <= 0x17E9)
-    if arabic_count > 5 and khmer_count == 0:
+    if has_khmer and arabic_count > 5 and khmer_count == 0:
         return True
 
     return False
