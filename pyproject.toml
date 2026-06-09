@@ -11,6 +11,7 @@ dependencies = [
     "opencv-python-headless>=4.8",
     "surya-ocr>=0.7",
     "bleach>=6.0",
+    "mlx-lm>=0.21",
 ]
 
 [project.optional-dependencies]
