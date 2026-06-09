@@ -5,7 +5,7 @@ import streamlit as st
 from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.preprocess import preprocess
-from khmer_pipeline.surya import run_surya
+from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -48,7 +48,7 @@ uploaded = st.file_uploader(
 
 if uploaded is not None:
     with st.status("Running pipeline...", expanded=True) as status:
-        st.write("Stage 1: Converting pages to images...")
+        st.write("Converting pages to images...")
         try:
             ingest_result = ingest(uploaded.read(), uploaded.name)
         except ValueError as e:
@@ -56,14 +56,20 @@ if uploaded is not None:
             st.error(str(e))
             st.stop()
 
-        st.write("Stage 2: Cleaning pages...")
+        st.write("Cleaning pages...")
         preprocess_result = preprocess(ingest_result)
 
-        st.write("Stage 3: Running Surya OCR (this may take a moment)...")
-        surya_result = run_surya(preprocess_result)
+        if not models_loaded():
+            st.write("Loading Surya models — first run takes about a minute...")
+        preload_models()
+
+        def _on_page(idx: int, total: int) -> None:
+            st.write(f"Page {idx + 1} / {total}: running OCR...")
+
+        surya_result = run_surya(preprocess_result, on_page=_on_page)
 
         status.update(
-            label=f"Stages 1–3 complete — {ingest_result.page_count} page(s) processed",
+            label=f"Done — {ingest_result.page_count} page(s) processed from {ingest_result.source_name}",
             state="complete",
         )
 

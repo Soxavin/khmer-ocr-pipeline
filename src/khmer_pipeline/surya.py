@@ -1,11 +1,19 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Callable, Optional
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
 
 _layout_pred = None
 _rec_pred = None
 _table_pred = None
+
+
+def models_loaded() -> bool:
+    return _layout_pred is not None
+
+
+def preload_models() -> None:
+    _get_predictors()
 
 
 def _get_predictors():
@@ -23,13 +31,18 @@ def _get_predictors():
     return _layout_pred, _rec_pred, _table_pred
 
 
-def run_surya(result: PreprocessResult) -> SuryaResult:
+def run_surya(
+    result: PreprocessResult,
+    on_page: Optional[Callable[[int, int], None]] = None,
+) -> SuryaResult:
     layout_pred, rec_pred, table_pred = _get_predictors()
     pil_images = [Image.fromarray(img) for img in result.page_images]
-    pages = [
-        _process_page(idx, pil_img, layout_pred, rec_pred, table_pred)
-        for idx, pil_img in enumerate(pil_images)
-    ]
+    total = len(pil_images)
+    pages = []
+    for idx, pil_img in enumerate(pil_images):
+        if on_page is not None:
+            on_page(idx, total)
+        pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, table_pred))
     return SuryaResult(source_name=result.source_name, pages=pages)
 
 
