@@ -41,6 +41,7 @@ class CorrectedPageResult:
     tables: list[dict[str, Any]]
     raw_ocr_text: str                   # copied from SuryaPageResult.ocr_text, unchanged
     corrected_text: str                 # after rule-based + optional Qwen2.5-VL pass
+    correction_diff: str                # difflib.ndiff output between raw and corrected
     qwen_used: bool                     # True if Qwen fallback fired for this page
 
 
