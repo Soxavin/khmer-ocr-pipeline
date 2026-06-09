@@ -63,7 +63,11 @@ def _process_page(
     if table_bboxes:
         crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
         table_results = table_pred(crops, mode="full")
-        tables = [_serialize_table(t) for t in table_results]
+        tables = []
+        for t in table_results:
+            tbl = _serialize_table(t)
+            tbl["cells"] = _filter_phantom_cells(tbl["cells"], tbl["image_bbox"])
+            tables.append(tbl)
     else:
         tables = []
 
@@ -100,6 +104,15 @@ def _serialize_table(t) -> dict[str, Any]:
         "mode": t.mode,
         "image_bbox": t.image_bbox,
     }
+
+
+def _filter_phantom_cells(cells: list[dict], parent_bbox: list[float]) -> list[dict]:
+    px0, py0, px1, py1 = parent_bbox
+    return [
+        c for c in cells
+        if not (c["bbox"][2] <= px0 or c["bbox"][0] >= px1 or
+                c["bbox"][3] <= py0 or c["bbox"][1] >= py1)
+    ]
 
 
 def _build_ocr_text(blocks) -> str:

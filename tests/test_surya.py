@@ -30,6 +30,19 @@ def _make_text_block_mock(reading_order: int = 0) -> MagicMock:
     return b
 
 
+def _make_cell_mock(bbox: list) -> MagicMock:
+    cell = MagicMock()
+    cell.model_dump.return_value = {
+        "polygon": [[bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]]],
+        "confidence": 0.9,
+        "bbox": bbox,
+        "row_id": 0,
+        "col_id": 0,
+        "cell_id": 0,
+    }
+    return cell
+
+
 def _make_predictors(with_table: bool = False):
     """Returns (layout_pred, rec_pred, table_pred) mocks."""
     text_bbox = MagicMock()
@@ -146,3 +159,40 @@ def test_run_surya_table_dict_has_required_keys():
     table = r.pages[0].tables[0]
     for key in ("rows", "cols", "cells", "html", "error", "mode", "image_bbox"):
         assert key in table, f"Missing table key: {key}"
+
+
+def test_phantom_cells_outside_bbox_are_discarded():
+    """Cells whose bbox falls entirely outside image_bbox are removed."""
+    text_bbox = MagicMock()
+    text_bbox.label = "Text"
+    text_bbox.bbox = [10.0, 10.0, 200.0, 50.0]
+    table_bbox = MagicMock()
+    table_bbox.label = "Table"
+    table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
+    layout_result = MagicMock()
+    layout_result.bboxes = [text_bbox, table_bbox]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    ocr_result = MagicMock()
+    ocr_result.blocks = [_make_text_block_mock(0)]
+    rec_pred = MagicMock(return_value=[ocr_result])
+
+    inside_cell = _make_cell_mock([10.0, 10.0, 50.0, 40.0])
+    outside_cell = _make_cell_mock([-50.0, -50.0, -10.0, -10.0])
+
+    table_result = MagicMock()
+    table_result.rows = []
+    table_result.cols = []
+    table_result.cells = [inside_cell, outside_cell]
+    table_result.html = "<table><tr><td>ខ្មែរ</td></tr></table>"
+    table_result.error = False
+    table_result.mode = "full"
+    table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
+    table_pred = MagicMock(return_value=[table_result])
+
+    with patch("khmer_pipeline.surya._get_predictors", return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    cells = r.pages[0].tables[0]["cells"]
+    assert len(cells) == 1
+    assert cells[0]["bbox"] == [10.0, 10.0, 50.0, 40.0]
