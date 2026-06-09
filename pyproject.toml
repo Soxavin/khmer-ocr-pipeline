@@ -10,6 +10,7 @@ dependencies = [
     "streamlit>=1.35",
     "opencv-python-headless>=4.8",
     "surya-ocr>=0.7",
+    "bleach>=6.0",
 ]
 
 [project.optional-dependencies]

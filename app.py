@@ -1,10 +1,21 @@
 from __future__ import annotations
+import bleach
 import numpy as np
 import streamlit as st
 from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.preprocess import preprocess
 from khmer_pipeline.surya import run_surya
+
+_SAFE_TAGS = [
+    "p", "br", "b", "i", "em", "strong", "span",
+    "table", "thead", "tbody", "tr", "td", "th",
+    "math",
+]
+
+
+def _safe_html(html: str) -> str:
+    return bleach.clean(html, tags=_SAFE_TAGS, attributes={}, strip=True)
 
 _LABEL_COLORS = {
     "Text": "#4A90D9",
@@ -78,11 +89,11 @@ if uploaded is not None:
 
         if surya_page.ocr_text:
             with st.expander(f"OCR text — page {i + 1}"):
-                st.markdown(surya_page.ocr_text, unsafe_allow_html=True)
+                st.markdown(_safe_html(surya_page.ocr_text), unsafe_allow_html=True)
 
         if surya_page.tables:
             with st.expander(f"Tables — page {i + 1} ({len(surya_page.tables)} detected)"):
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
                     if tbl.get("html"):
-                        st.markdown(tbl["html"], unsafe_allow_html=True)
+                        st.markdown(_safe_html(tbl["html"]), unsafe_allow_html=True)
