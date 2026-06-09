@@ -17,16 +17,23 @@ def _make_preprocess_result(n_pages: int = 2) -> PreprocessResult:
     )
 
 
-def _make_text_block_mock(reading_order: int = 0) -> MagicMock:
+def _make_text_line_mock(idx: int = 0) -> MagicMock:
+    """Matches surya.recognition.schema.TextLine in the new Surya API."""
+    line = MagicMock()
+    line.text = f"ខ្មែរ {idx}"
+    line.bbox = [10.0, 10.0, 200.0, 50.0]
+    line.polygon = [[10.0, 10.0], [200.0, 10.0], [200.0, 50.0], [10.0, 50.0]]
+    line.confidence = 0.95
+    return line
+
+
+def _make_layout_bbox_mock(label: str = "Text") -> MagicMock:
+    """Matches surya.layout.schema.LayoutBox in the new Surya API."""
     b = MagicMock()
-    b.label = "Text"
-    b.html = f"<p>ខ្មែរ {reading_order}</p>"
+    b.label = label
     b.bbox = [10.0, 10.0, 200.0, 50.0]
     b.polygon = [[10.0, 10.0], [200.0, 10.0], [200.0, 50.0], [10.0, 50.0]]
-    b.reading_order = reading_order
-    b.confidence = 0.95
-    b.skipped = False
-    b.error = False
+    b.position = 0
     return b
 
 
@@ -44,15 +51,10 @@ def _make_cell_mock(bbox: list) -> MagicMock:
 
 
 def _make_predictors(with_table: bool = False):
-    """Returns (layout_pred, rec_pred, table_pred) mocks."""
-    text_bbox = MagicMock()
-    text_bbox.label = "Text"
-    text_bbox.bbox = [10.0, 10.0, 200.0, 50.0]
-
-    layout_bboxes = [text_bbox]
+    """Returns (layout_pred, rec_pred, table_pred) mocks for the new Surya API."""
+    layout_bboxes = [_make_layout_bbox_mock("Text")]
     if with_table:
-        table_bbox = MagicMock()
-        table_bbox.label = "Table"
+        table_bbox = _make_layout_bbox_mock("Table")
         table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
         layout_bboxes.append(table_bbox)
 
@@ -61,7 +63,7 @@ def _make_predictors(with_table: bool = False):
     layout_pred = MagicMock(return_value=[layout_result])
 
     ocr_result = MagicMock()
-    ocr_result.blocks = [_make_text_block_mock(0)]
+    ocr_result.text_lines = [_make_text_line_mock(0)]
     rec_pred = MagicMock(return_value=[ocr_result])
 
     if with_table:
@@ -69,9 +71,6 @@ def _make_predictors(with_table: bool = False):
         table_result.rows = []
         table_result.cols = []
         table_result.cells = []
-        table_result.html = "<table><tr><td>ខ្មែរ</td></tr></table>"
-        table_result.error = False
-        table_result.mode = "full"
         table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
         table_pred = MagicMock(return_value=[table_result])
     else:
@@ -125,7 +124,7 @@ def test_run_surya_block_has_required_keys():
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     block = r.pages[0].text_blocks[0]
-    for key in ("label", "html", "bbox", "polygon", "reading_order", "confidence", "skipped", "error"):
+    for key in ("label", "bbox", "polygon", "reading_order"):
         assert key in block, f"Missing key: {key}"
 
 
@@ -135,10 +134,10 @@ def test_run_surya_ocr_text_is_str():
     assert isinstance(r.pages[0].ocr_text, str)
 
 
-def test_run_surya_ocr_text_contains_block_html():
+def test_run_surya_ocr_text_contains_khmer():
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
-    assert "<p>ខ្មែរ" in r.pages[0].ocr_text
+    assert "ខ្មែរ" in r.pages[0].ocr_text
 
 
 def test_run_surya_no_tables_gives_empty_list():
@@ -157,24 +156,23 @@ def test_run_surya_table_dict_has_required_keys():
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result())
     table = r.pages[0].tables[0]
-    for key in ("rows", "cols", "cells", "html", "error", "mode", "image_bbox"):
+    for key in ("rows", "cols", "cells", "image_bbox"):
         assert key in table, f"Missing table key: {key}"
 
 
 def test_phantom_cells_outside_bbox_are_discarded():
     """Cells whose bbox falls entirely outside image_bbox are removed."""
-    text_bbox = MagicMock()
-    text_bbox.label = "Text"
-    text_bbox.bbox = [10.0, 10.0, 200.0, 50.0]
-    table_bbox = MagicMock()
-    table_bbox.label = "Table"
+    layout_bboxes = [_make_layout_bbox_mock("Text")]
+    table_bbox = _make_layout_bbox_mock("Table")
     table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
+    layout_bboxes.append(table_bbox)
+
     layout_result = MagicMock()
-    layout_result.bboxes = [text_bbox, table_bbox]
+    layout_result.bboxes = layout_bboxes
     layout_pred = MagicMock(return_value=[layout_result])
 
     ocr_result = MagicMock()
-    ocr_result.blocks = [_make_text_block_mock(0)]
+    ocr_result.text_lines = [_make_text_line_mock(0)]
     rec_pred = MagicMock(return_value=[ocr_result])
 
     inside_cell = _make_cell_mock([10.0, 10.0, 50.0, 40.0])
@@ -184,9 +182,6 @@ def test_phantom_cells_outside_bbox_are_discarded():
     table_result.rows = []
     table_result.cols = []
     table_result.cells = [inside_cell, outside_cell]
-    table_result.html = "<table><tr><td>ខ្មែរ</td></tr></table>"
-    table_result.error = False
-    table_result.mode = "full"
     table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
     table_pred = MagicMock(return_value=[table_result])
 

@@ -19,14 +19,14 @@ def preload_models() -> None:
 def _get_predictors():
     global _layout_pred, _rec_pred, _table_pred
     if _layout_pred is None:
-        from surya.inference import SuryaInferenceManager
+        from surya.foundation import FoundationPredictor
         from surya.layout import LayoutPredictor
         from surya.recognition import RecognitionPredictor
         from surya.table_rec import TableRecPredictor
-        manager = SuryaInferenceManager()
-        layout = LayoutPredictor(manager)
-        rec = RecognitionPredictor(manager)
-        table = TableRecPredictor(manager)
+        from surya.settings import settings
+        layout = LayoutPredictor(FoundationPredictor(checkpoint=settings.LAYOUT_MODEL_CHECKPOINT))
+        rec = RecognitionPredictor(FoundationPredictor(checkpoint=settings.RECOGNITION_MODEL_CHECKPOINT))
+        table = TableRecPredictor()
         _layout_pred, _rec_pred, _table_pred = layout, rec, table
     return _layout_pred, _rec_pred, _table_pred
 
@@ -54,15 +54,23 @@ def _process_page(
     table_pred,
 ) -> SuryaPageResult:
     layout_result = layout_pred([pil_img])[0]
-    ocr_result = rec_pred([pil_img], [layout_result])[0]
 
-    text_blocks = [_serialize_block(b) for b in ocr_result.blocks]
-    ocr_text = _build_ocr_text(ocr_result.blocks)
+    # Layout boxes are the text_blocks (used for overlay drawing with labels)
+    text_blocks = [_serialize_layout_box(b) for b in layout_result.bboxes]
+
+    # OCR: pass non-Table layout bboxes to recognition predictor
+    non_table_bboxes = [b for b in layout_result.bboxes if b.label != "Table"]
+    if non_table_bboxes:
+        page_bboxes = [[list(map(int, b.bbox)) for b in non_table_bboxes]]
+        ocr_result = rec_pred([pil_img], bboxes=page_bboxes)[0]
+        ocr_text = _build_ocr_text(ocr_result.text_lines)
+    else:
+        ocr_text = ""
 
     table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
     if table_bboxes:
         crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
-        table_results = table_pred(crops, mode="full")
+        table_results = table_pred(crops)
         tables = []
         for t in table_results:
             tbl = _serialize_table(t)
@@ -79,29 +87,20 @@ def _process_page(
     )
 
 
-def _serialize_block(b) -> dict[str, Any]:
+def _serialize_layout_box(b) -> dict[str, Any]:
     return {
         "label": b.label,
-        "html": b.html,
         "bbox": b.bbox,
         "polygon": b.polygon,
-        "reading_order": b.reading_order,
-        "confidence": b.confidence,
-        "skipped": b.skipped,
-        "error": b.error,
+        "reading_order": b.position,
     }
 
 
 def _serialize_table(t) -> dict[str, Any]:
-    # In mode="full", rows/cols/cells are empty; html is populated.
-    # If mode="simple" is ever used, rows/cols/cells are Pydantic v2 models with .model_dump().
     return {
         "rows": [r.model_dump() for r in t.rows],
         "cols": [c.model_dump() for c in t.cols],
         "cells": [cell.model_dump() for cell in t.cells],
-        "html": t.html,
-        "error": t.error,
-        "mode": t.mode,
         "image_bbox": t.image_bbox,
     }
 
@@ -115,7 +114,5 @@ def _filter_phantom_cells(cells: list[dict], parent_bbox: list[float]) -> list[d
     ]
 
 
-def _build_ocr_text(blocks) -> str:
-    active = [b for b in blocks if not b.skipped and not b.error]
-    ordered = sorted(active, key=lambda b: b.reading_order)
-    return "\n\n".join(b.html for b in ordered)
+def _build_ocr_text(text_lines) -> str:
+    return "\n\n".join(line.text for line in text_lines if line.text)
