@@ -6,7 +6,8 @@ import streamlit as st
 from pathlib import Path
 from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.preprocess import preprocess
+from khmer_pipeline.models import IngestResult
+from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 from khmer_pipeline.postprocess import postprocess
 from khmer_pipeline.export import export
@@ -51,45 +52,86 @@ uploaded = st.file_uploader(
 )
 
 if uploaded is not None:
-    with st.status("Running pipeline...", expanded=True) as status:
-        st.write("Converting pages to images...")
-        try:
-            ingest_result = ingest(uploaded.read(), uploaded.name)
-        except ValueError as e:
-            status.update(label="Stage 1 failed", state="error")
-            st.error(str(e))
-            st.stop()
+    # Settings key — hardcoded defaults until Task 3 adds the sidebar
+    dpi = 200
+    page_selection = "All pages"
+    page_num = 1
+    page_start = 1
+    page_end = 1
+    remove_stamps = True
+    sharpen = True
+    normalise = True
+    tables_only = False
+    enable_qwen = True
 
-        st.write("Cleaning pages...")
-        preprocess_result = preprocess(ingest_result)
+    page_sel_part = "all"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}"
 
-        if not models_loaded():
-            st.write("Loading Surya models — first run takes about a minute...")
-        preload_models()
+    if st.session_state.get("last_key") != settings_key:
+        with st.status("Running pipeline...", expanded=True) as status:
+            st.write("Converting pages to images...")
+            try:
+                ingest_result = ingest(uploaded.read(), uploaded.name, dpi=dpi)
+            except ValueError as e:
+                status.update(label="Stage 1 failed", state="error")
+                st.error(str(e))
+                st.stop()
 
-        def _on_page(idx: int, total: int) -> None:
-            st.write(f"Page {idx + 1} / {total}: running OCR...")
+            # Page selection (all pages for now — Task 3 wires the sidebar)
+            selected_indices = list(range(ingest_result.page_count))
+            filtered_ingest = IngestResult(
+                source_name=ingest_result.source_name,
+                page_images=[ingest_result.page_images[i] for i in selected_indices],
+                dpi=ingest_result.dpi,
+                page_count=len(selected_indices),
+            )
 
-        surya_result = run_surya(preprocess_result, on_page=_on_page)
+            st.write("Cleaning pages...")
+            config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise)
+            preprocess_result = preprocess(filtered_ingest, config)
 
-        st.write("Running post-processing...")
-        postprocess_result = postprocess(surya_result)
+            if not models_loaded():
+                st.write("Loading Surya models — first run takes about a minute...")
+            preload_models()
 
-        st.write("Exporting structured output...")
-        export_result = export(postprocess_result)
+            def _on_page(idx: int, total: int) -> None:
+                st.write(f"Page {idx + 1} / {total}: running OCR...")
 
-        status.update(
-            label=f"Stages 1–5 complete — {ingest_result.page_count} page(s) from {ingest_result.source_name}",
-            state="complete",
-        )
+            surya_result = run_surya(preprocess_result, on_page=_on_page)
 
-    st.subheader(f"{ingest_result.page_count} page(s) from `{ingest_result.source_name}`")
+            st.write("Running post-processing...")
+            postprocess_result = postprocess(surya_result, skip_qwen=not enable_qwen)
+
+            st.write("Exporting structured output...")
+            export_result = export(postprocess_result)
+
+            st.session_state["ingest_result"] = ingest_result
+            st.session_state["filtered_ingest"] = filtered_ingest
+            st.session_state["preprocess_result"] = preprocess_result
+            st.session_state["surya_result"] = surya_result
+            st.session_state["postprocess_result"] = postprocess_result
+            st.session_state["export_result"] = export_result
+            st.session_state["last_key"] = settings_key
+
+            status.update(
+                label=f"Stages 1–5 complete — {filtered_ingest.page_count} page(s) from {ingest_result.source_name}",
+                state="complete",
+            )
+    else:
+        ingest_result = st.session_state["ingest_result"]
+        filtered_ingest = st.session_state["filtered_ingest"]
+        preprocess_result = st.session_state["preprocess_result"]
+        surya_result = st.session_state["surya_result"]
+        postprocess_result = st.session_state["postprocess_result"]
+        export_result = st.session_state["export_result"]
+
+    st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
 
     for i, (orig, proc, surya_page, post_page) in enumerate(
-        zip(ingest_result.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
+        zip(filtered_ingest.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
     ):
         st.caption(
-            f"Page {i + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
+            f"Page {surya_page.page_index + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
         )
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -103,12 +145,12 @@ if uploaded is not None:
                 use_container_width=True,
             )
 
-        if surya_page.ocr_text:
-            with st.expander(f"OCR text — page {i + 1}"):
+        if not tables_only and surya_page.ocr_text:
+            with st.expander(f"OCR text — page {surya_page.page_index + 1}"):
                 st.markdown(_safe_html(surya_page.ocr_text), unsafe_allow_html=True)
 
         if surya_page.tables:
-            with st.expander(f"Tables — page {i + 1} ({len(surya_page.tables)} detected)"):
+            with st.expander(f"Tables — page {surya_page.page_index + 1} ({len(surya_page.tables)} detected)"):
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
                     cells = tbl["cells"]
@@ -127,7 +169,7 @@ if uploaded is not None:
                                     grid[r][col] = text
                         st.dataframe(grid)
 
-        with st.expander(f"Post-processing — page {i + 1}"):
+        with st.expander(f"Post-processing — page {surya_page.page_index + 1}"):
             if post_page.qwen_used:
                 st.markdown("**⚡ Qwen correction applied**")
             else:
