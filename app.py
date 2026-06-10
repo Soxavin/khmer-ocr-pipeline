@@ -57,6 +57,8 @@ with st.sidebar:
     elif page_selection == "Page range":
         page_start = st.number_input("From page", min_value=1, value=1, step=1)
         page_end = st.number_input("To page", min_value=1, value=5, step=1)
+        if page_end < page_start:
+            st.warning("'To page' is less than 'From page' — only the first page will be processed.")
 
     st.header("Preprocessing")
     remove_stamps = st.checkbox("Remove colored stamps", value=True)
