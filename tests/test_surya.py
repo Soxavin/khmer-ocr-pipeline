@@ -235,9 +235,7 @@ def test_small_region_skipped():
     layout_result.bboxes = [tiny_bbox]
     layout_pred = MagicMock(return_value=[layout_result])
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [_make_text_line_mock(0)]
-    rec_pred = MagicMock(return_value=[ocr_result])
+    rec_pred = MagicMock()
 
     table_pred = MagicMock(return_value=[])
 
@@ -253,6 +251,7 @@ def test_region_label_in_text_blocks():
     """Every text block must have a 'region_label' key."""
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
+    assert r.pages[0].text_blocks, "Expected at least one text block"
     for block in r.pages[0].text_blocks:
         assert "region_label" in block, f"Block missing region_label: {block}"
 
