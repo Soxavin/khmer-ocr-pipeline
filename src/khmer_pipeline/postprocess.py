@@ -98,10 +98,10 @@ def _build_diff(raw: str, corrected: str) -> str:
     return "\n".join(diff)
 
 
-def _correct_page(page: SuryaPageResult) -> CorrectedPageResult:
+def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPageResult:
     raw = page.ocr_text
     after_rules = _apply_rules(raw)
-    if _detect_errors(after_rules):
+    if not skip_qwen and _detect_errors(after_rules):
         corrected = _qwen_correct(after_rules)
         qwen_used = True
     else:
@@ -119,8 +119,8 @@ def _correct_page(page: SuryaPageResult) -> CorrectedPageResult:
     )
 
 
-def postprocess(result: SuryaResult) -> PostprocessResult:
+def postprocess(result: SuryaResult, skip_qwen: bool = False) -> PostprocessResult:
     return PostprocessResult(
         source_name=result.source_name,
-        pages=[_correct_page(page) for page in result.pages],
+        pages=[_correct_page(page, skip_qwen=skip_qwen) for page in result.pages],
     )
