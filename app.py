@@ -106,7 +106,7 @@ if uploaded is not None:
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
                     cells = tbl["cells"]
-                    if cells and any(c.get("text_lines") for c in cells):
+                    if cells:
                         max_row = max(c["row_id"] for c in cells) + 1
                         max_col = max((c.get("col_id") or 0) for c in cells) + 1
                         grid = [[""] * max_col for _ in range(max_row)]

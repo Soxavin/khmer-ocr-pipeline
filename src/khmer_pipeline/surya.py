@@ -1,4 +1,5 @@
 from __future__ import annotations
+import warnings
 from typing import Any, Callable, Optional
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
@@ -73,10 +74,13 @@ def _process_page(
         table_results = table_pred(crops)
         for t, crop in zip(table_results, crops):
             if t.cells:
-                cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
-                cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
-                for cell, line in zip(t.cells, cell_ocr.text_lines):
-                    cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
+                try:
+                    cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
+                    cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
+                    for cell, line in zip(t.cells, cell_ocr.text_lines):
+                        cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
+                except Exception as e:
+                    warnings.warn(f"Cell OCR failed: {e}")
         tables = []
         for t in table_results:
             tbl = _serialize_table(t)
