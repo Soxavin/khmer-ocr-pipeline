@@ -219,10 +219,31 @@ if uploaded is not None:
             if post_page.correction_diff:
                 st.code(post_page.correction_diff, language="diff")
 
+        with st.expander(f"Edit corrected text — page {surya_page.page_index + 1}"):
+            edited = st.text_area(
+                "Corrected text (editable)",
+                value=st.session_state.get(f"edited_text_{i}", post_page.corrected_text),
+                height=200,
+                key=f"edit_{i}",
+            )
+            if edited != post_page.corrected_text:
+                st.session_state[f"edited_text_{i}"] = edited
+
     st.subheader("Downloads")
+    # Build export JSON, substituting any analyst-edited text
+    doc_json = dict(export_result.document_json)
+    patched_pages = []
+    for i, page_data in enumerate(doc_json.get("pages", [])):
+        edited_text = st.session_state.get(f"edited_text_{i}")
+        if edited_text is not None:
+            page_data = dict(page_data)
+            page_data["corrected_text"] = edited_text
+        patched_pages.append(page_data)
+    doc_json["pages"] = patched_pages
+
     st.download_button(
         label="⬇ Download document JSON",
-        data=json.dumps(export_result.document_json, ensure_ascii=False, indent=2),
+        data=json.dumps(doc_json, ensure_ascii=False, indent=2),
         file_name=f"{Path(uploaded.name).stem}_extracted.json",
         mime="application/json",
     )
