@@ -71,6 +71,7 @@ if uploaded is not None:
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Converting pages to images...")
             try:
+                uploaded.seek(0)
                 ingest_result = ingest(uploaded.read(), uploaded.name, dpi=dpi)
             except ValueError as e:
                 status.update(label="Stage 1 failed", state="error")
