@@ -60,11 +60,19 @@ def _process_page(
     text_blocks = [_serialize_layout_box(b) for b in layout_result.bboxes]
 
     # OCR: pass non-Table layout bboxes to recognition predictor
-    non_table_bboxes = [b for b in layout_result.bboxes if b.label != "Table"]
+    # Filter degenerate bboxes (zero/negative width or height) before rec_pred
+    non_table_bboxes = [
+        b for b in layout_result.bboxes
+        if b.label != "Table" and b.bbox[2] > b.bbox[0] and b.bbox[3] > b.bbox[1]
+    ]
     if non_table_bboxes:
         page_bboxes = [[list(map(int, b.bbox)) for b in non_table_bboxes]]
-        ocr_result = rec_pred([pil_img], bboxes=page_bboxes)[0]
-        ocr_text = _build_ocr_text(ocr_result.text_lines)
+        try:
+            ocr_result = rec_pred([pil_img], bboxes=page_bboxes)[0]
+            ocr_text = _build_ocr_text(ocr_result.text_lines)
+        except Exception as e:
+            warnings.warn(f"Text OCR failed on page {page_index}: {e}")
+            ocr_text = ""
     else:
         ocr_text = ""
 
