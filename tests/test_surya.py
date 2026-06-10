@@ -224,3 +224,43 @@ def test_table_cells_get_ocr_text():
     assert rec_pred.call_count == 1
     assert cell.text_lines is not None
     assert cell.text_lines[0]["text"] == "ខ្មែរ 0"
+
+
+def test_small_region_skipped():
+    """Layout bbox smaller than 50×20 pixels produces no text blocks."""
+    tiny_bbox = _make_layout_bbox_mock("Text")
+    tiny_bbox.bbox = [10.0, 10.0, 40.0, 25.0]   # 30×15 — below both thresholds
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [tiny_bbox]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    ocr_result = MagicMock()
+    ocr_result.text_lines = [_make_text_line_mock(0)]
+    rec_pred = MagicMock(return_value=[ocr_result])
+
+    table_pred = MagicMock(return_value=[])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert r.pages[0].text_blocks == []
+    rec_pred.assert_not_called()
+
+
+def test_region_label_in_text_blocks():
+    """Every text block must have a 'region_label' key."""
+    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+    for block in r.pages[0].text_blocks:
+        assert "region_label" in block, f"Block missing region_label: {block}"
+
+
+def test_ocr_text_has_no_region_labels():
+    """ocr_text must be plain text — layout label names must not appear as prefixes."""
+    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+    ocr_text = r.pages[0].ocr_text
+    for label in ("Text:", "Table:", "Title:", "Figure:", "Caption:", "Picture:"):
+        assert label not in ocr_text, f"ocr_text contains label prefix '{label}'"
