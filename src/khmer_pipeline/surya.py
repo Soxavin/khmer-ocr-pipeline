@@ -68,15 +68,16 @@ def _process_page(
         crop_w, crop_h = crop.size
         try:
             region_ocr = rec_pred([crop], bboxes=[[[0, 0, crop_w, crop_h]]])[0]
-            for line in region_ocr.text_lines:
-                block = _serialize_text_line(line)
-                block = _adjust_coordinates(block, x0, y0)
-                block["label"] = layout_bbox.label
-                block["region_label"] = layout_bbox.label
-                block["reading_order"] = layout_bbox.position
-                text_blocks.append(block)
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
+            continue
+        for line in region_ocr.text_lines:
+            block = _serialize_text_line(line)
+            _adjust_coordinates(block, x0, y0)
+            block["label"] = layout_bbox.label
+            block["region_label"] = layout_bbox.label
+            block["reading_order"] = layout_bbox.position
+            text_blocks.append(block)
 
     # Sort blocks: primary by reading_order (if set), fallback top-to-bottom left-to-right
     def _sort_key(block: dict) -> tuple:
@@ -121,25 +122,17 @@ def _process_page(
     )
 
 
-def _serialize_layout_box(b) -> dict[str, Any]:
-    return {
-        "label": b.label,
-        "bbox": b.bbox,
-        "polygon": b.polygon,
-        "reading_order": b.position,
-    }
-
 
 def _serialize_text_line(line) -> dict[str, Any]:
     return {
         "text": line.text,
         "bbox": list(line.bbox),
-        "polygon": [list(p) for p in line.polygon],
+        "polygon": [list(p) for p in (line.polygon or [])],
         "confidence": line.confidence,
     }
 
 
-def _adjust_coordinates(block_dict: dict, offset_x: float, offset_y: float) -> dict:
+def _adjust_coordinates(block_dict: dict, offset_x: float, offset_y: float) -> None:
     if block_dict.get("bbox"):
         b = block_dict["bbox"]
         block_dict["bbox"] = [b[0] + offset_x, b[1] + offset_y, b[2] + offset_x, b[3] + offset_y]
@@ -148,7 +141,6 @@ def _adjust_coordinates(block_dict: dict, offset_x: float, offset_y: float) -> d
             [p[0] + offset_x, p[1] + offset_y]
             for p in block_dict["polygon"]
         ]
-    return block_dict
 
 
 def _serialize_table(t) -> dict[str, Any]:
