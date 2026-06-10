@@ -96,9 +96,10 @@ if uploaded is not None:
             try:
                 uploaded.seek(0)
                 ingest_result = ingest(uploaded.read(), uploaded.name, dpi=dpi)
-            except ValueError as e:
+            except Exception as e:
                 status.update(label="Stage 1 failed", state="error")
-                st.error(str(e))
+                st.error(f"Stage 1 failed: {str(e)}")
+                st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
 
             total_pages = ingest_result.page_count
@@ -119,23 +120,47 @@ if uploaded is not None:
             )
 
             st.write("Cleaning pages...")
-            config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise)
-            preprocess_result = preprocess(filtered_ingest, config)
+            try:
+                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise)
+                preprocess_result = preprocess(filtered_ingest, config)
+            except Exception as e:
+                status.update(label="Stage 2 failed", state="error")
+                st.error(f"Stage 2 failed: {str(e)}")
+                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.stop()
 
-            if not models_loaded():
-                st.write("Loading Surya models — first run takes about a minute...")
-            preload_models()
+            try:
+                if not models_loaded():
+                    st.write("Loading Surya models — first run takes about a minute...")
+                preload_models()
 
-            def _on_page(idx: int, total: int) -> None:
-                st.write(f"Page {idx + 1} / {total}: running OCR...")
+                def _on_page(idx: int, total: int) -> None:
+                    st.write(f"Page {idx + 1} / {total}: running OCR...")
 
-            surya_result = run_surya(preprocess_result, on_page=_on_page)
+                surya_result = run_surya(preprocess_result, on_page=_on_page)
+            except Exception as e:
+                status.update(label="Stage 3 failed", state="error")
+                st.error(f"Stage 3 failed: {str(e)}")
+                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.stop()
 
             st.write("Running post-processing...")
-            postprocess_result = postprocess(surya_result, skip_qwen=not enable_qwen)
+            try:
+                postprocess_result = postprocess(surya_result, skip_qwen=not enable_qwen)
+            except Exception as e:
+                status.update(label="Stage 4 failed", state="error")
+                st.error(f"Stage 4 failed: {str(e)}")
+                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.stop()
 
             st.write("Exporting structured output...")
-            export_result = export(postprocess_result)
+            try:
+                export_result = export(postprocess_result)
+            except Exception as e:
+                status.update(label="Stage 5 failed", state="error")
+                st.error(f"Stage 5 failed: {str(e)}")
+                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.stop()
 
             st.session_state["ingest_result"] = ingest_result
             st.session_state["filtered_ingest"] = filtered_ingest
