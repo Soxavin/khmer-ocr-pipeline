@@ -1,12 +1,15 @@
 from __future__ import annotations
+import json
 import bleach
 import numpy as np
 import streamlit as st
+from pathlib import Path
 from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.preprocess import preprocess
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 from khmer_pipeline.postprocess import postprocess
+from khmer_pipeline.export import export
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -40,7 +43,7 @@ def _draw_layout(img_array: np.ndarray, blocks: list[dict]) -> np.ndarray:
 
 st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
 st.title("Khmer Document Extraction Pipeline")
-st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process")
+st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
 
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
@@ -72,8 +75,11 @@ if uploaded is not None:
         st.write("Running post-processing...")
         postprocess_result = postprocess(surya_result)
 
+        st.write("Exporting structured output...")
+        export_result = export(postprocess_result)
+
         status.update(
-            label=f"Stages 1–4 complete — {ingest_result.page_count} page(s) from {ingest_result.source_name}",
+            label=f"Stages 1–5 complete — {ingest_result.page_count} page(s) from {ingest_result.source_name}",
             state="complete",
         )
 
@@ -130,3 +136,18 @@ if uploaded is not None:
                 st.write(post_page.corrected_text)
             if post_page.correction_diff:
                 st.code(post_page.correction_diff, language="diff")
+
+    st.subheader("Downloads")
+    st.download_button(
+        label="⬇ Download document JSON",
+        data=json.dumps(export_result.document_json, ensure_ascii=False, indent=2),
+        file_name=f"{Path(uploaded.name).stem}_extracted.json",
+        mime="application/json",
+    )
+    for table_id, csv_string in export_result.tables_csv:
+        st.download_button(
+            label=f"⬇ Download {table_id}.csv",
+            data=csv_string.encode("utf-8-sig"),
+            file_name=f"{table_id}.csv",
+            mime="text/csv",
+        )
