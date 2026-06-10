@@ -158,6 +158,7 @@ if uploaded is not None:
         export_result = st.session_state["export_result"]
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
+    show_layout = st.checkbox("Show layout overlay", value=True)
 
     for i, (orig, proc, surya_page, post_page) in enumerate(
         zip(filtered_ingest.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
@@ -165,17 +166,24 @@ if uploaded is not None:
         st.caption(
             f"Page {surya_page.page_index + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
         )
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.image(orig, caption="Original", use_container_width=True)
-        with col2:
-            st.image(proc, caption="Preprocessed", use_container_width=True)
-        with col3:
-            st.image(
-                _draw_layout(proc, surya_page.text_blocks),
-                caption="Layout detection",
-                use_container_width=True,
-            )
+        if show_layout:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.image(orig, caption="Original", use_container_width=True)
+            with col2:
+                st.image(proc, caption="Preprocessed", use_container_width=True)
+            with col3:
+                st.image(
+                    _draw_layout(proc, surya_page.text_blocks),
+                    caption="Layout detection",
+                    use_container_width=True,
+                )
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.image(orig, caption="Original", use_container_width=True)
+            with col2:
+                st.image(proc, caption="Preprocessed", use_container_width=True)
 
         if not tables_only and surya_page.ocr_text:
             with st.expander(f"OCR text — page {surya_page.page_index + 1}"):
@@ -219,9 +227,10 @@ if uploaded is not None:
         mime="application/json",
     )
     for table_id, csv_string in export_result.tables_csv:
-        st.download_button(
-            label=f"⬇ Download {table_id}.csv",
-            data=csv_string.encode("utf-8-sig"),
-            file_name=f"{table_id}.csv",
-            mime="text/csv",
-        )
+        if st.checkbox(f"Include {table_id} in export", value=True, key=f"export_{table_id}"):
+            st.download_button(
+                label=f"⬇ Download {table_id}.csv",
+                data=csv_string.encode("utf-8-sig"),
+                file_name=f"{table_id}.csv",
+                mime="text/csv",
+            )
