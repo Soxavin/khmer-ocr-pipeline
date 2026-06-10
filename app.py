@@ -46,25 +46,46 @@ st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
 st.title("Khmer Document Extraction Pipeline")
 st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
 
+with st.sidebar:
+    st.header("Document settings")
+    dpi = st.select_slider("Scan quality (DPI)", options=[150, 200, 300], value=200)
+    st.caption("200 for digital PDFs, 300 for scanned documents.")
+
+    page_selection = st.radio("Pages to process", ["All pages", "Single page", "Page range"])
+    if page_selection == "Single page":
+        page_num = st.number_input("Page number", min_value=1, value=1, step=1)
+    elif page_selection == "Page range":
+        page_start = st.number_input("From page", min_value=1, value=1, step=1)
+        page_end = st.number_input("To page", min_value=1, value=5, step=1)
+
+    st.header("Preprocessing")
+    remove_stamps = st.checkbox("Remove colored stamps", value=True)
+    sharpen = st.checkbox("Sharpen text", value=True)
+    normalise = st.checkbox("Enhance contrast", value=True)
+
+    st.header("Extraction")
+    extraction_mode = st.radio(
+        "Extraction mode",
+        ["Full extraction (text + tables)", "Tables only"],
+    )
+    tables_only = extraction_mode == "Tables only"
+
+    st.header("Post-processing")
+    enable_qwen = st.checkbox("Enable Qwen correction", value=True)
+
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
     type=["pdf", "png", "jpg", "jpeg", "tiff", "tif"],
 )
 
 if uploaded is not None:
-    # Settings key — hardcoded defaults until Task 3 adds the sidebar
-    dpi = 200
-    page_selection = "All pages"
-    page_num = 1
-    page_start = 1
-    page_end = 1
-    remove_stamps = True
-    sharpen = True
-    normalise = True
-    tables_only = False
-    enable_qwen = True
-
-    page_sel_part = "all"
+    if page_selection == "Single page":
+        page_sel_part = f"page_{page_num}"
+    elif page_selection == "Page range":
+        page_sel_part = f"range_{page_start}_{page_end}"
+    else:
+        page_sel_part = "all"
+    # tables_only omitted: it gates display only, not pipeline output
     settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}"
 
     if st.session_state.get("last_key") != settings_key:
@@ -78,8 +99,16 @@ if uploaded is not None:
                 st.error(str(e))
                 st.stop()
 
-            # Page selection (all pages for now — Task 3 wires the sidebar)
-            selected_indices = list(range(ingest_result.page_count))
+            total_pages = ingest_result.page_count
+            if page_selection == "Single page":
+                idx = min(int(page_num) - 1, total_pages - 1)
+                selected_indices = [max(0, idx)]
+            elif page_selection == "Page range":
+                start = max(0, int(page_start) - 1)
+                end = min(int(page_end), total_pages)
+                selected_indices = list(range(start, max(start + 1, end)))
+            else:
+                selected_indices = list(range(total_pages))
             filtered_ingest = IngestResult(
                 source_name=ingest_result.source_name,
                 page_images=[ingest_result.page_images[i] for i in selected_indices],
