@@ -56,26 +56,42 @@ def _process_page(
 ) -> SuryaPageResult:
     layout_result = layout_pred([pil_img])[0]
 
-    # Layout boxes are the text_blocks (used for overlay drawing with labels)
-    text_blocks = [_serialize_layout_box(b) for b in layout_result.bboxes]
-
-    # OCR: pass non-Table layout bboxes to recognition predictor
-    # Filter degenerate bboxes (zero/negative width or height) before rec_pred
-    non_table_bboxes = [
-        b for b in layout_result.bboxes
-        if b.label != "Table" and b.bbox[2] > b.bbox[0] and b.bbox[3] > b.bbox[1]
-    ]
-    if non_table_bboxes:
-        page_bboxes = [[list(map(int, b.bbox)) for b in non_table_bboxes]]
+    # Per-region OCR: crop each non-Table layout region, run rec_pred on the crop
+    text_blocks: list[dict] = []
+    for layout_bbox in layout_result.bboxes:
+        if layout_bbox.label == "Table":
+            continue
+        x0, y0, x1, y1 = layout_bbox.bbox
+        if (x1 - x0) < 50 or (y1 - y0) < 20:
+            continue
+        crop = pil_img.crop((int(x0), int(y0), int(x1), int(y1)))
+        crop_w, crop_h = crop.size
         try:
-            ocr_result = rec_pred([pil_img], bboxes=page_bboxes)[0]
-            ocr_text = _build_ocr_text(ocr_result.text_lines)
+            region_ocr = rec_pred([crop], bboxes=[[[0, 0, crop_w, crop_h]]])[0]
+            for line in region_ocr.text_lines:
+                block = _serialize_text_line(line)
+                block = _adjust_coordinates(block, x0, y0)
+                block["label"] = layout_bbox.label
+                block["region_label"] = layout_bbox.label
+                block["reading_order"] = layout_bbox.position
+                text_blocks.append(block)
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
-            ocr_text = ""
-    else:
-        ocr_text = ""
 
+    # Sort blocks: primary by reading_order (if set), fallback top-to-bottom left-to-right
+    def _sort_key(block: dict) -> tuple:
+        ro = block.get("reading_order") or 0
+        bbox = block.get("bbox") or [0, 0, 0, 0]
+        if ro > 0:
+            return (0, ro, 0.0, 0.0)
+        return (1, 0, bbox[1], bbox[0])
+
+    sorted_blocks = sorted(text_blocks, key=_sort_key)
+
+    # Plain text — no region labels embedded
+    ocr_text = "\n\n".join(b["text"] for b in sorted_blocks if b.get("text"))
+
+    # Table recognition (unchanged)
     table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
     if table_bboxes:
         crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
@@ -99,7 +115,7 @@ def _process_page(
 
     return SuryaPageResult(
         page_index=page_index,
-        text_blocks=text_blocks,
+        text_blocks=sorted_blocks,
         tables=tables,
         ocr_text=ocr_text,
     )
@@ -112,6 +128,27 @@ def _serialize_layout_box(b) -> dict[str, Any]:
         "polygon": b.polygon,
         "reading_order": b.position,
     }
+
+
+def _serialize_text_line(line) -> dict[str, Any]:
+    return {
+        "text": line.text,
+        "bbox": list(line.bbox),
+        "polygon": [list(p) for p in line.polygon],
+        "confidence": line.confidence,
+    }
+
+
+def _adjust_coordinates(block_dict: dict, offset_x: float, offset_y: float) -> dict:
+    if block_dict.get("bbox"):
+        b = block_dict["bbox"]
+        block_dict["bbox"] = [b[0] + offset_x, b[1] + offset_y, b[2] + offset_x, b[3] + offset_y]
+    if block_dict.get("polygon"):
+        block_dict["polygon"] = [
+            [p[0] + offset_x, p[1] + offset_y]
+            for p in block_dict["polygon"]
+        ]
+    return block_dict
 
 
 def _serialize_table(t) -> dict[str, Any]:
@@ -132,5 +169,3 @@ def _filter_phantom_cells(cells: list[dict], parent_bbox: list[float]) -> list[d
     ]
 
 
-def _build_ocr_text(text_lines) -> str:
-    return "\n\n".join(line.text for line in text_lines if line.text)
