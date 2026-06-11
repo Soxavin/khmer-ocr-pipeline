@@ -94,27 +94,30 @@ def _process_page(
     # Plain text — no region labels embedded
     ocr_text = "\n\n".join(b["text"] for b in sorted_blocks if b.get("text"))
 
-    # Table recognition (unchanged)
+    # Table recognition: one table_pred call per table (batch size 1).
+    # Batching multiple differently-structured table crops in a single
+    # table_pred(crops) call crashes surya 0.17.1's TableRecPredictor
+    # (decoder position_ids/cache sized from the first image only).
     table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
-    if table_bboxes:
-        crops = [pil_img.crop(tuple(map(int, b.bbox))) for b in table_bboxes]
-        table_results = table_pred(crops)
-        for t, crop in zip(table_results, crops):
-            if t.cells:
-                try:
-                    cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
-                    cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
-                    for cell, line in zip(t.cells, cell_ocr.text_lines):
-                        cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
-                except Exception as e:
-                    warnings.warn(f"Cell OCR failed: {e}")
-        tables = []
-        for t in table_results:
-            tbl = _serialize_table(t)
-            tbl["cells"] = _filter_phantom_cells(tbl["cells"], tbl["image_bbox"])
-            tables.append(tbl)
-    else:
-        tables = []
+    tables: list[dict] = []
+    for b in table_bboxes:
+        crop = pil_img.crop(tuple(map(int, b.bbox)))
+        try:
+            t = table_pred([crop])[0]
+        except Exception as e:
+            warnings.warn(f"Table recognition failed on page {page_index}: {e}")
+            continue
+        if t.cells:
+            try:
+                cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
+                cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
+                for cell, line in zip(t.cells, cell_ocr.text_lines):
+                    cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
+            except Exception as e:
+                warnings.warn(f"Cell OCR failed: {e}")
+        tbl = _serialize_table(t)
+        tbl["cells"] = _filter_phantom_cells(tbl["cells"], tbl["image_bbox"])
+        tables.append(tbl)
 
     return SuryaPageResult(
         page_index=page_index,
