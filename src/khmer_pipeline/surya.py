@@ -56,33 +56,26 @@ def _process_page(
 ) -> SuryaPageResult:
     layout_result = layout_pred([pil_img])[0]
 
-    # Collect crops for all non-Table, non-degenerate layout regions
-    region_crops: list[Image.Image] = []
-    regions: list = []
-    offsets: list[tuple[float, float]] = []
-    for layout_bbox in layout_result.bboxes:
-        if layout_bbox.label == "Table":
-            continue
-        x0, y0, x1, y1 = layout_bbox.bbox
-        if (x1 - x0) < 50 or (y1 - y0) < 20:
-            continue
-        region_crops.append(pil_img.crop((int(x0), int(y0), int(x1), int(y1))))
-        regions.append(layout_bbox)
-        offsets.append((x0, y0))
+    # Collect page-space bboxes for all non-Table, non-degenerate layout regions
+    text_regions = [
+        b for b in layout_result.bboxes
+        if b.label != "Table"
+        and (b.bbox[2] - b.bbox[0]) >= 50
+        and (b.bbox[3] - b.bbox[1]) >= 20
+    ]
 
-    # Batch all region crops into a single rec_pred call
+    # OCR all text regions in one call: one page image, one bbox per region (page-space)
     text_blocks: list[dict] = []
-    if region_crops:
-        bboxes_per_crop = [[[0, 0, c.size[0], c.size[1]]] for c in region_crops]
+    if text_regions:
+        region_bboxes = [list(map(int, b.bbox)) for b in text_regions]
         try:
-            region_ocr_results = rec_pred(region_crops, bboxes=bboxes_per_crop)
+            region_ocr = rec_pred([pil_img], bboxes=[region_bboxes])[0]
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
-            region_ocr_results = []
-        for region_ocr, layout_bbox, (x0, y0) in zip(region_ocr_results, regions, offsets):
-            for line in region_ocr.text_lines:
+            region_ocr = None
+        if region_ocr is not None:
+            for line, layout_bbox in zip(region_ocr.text_lines, text_regions):
                 block = _serialize_text_line(line)
-                _adjust_coordinates(block, x0, y0)
                 block["label"] = layout_bbox.label
                 block["region_label"] = layout_bbox.label
                 block["reading_order"] = layout_bbox.position
@@ -139,17 +132,6 @@ def _serialize_text_line(line) -> dict[str, Any]:
         "polygon": [list(p) for p in (line.polygon or [])],
         "confidence": line.confidence,
     }
-
-
-def _adjust_coordinates(block_dict: dict, offset_x: float, offset_y: float) -> None:
-    if block_dict.get("bbox"):
-        b = block_dict["bbox"]
-        block_dict["bbox"] = [b[0] + offset_x, b[1] + offset_y, b[2] + offset_x, b[3] + offset_y]
-    if block_dict.get("polygon"):
-        block_dict["polygon"] = [
-            [p[0] + offset_x, p[1] + offset_y]
-            for p in block_dict["polygon"]
-        ]
 
 
 def _serialize_table(t) -> dict[str, Any]:
