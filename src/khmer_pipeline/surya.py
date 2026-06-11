@@ -57,7 +57,7 @@ def _process_page(
     layout_result = layout_pred([pil_img])[0]
 
     # Collect crops for all non-Table, non-degenerate layout regions
-    crops: list[Image.Image] = []
+    region_crops: list[Image.Image] = []
     regions: list = []
     offsets: list[tuple[float, float]] = []
     for layout_bbox in layout_result.bboxes:
@@ -66,16 +66,16 @@ def _process_page(
         x0, y0, x1, y1 = layout_bbox.bbox
         if (x1 - x0) < 50 or (y1 - y0) < 20:
             continue
-        crops.append(pil_img.crop((int(x0), int(y0), int(x1), int(y1))))
+        region_crops.append(pil_img.crop((int(x0), int(y0), int(x1), int(y1))))
         regions.append(layout_bbox)
         offsets.append((x0, y0))
 
     # Batch all region crops into a single rec_pred call
     text_blocks: list[dict] = []
-    if crops:
-        bboxes_per_crop = [[[0, 0, c.size[0], c.size[1]]] for c in crops]
+    if region_crops:
+        bboxes_per_crop = [[[0, 0, c.size[0], c.size[1]]] for c in region_crops]
         try:
-            region_ocr_results = rec_pred(crops, bboxes=bboxes_per_crop)
+            region_ocr_results = rec_pred(region_crops, bboxes=bboxes_per_crop)
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
             region_ocr_results = []
