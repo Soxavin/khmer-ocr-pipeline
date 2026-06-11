@@ -263,3 +263,50 @@ def test_ocr_text_has_no_region_labels():
     ocr_text = r.pages[0].ocr_text
     for label in ("Text:", "Table:", "Title:", "Figure:", "Caption:", "Picture:"):
         assert label not in ocr_text, f"ocr_text contains label prefix '{label}'"
+
+
+def test_per_region_ocr_batched_in_single_call():
+    """Multiple non-Table regions are OCR'd in a single batched rec_pred call."""
+    bbox1 = _make_layout_bbox_mock("Text")
+    bbox1.bbox = [10.0, 10.0, 200.0, 50.0]
+    bbox1.position = 1
+
+    bbox2 = _make_layout_bbox_mock("Text")
+    bbox2.bbox = [10.0, 100.0, 200.0, 150.0]
+    bbox2.position = 2
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [bbox1, bbox2]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    line1 = _make_text_line_mock(0)
+    line1.text = "ខ្មែរ first"
+    ocr_result_1 = MagicMock()
+    ocr_result_1.text_lines = [line1]
+
+    line2 = _make_text_line_mock(1)
+    line2.text = "ខ្មែរ second"
+    ocr_result_2 = MagicMock()
+    ocr_result_2.text_lines = [line2]
+
+    rec_pred = MagicMock(return_value=[ocr_result_1, ocr_result_2])
+    table_pred = MagicMock(return_value=[])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    # One batched call for all text regions on the page
+    assert rec_pred.call_count == 1
+
+    # Both regions' crops were passed in a single call
+    call_args = rec_pred.call_args
+    images_arg = call_args[0][0]
+    bboxes_arg = call_args[1]["bboxes"]
+    assert len(images_arg) == 2
+    assert len(bboxes_arg) == 2
+
+    # Both regions' text made it into the result
+    texts = [b["text"] for b in r.pages[0].text_blocks]
+    assert "ខ្មែរ first" in texts
+    assert "ខ្មែរ second" in texts
