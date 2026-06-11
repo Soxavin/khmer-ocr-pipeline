@@ -56,28 +56,37 @@ def _process_page(
 ) -> SuryaPageResult:
     layout_result = layout_pred([pil_img])[0]
 
-    # Per-region OCR: crop each non-Table layout region, run rec_pred on the crop
-    text_blocks: list[dict] = []
+    # Collect crops for all non-Table, non-degenerate layout regions
+    crops: list[Image.Image] = []
+    regions: list = []
+    offsets: list[tuple[float, float]] = []
     for layout_bbox in layout_result.bboxes:
         if layout_bbox.label == "Table":
             continue
         x0, y0, x1, y1 = layout_bbox.bbox
         if (x1 - x0) < 50 or (y1 - y0) < 20:
             continue
-        crop = pil_img.crop((int(x0), int(y0), int(x1), int(y1)))
-        crop_w, crop_h = crop.size
+        crops.append(pil_img.crop((int(x0), int(y0), int(x1), int(y1))))
+        regions.append(layout_bbox)
+        offsets.append((x0, y0))
+
+    # Batch all region crops into a single rec_pred call
+    text_blocks: list[dict] = []
+    if crops:
+        bboxes_per_crop = [[[0, 0, c.size[0], c.size[1]]] for c in crops]
         try:
-            region_ocr = rec_pred([crop], bboxes=[[[0, 0, crop_w, crop_h]]])[0]
+            region_ocr_results = rec_pred(crops, bboxes=bboxes_per_crop)
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
-            continue
-        for line in region_ocr.text_lines:
-            block = _serialize_text_line(line)
-            _adjust_coordinates(block, x0, y0)
-            block["label"] = layout_bbox.label
-            block["region_label"] = layout_bbox.label
-            block["reading_order"] = layout_bbox.position
-            text_blocks.append(block)
+            region_ocr_results = []
+        for region_ocr, layout_bbox, (x0, y0) in zip(region_ocr_results, regions, offsets):
+            for line in region_ocr.text_lines:
+                block = _serialize_text_line(line)
+                _adjust_coordinates(block, x0, y0)
+                block["label"] = layout_bbox.label
+                block["region_label"] = layout_bbox.label
+                block["reading_order"] = layout_bbox.position
+                text_blocks.append(block)
 
     # Sort blocks: primary by reading_order (if set), fallback top-to-bottom left-to-right
     def _sort_key(block: dict) -> tuple:
