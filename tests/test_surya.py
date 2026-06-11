@@ -1,4 +1,5 @@
 from __future__ import annotations
+import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
@@ -311,3 +312,75 @@ def test_per_region_ocr_batched_in_single_call():
     texts = [b["text"] for b in r.pages[0].text_blocks]
     assert "ខ្មែរ first" in texts
     assert "ខ្មែរ second" in texts
+
+
+def test_multiple_tables_get_one_table_pred_call_each():
+    """Each detected Table region gets its own table_pred([crop]) call (avoids
+    batching differently-sized table images, which crashes surya 0.17.1)."""
+    table_bbox1 = _make_layout_bbox_mock("Table")
+    table_bbox1.bbox = [10.0, 60.0, 200.0, 150.0]
+
+    table_bbox2 = _make_layout_bbox_mock("Table")
+    table_bbox2.bbox = [10.0, 200.0, 300.0, 400.0]
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [table_bbox1, table_bbox2]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    table_result_1 = MagicMock()
+    table_result_1.rows = []
+    table_result_1.cols = []
+    table_result_1.cells = []
+    table_result_1.image_bbox = [0.0, 0.0, 190.0, 90.0]
+
+    table_result_2 = MagicMock()
+    table_result_2.rows = []
+    table_result_2.cols = []
+    table_result_2.cells = []
+    table_result_2.image_bbox = [0.0, 0.0, 290.0, 200.0]
+
+    table_pred = MagicMock(side_effect=[[table_result_1], [table_result_2]])
+    rec_pred = MagicMock()
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    # One call per table, each with a single-image list
+    assert table_pred.call_count == 2
+    for call in table_pred.call_args_list:
+        images_arg = call[0][0]
+        assert len(images_arg) == 1
+
+    assert len(r.pages[0].tables) == 2
+
+
+def test_table_recognition_failure_is_isolated():
+    """If table_pred raises for one table, other tables on the page still process
+    and the page does not crash."""
+    table_bbox1 = _make_layout_bbox_mock("Table")
+    table_bbox1.bbox = [10.0, 60.0, 200.0, 150.0]
+
+    table_bbox2 = _make_layout_bbox_mock("Table")
+    table_bbox2.bbox = [10.0, 200.0, 300.0, 400.0]
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [table_bbox1, table_bbox2]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    table_result_2 = MagicMock()
+    table_result_2.rows = []
+    table_result_2.cols = []
+    table_result_2.cells = []
+    table_result_2.image_bbox = [0.0, 0.0, 290.0, 200.0]
+
+    table_pred = MagicMock(side_effect=[RuntimeError("boom"), [table_result_2]])
+    rec_pred = MagicMock()
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        with pytest.warns(UserWarning, match="Table recognition failed"):
+            r = run_surya(_make_preprocess_result(n_pages=1))
+
+    # The failed table is skipped; the second table is still present
+    assert len(r.pages[0].tables) == 1
