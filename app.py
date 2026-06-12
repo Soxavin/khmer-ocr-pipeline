@@ -224,22 +224,22 @@ if uploaded is not None:
         if show_layout:
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.image(orig, caption="Original", use_container_width=True)
+                st.image(orig, caption="Original", width="stretch")
             with col2:
-                st.image(proc, caption="Preprocessed", use_container_width=True)
+                st.image(proc, caption="Preprocessed", width="stretch")
             with col3:
                 table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
                 st.image(
                     _draw_layout(proc, surya_page.text_blocks + table_blocks),
                     caption="Layout detection",
-                    use_container_width=True,
+                    width="stretch",
                 )
         else:
             col1, col2 = st.columns(2)
             with col1:
-                st.image(orig, caption="Original", use_container_width=True)
+                st.image(orig, caption="Original", width="stretch")
             with col2:
-                st.image(proc, caption="Preprocessed", use_container_width=True)
+                st.image(proc, caption="Preprocessed", width="stretch")
 
         if not tables_only and surya_page.ocr_text:
             with st.expander(f"OCR text — page {surya_page.page_index + 1}"):
