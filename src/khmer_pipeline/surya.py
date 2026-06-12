@@ -17,6 +17,11 @@ def preload_models() -> None:
     _get_predictors()
 
 
+def _new_table_predictor():
+    from surya.table_rec import TableRecPredictor
+    return TableRecPredictor()
+
+
 def _get_predictors():
     global _layout_pred, _rec_pred, _table_pred
     if _layout_pred is None:
@@ -104,9 +109,15 @@ def _process_page(
         crop = pil_img.crop(tuple(map(int, b.bbox)))
         try:
             t = table_pred([crop])[0]
-        except Exception as e:
-            warnings.warn(f"Table recognition failed on page {page_index}: {e}")
-            continue
+        except Exception:
+            # Retry once with a freshly-constructed TableRecPredictor: a
+            # stale decoder cache/position-id state on the shared singleton
+            # can otherwise cause a one-off tensor-shape mismatch on this crop.
+            try:
+                t = _new_table_predictor()([crop])[0]
+            except Exception as e:
+                warnings.warn(f"Table recognition failed on page {page_index}: {e}")
+                continue
         if t.cells:
             try:
                 cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]

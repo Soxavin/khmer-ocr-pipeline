@@ -356,8 +356,9 @@ def test_multiple_tables_get_one_table_pred_call_each():
 
 
 def test_table_recognition_failure_is_isolated():
-    """If table_pred raises for one table, other tables on the page still process
-    and the page does not crash."""
+    """If table_pred raises for one table (and the retry with a fresh
+    predictor also fails), other tables on the page still process and the
+    page does not crash."""
     table_bbox1 = _make_layout_bbox_mock("Table")
     table_bbox1.bbox = [10.0, 60.0, 200.0, 150.0]
 
@@ -377,10 +378,43 @@ def test_table_recognition_failure_is_isolated():
     table_pred = MagicMock(side_effect=[RuntimeError("boom"), [table_result_2]])
     rec_pred = MagicMock()
 
+    retry_pred = MagicMock(side_effect=RuntimeError("boom again"))
+
     with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred, table_pred)):
+               return_value=(layout_pred, rec_pred, table_pred)), \
+         patch("khmer_pipeline.surya._new_table_predictor", return_value=retry_pred):
         with pytest.warns(UserWarning, match="Table recognition failed"):
             r = run_surya(_make_preprocess_result(n_pages=1))
 
     # The failed table is skipped; the second table is still present
     assert len(r.pages[0].tables) == 1
+
+
+def test_table_recognition_retries_with_fresh_predictor_on_failure():
+    """If table_pred raises on the shared singleton, retry once with a
+    freshly-constructed TableRecPredictor before giving up on the table."""
+    table_bbox = _make_layout_bbox_mock("Table")
+    table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [table_bbox]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    table_result = MagicMock()
+    table_result.rows = []
+    table_result.cols = []
+    table_result.cells = []
+    table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
+
+    table_pred = MagicMock(side_effect=RuntimeError("tensor mismatch"))
+    rec_pred = MagicMock()
+
+    retry_pred = MagicMock(return_value=[table_result])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)), \
+         patch("khmer_pipeline.surya._new_table_predictor", return_value=retry_pred):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert len(r.pages[0].tables) == 1
+    retry_pred.assert_called_once()
