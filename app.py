@@ -305,7 +305,11 @@ if uploaded is not None:
         file_name=f"{Path(uploaded.name).stem}_extracted.json",
         mime="application/json",
     )
+    skipped_tables = 0
     for table_id, csv_string in export_result.tables_csv:
+        if not csv_string.strip().strip("﻿"):
+            skipped_tables += 1
+            continue
         if st.checkbox(f"Include {table_id} in export", value=True, key=f"export_{table_id}"):
             st.download_button(
                 label=f"⬇ Download {table_id}.csv",
@@ -313,3 +317,7 @@ if uploaded is not None:
                 file_name=f"{table_id}.csv",
                 mime="text/csv",
             )
+    if skipped_tables:
+        st.caption(
+            f"{skipped_tables} table(s) had no extractable content and were excluded from downloads."
+        )
