@@ -198,8 +198,9 @@ if uploaded is not None:
             with col2:
                 st.image(proc, caption="Preprocessed", use_container_width=True)
             with col3:
+                table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
                 st.image(
-                    _draw_layout(proc, surya_page.text_blocks),
+                    _draw_layout(proc, surya_page.text_blocks + table_blocks),
                     caption="Layout detection",
                     use_container_width=True,
                 )

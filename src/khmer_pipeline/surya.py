@@ -128,6 +128,7 @@ def _process_page(
                 warnings.warn(f"Cell OCR failed: {e}")
         tbl = _serialize_table(t)
         tbl["cells"] = _filter_phantom_cells(tbl["cells"], tbl["image_bbox"])
+        tbl["bbox"] = list(b.bbox)
         tables.append(tbl)
 
     return SuryaPageResult(

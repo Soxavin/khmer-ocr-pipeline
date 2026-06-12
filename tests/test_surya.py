@@ -159,8 +159,17 @@ def test_run_surya_table_dict_has_required_keys():
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result())
     table = r.pages[0].tables[0]
-    for key in ("rows", "cols", "cells", "image_bbox"):
+    for key in ("rows", "cols", "cells", "image_bbox", "bbox"):
         assert key in table, f"Missing table key: {key}"
+
+
+def test_table_bbox_is_page_space_layout_bbox():
+    """tbl['bbox'] must be the page-space bbox of the "Table" layout region
+    (used to draw the layout overlay), not the crop-relative image_bbox."""
+    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+    table = r.pages[0].tables[0]
+    assert table["bbox"] == [10.0, 60.0, 200.0, 150.0]
 
 
 def test_phantom_cells_outside_bbox_are_discarded():
