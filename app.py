@@ -113,10 +113,21 @@ if uploaded is not None:
 
             total_pages = ingest_result.page_count
             if page_selection == "Single page":
-                idx = min(int(page_num) - 1, total_pages - 1)
-                selected_indices = [max(0, idx)]
+                if total_pages == 0:
+                    st.warning("Document has no pages.")
+                    st.stop()
+                idx = max(0, min(int(page_num) - 1, total_pages - 1))
+                selected_indices = [idx]
             elif page_selection == "Page range":
+                if total_pages == 0:
+                    st.warning("Document has no pages.")
+                    st.stop()
                 start = max(0, int(page_start) - 1)
+                if start >= total_pages:
+                    st.warning(
+                        f"Start page {page_start} exceeds document length ({total_pages} page(s))."
+                    )
+                    st.stop()
                 end = min(int(page_end), total_pages)
                 selected_indices = list(range(start, max(start + 1, end)))
             else:
