@@ -119,8 +119,10 @@ def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPa
     for block in page.text_blocks:
         block_text = _apply_rules(block.get("text", ""))
         if not skip_qwen and _anomaly_score(block_text) >= ANOMALY_THRESHOLD:
-            block_text = _qwen_correct(block_text)
-            qwen_used = True
+            corrected = _qwen_correct(block_text)
+            if corrected != block_text:
+                block_text = corrected
+                qwen_used = True
         corrected_block_texts.append(block_text)
 
     # Rebuild corrected_text from corrected blocks

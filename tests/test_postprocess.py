@@ -136,7 +136,8 @@ def test_qwen_failure_falls_back_gracefully():
         assert "Qwen correction failed" in str(w[0].message)
     # corrected_text equals rule-applied block text (Qwen failed, returned input unchanged)
     assert r.pages[0].corrected_text == pp._apply_rules(sinhala_text)
-    assert r.pages[0].qwen_used is True  # Qwen was attempted
+    # Qwen was attempted but failed and changed nothing, so it was not "applied"
+    assert r.pages[0].qwen_used is False
 
 
 def test_correction_diff_populated():
