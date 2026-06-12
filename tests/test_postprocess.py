@@ -12,10 +12,10 @@ _KHMER_NUM_4 = chr(0x17E4)  # Khmer numeral 4
 _KHMER_NUM_5 = chr(0x17E5)  # Khmer numeral 5
 
 
-def _make_surya_result(ocr_text: str = "ខ្មែរ") -> SuryaResult:
+def _make_surya_result(ocr_text: str = "ខ្មែរ", text_blocks: list | None = None) -> SuryaResult:
     page = SuryaPageResult(
         page_index=0,
-        text_blocks=[],
+        text_blocks=text_blocks if text_blocks is not None else [],
         tables=[],
         ocr_text=ocr_text,
     )
@@ -50,38 +50,59 @@ def test_rules_apply_correctly():
     assert result == "some RIGHT text"
 
 
-# --- _detect_errors: foreign script checks ---
+def test_nfc_normalization_applied():
+    import unicodedata
+    nfd_text = "កា"
+    assert pp._apply_rules(nfd_text) == unicodedata.normalize("NFC", nfd_text)
+
+
+# --- _anomaly_score / _detect_errors ---
+
+def test_anomaly_score_zero_for_empty():
+    assert pp._anomaly_score("") == 0.0
+    assert pp._anomaly_score("   ") == 0.0
+
+
+def test_anomaly_score_between_0_and_1():
+    for text in ["clean text", "ខ្មែរ", _SINHALA_KA * 5, "CP 03-06-26 0.00%"]:
+        assert 0.0 <= pp._anomaly_score(text) <= 1.0
+
+
+def test_anomaly_score_high_for_sinhala():
+    assert pp._anomaly_score(_SINHALA_KA * 10) >= pp.ANOMALY_THRESHOLD
+
+
+def test_anomaly_score_low_for_latin():
+    # Latin text including numbers should not trigger — mixed numerals are normal
+    assert pp._anomaly_score("CP ARDB 03-06-26 12,000 0.00%") < pp.ANOMALY_THRESHOLD
+
+
+def test_mixed_khmer_arabic_numerals_not_anomalous():
+    # Khmer row numbers + Arabic prices — normal in financial docs, must not trigger
+    mixed = "៩ សាច់ជ្រូករស់ 12,000 13,000 8.33%"
+    assert pp._anomaly_score(mixed) < pp.ANOMALY_THRESHOLD
+
 
 def test_foreign_script_sinhala_triggers():
-    assert pp._detect_errors("normal text " + _SINHALA_KA + " more") is True
+    # 3 Sinhala chars in a 13-char string: 3/13 ≈ 0.23 >= 0.15
+    text = "text " + _SINHALA_KA * 3 + " more"
+    assert pp._detect_errors(text) is True
 
 
 def test_foreign_script_lao_triggers():
-    assert pp._detect_errors("text " + _LAO_KO + " here") is True
+    # 3 Lao chars in a 13-char string: 3/13 ≈ 0.23 >= 0.15
+    text = "text " + _LAO_KO * 3 + " more"
+    assert pp._detect_errors(text) is True
 
 
 def test_latin_does_not_trigger():
     assert pp._detect_errors("CP ARDB 03-06-26 0.00%") is False
 
 
-# --- _detect_errors: Khmer numeral check ---
-
-def test_khmer_numeral_check_triggers():
-    # 6 Arabic numerals, 0 Khmer numerals → should trigger
-    text = "ទំនិញ 1 2 3 4 5 6 នៅ"
-    assert pp._detect_errors(text) is True
-
-
-def test_khmer_numeral_check_does_not_trigger_below_threshold():
-    # 3 Arabic numerals (≤5), 0 Khmer numerals → should NOT trigger
-    text = "ទំនិញ 1 2 3 នៅ"
-    assert pp._detect_errors(text) is False
-
-
-# --- qwen_used flag ---
+# --- qwen_used flag / region-level routing ---
 
 def test_qwen_used_false_when_no_errors():
-    # Khmer text with Khmer numerals — no foreign scripts, numeral check satisfied
+    # Khmer text with Khmer numerals — no foreign scripts, no text_blocks (fallback path)
     clean = "ចំណូល " + _KHMER_NUM_3 + " " + _KHMER_NUM_4 + " " + _KHMER_NUM_5
     with _mock_qwen():
         r = pp.postprocess(_make_surya_result(ocr_text=clean))
@@ -89,27 +110,31 @@ def test_qwen_used_false_when_no_errors():
 
 
 def test_qwen_used_true_when_errors():
-    # Sinhala character (U+0D9A) forces Qwen path
-    sinhala_text = "text " + _SINHALA_KA + " more"
+    # A text block with Sinhala density >= ANOMALY_THRESHOLD forces the Qwen path
+    sinhala_text = "text " + _SINHALA_KA * 3 + " more"
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
          patch("khmer_pipeline.postprocess.generate", return_value="corrected") as _:
         mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(_make_surya_result(ocr_text=sinhala_text))
+        r = pp.postprocess(_make_surya_result(
+            ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
+        ))
     assert r.pages[0].qwen_used is True
 
 
 def test_qwen_failure_falls_back_gracefully():
     # When generate raises, corrected_text should equal rule-based output, no crash
-    sinhala_text = "text " + _SINHALA_KA + " more"
+    sinhala_text = "text " + _SINHALA_KA * 3 + " more"
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
          patch("khmer_pipeline.postprocess.generate", side_effect=RuntimeError("GPU OOM")):
         mock_get.return_value = (MagicMock(), MagicMock())
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            r = pp.postprocess(_make_surya_result(ocr_text=sinhala_text))
+            r = pp.postprocess(_make_surya_result(
+                ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
+            ))
         assert len(w) == 1
         assert "Qwen correction failed" in str(w[0].message)
-    # corrected_text equals rule-applied input (Qwen failed, returned input unchanged)
+    # corrected_text equals rule-applied block text (Qwen failed, returned input unchanged)
     assert r.pages[0].corrected_text == pp._apply_rules(sinhala_text)
     assert r.pages[0].qwen_used is True  # Qwen was attempted
 
@@ -122,7 +147,7 @@ def test_correction_diff_populated():
 
 
 def test_qwen_not_called_when_no_errors():
-    # generate should never be called when _detect_errors returns False
+    # generate should never be called when no text block is anomalous
     clean = "ចំណូល " + _KHMER_NUM_3 + " " + _KHMER_NUM_4 + " " + _KHMER_NUM_5
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
          patch("khmer_pipeline.postprocess.generate") as mock_gen:
@@ -131,17 +156,25 @@ def test_qwen_not_called_when_no_errors():
     mock_gen.assert_not_called()
 
 
+def test_page_with_no_text_blocks_falls_back_to_ocr_text():
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[], ocr_text="raw text")
+    surya_result = SuryaResult(source_name="test.pdf", pages=[page])
+    with _mock_qwen():
+        result = pp.postprocess(surya_result)
+    assert result.pages[0].corrected_text == pp._apply_rules("raw text")
+    assert result.pages[0].qwen_used is False
+
+
 def test_multi_page_each_page_corrected_independently():
-    # page 0: clean Khmer; page 1: has Sinhala → triggers Qwen; verify per-page independence
-    from khmer_pipeline.models import SuryaPageResult
+    # page 0: clean Khmer block; page 1: Sinhala-dense block triggers Qwen
+    clean_text = "ចំណូល " + _KHMER_NUM_3
+    dirty_text = "text " + _SINHALA_KA * 3 + " here"
 
     def _make_page(idx, text):
         return SuryaPageResult(
-            page_index=idx, text_blocks=[], tables=[], ocr_text=text
+            page_index=idx, text_blocks=[{"text": text}], tables=[], ocr_text=text
         )
 
-    clean_text = "ចំណូល " + _KHMER_NUM_3
-    dirty_text = "text " + _SINHALA_KA + " here"
     multi = SuryaResult(
         source_name="multi.pdf",
         pages=[_make_page(0, clean_text), _make_page(1, dirty_text)],
@@ -155,9 +188,3 @@ def test_multi_page_each_page_corrected_independently():
     assert r.pages[0].qwen_used is False
     assert r.pages[1].qwen_used is True
     mock_gen.assert_called_once()
-
-
-def test_nfc_normalization_applied():
-    import unicodedata
-    nfd_text = "កា"
-    assert pp._apply_rules(nfd_text) == unicodedata.normalize("NFC", nfd_text)

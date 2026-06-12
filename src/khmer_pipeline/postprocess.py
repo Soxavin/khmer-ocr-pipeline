@@ -41,28 +41,38 @@ def _apply_rules(text: str) -> str:
     return text
 
 
+ANOMALY_THRESHOLD: float = 0.15  # tunable — proportion of foreign-script chars that triggers correction
+
+
+def _is_foreign_script(ch: str) -> bool:
+    """Returns True if character belongs to a script that should not appear
+    in Khmer financial documents."""
+    cp = ord(ch)
+    return (
+        0x0D80 <= cp <= 0x0DFF or  # Sinhala
+        0x0E80 <= cp <= 0x0EFF or  # Lao
+        0x0E00 <= cp <= 0x0E7F or  # Thai
+        0x1000 <= cp <= 0x109F or  # Myanmar
+        0x0600 <= cp <= 0x06FF or  # Arabic script (not numerals)
+        0x4E00 <= cp <= 0x9FFF or  # CJK Unified Ideographs
+        0x3040 <= cp <= 0x30FF     # Hiragana/Katakana
+    )
+
+
+def _anomaly_score(text: str) -> float:
+    """Returns a score from 0.0 (clean) to 1.0 (highly anomalous).
+    Score is the proportion of characters from wrong scripts.
+    ANOMALY_THRESHOLD = 0.15 is tunable."""
+    if not text.strip():
+        return 0.0
+    total = len(text)
+    foreign_count = sum(1 for ch in text if _is_foreign_script(ch))
+    return foreign_count / total
+
+
 def _detect_errors(text: str) -> bool:
-    # Check A: foreign script characters
-    for ch in text:
-        cp = ord(ch)
-        if (0x0D80 <= cp <= 0x0DFF or   # Sinhala
-                0x0E00 <= cp <= 0x0E7F or   # Thai
-                0x0E80 <= cp <= 0x0EFF or   # Lao
-                0x1000 <= cp <= 0x109F or   # Myanmar
-                0x0600 <= cp <= 0x06FF or   # Arabic
-                0x4E00 <= cp <= 0x9FFF or   # CJK Unified Ideographs
-                0x3040 <= cp <= 0x30FF):    # Hiragana/Katakana
-            return True
-
-    # Check B: Arabic numerals present but no Khmer numerals, only when Khmer text exists.
-    # Pure Latin/ASCII strings (dates, headers) must not trigger even with many digits.
-    has_khmer = any(0x1780 <= ord(ch) <= 0x17FF for ch in text)
-    arabic_count = sum(1 for ch in text if 0x30 <= ord(ch) <= 0x39)
-    khmer_count = sum(1 for ch in text if 0x17E0 <= ord(ch) <= 0x17E9)
-    if has_khmer and arabic_count > 5 and khmer_count == 0:
-        return True
-
-    return False
+    """Thin wrapper kept for backward compatibility with existing tests."""
+    return _anomaly_score(text) >= ANOMALY_THRESHOLD
 
 
 def _qwen_correct(text: str) -> str:
@@ -101,21 +111,32 @@ def _build_diff(raw: str, corrected: str) -> str:
 
 
 def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPageResult:
-    raw = page.ocr_text
-    after_rules = _apply_rules(raw)
-    if not skip_qwen and _detect_errors(after_rules):
-        corrected = _qwen_correct(after_rules)
-        qwen_used = True
+    raw = page.ocr_text  # always copied unchanged into raw_ocr_text
+
+    # Process each text block individually
+    corrected_block_texts = []
+    qwen_used = False
+    for block in page.text_blocks:
+        block_text = _apply_rules(block.get("text", ""))
+        if not skip_qwen and _anomaly_score(block_text) >= ANOMALY_THRESHOLD:
+            block_text = _qwen_correct(block_text)
+            qwen_used = True
+        corrected_block_texts.append(block_text)
+
+    # Rebuild corrected_text from corrected blocks
+    # If page has no text blocks (table-only page), fall back to rule-corrected ocr_text
+    if corrected_block_texts:
+        corrected_text = "\n\n".join(t for t in corrected_block_texts if t)
     else:
-        corrected = after_rules
-        qwen_used = False
-    diff = _build_diff(raw, corrected)
+        corrected_text = _apply_rules(raw)
+
+    diff = _build_diff(raw, corrected_text)
     return CorrectedPageResult(
         page_index=page.page_index,
-        text_blocks=page.text_blocks,
+        text_blocks=page.text_blocks,  # unchanged
         tables=page.tables,
         raw_ocr_text=raw,
-        corrected_text=corrected,
+        corrected_text=corrected_text,
         correction_diff=diff,
         qwen_used=qwen_used,
     )
