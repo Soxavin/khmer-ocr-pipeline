@@ -75,6 +75,15 @@ with st.sidebar:
     st.header("Post-processing")
     enable_qwen = st.checkbox("Enable Qwen correction", value=True)
 
+    st.header("Export")
+    convert_numerals = st.checkbox(
+        "Convert Khmer numerals to Arabic in CSV",
+        value=False,
+        help="Converts ០១២... to 012... in exported CSV files. "
+             "Useful for loading into Excel or databases. "
+             "Does not affect the JSON export.",
+    )
+
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
     type=["pdf", "png", "jpg", "jpeg", "tiff", "tif"],
@@ -88,7 +97,7 @@ if uploaded is not None:
     else:
         page_sel_part = "all"
     # tables_only omitted: it gates display only, not pipeline output
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}"
 
     if st.session_state.get("last_key") != settings_key:
         with st.status("Running pipeline...", expanded=True) as status:
@@ -155,7 +164,7 @@ if uploaded is not None:
 
             st.write("Exporting structured output...")
             try:
-                export_result = export(postprocess_result)
+                export_result = export(postprocess_result, convert_numerals=convert_numerals)
             except Exception as e:
                 status.update(label="Stage 5 failed", state="error")
                 st.error(f"Stage 5 failed: {str(e)}")

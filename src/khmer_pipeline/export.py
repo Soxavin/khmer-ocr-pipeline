@@ -5,14 +5,25 @@ from datetime import datetime
 from pathlib import Path
 from .models import PostprocessResult, ExportResult
 
+_KHMER_TO_ARABIC: dict[str, str] = {
+    "០": "0", "១": "1", "២": "2", "៣": "3", "៤": "4",
+    "៥": "5", "៦": "6", "៧": "7", "៨": "8", "៩": "9",
+}
 
-def export(result: PostprocessResult) -> ExportResult:
+
+def _convert_khmer_numerals(text: str) -> str:
+    """Convert Khmer digit characters to Arabic digits.
+    Applied to CSV cell text only when the user enables this option."""
+    return "".join(_KHMER_TO_ARABIC.get(ch, ch) for ch in text)
+
+
+def export(result: PostprocessResult, convert_numerals: bool = False) -> ExportResult:
     document_json = _build_document_json(result)
     tables_csv: list[tuple[str, str]] = []
     for page in result.pages:
         for t_idx, table in enumerate(page.tables):
             table_id = _make_table_id(result.source_name, page.page_index, t_idx)
-            tables_csv.append((table_id, _table_to_csv(table)))
+            tables_csv.append((table_id, _table_to_csv(table, convert_numerals)))
     return ExportResult(
         source_name=result.source_name,
         document_json=document_json,
@@ -24,7 +35,7 @@ def _make_table_id(source_name: str, page_index: int, table_index: int) -> str:
     return f"{Path(source_name).stem}_page{page_index + 1}_table{table_index + 1}"
 
 
-def _table_to_csv(table: dict) -> str:
+def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
     cells = table.get("cells", [])
     buf = io.StringIO()
     buf.write("﻿")  # UTF-8 BOM — required for Excel to open Khmer text correctly
@@ -40,6 +51,8 @@ def _table_to_csv(table: dict) -> str:
         text = " ".join(
             t["text"] for t in (c.get("text_lines") or []) if t.get("text")
         ).strip()
+        if convert_numerals:
+            text = _convert_khmer_numerals(text)
         if 0 <= r < max_row and 0 <= col < max_col:
             grid[r][col] = text
     writer.writerows(grid)

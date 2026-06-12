@@ -91,3 +91,39 @@ def test_raw_ocr_text_not_in_json():
 def test_correction_diff_not_in_json():
     doc = export(_make_result(pages=[_make_page(0, correction_diff="--- a\n+++ b")])).document_json
     assert "correction_diff" not in str(doc)
+
+
+def test_khmer_numerals_converted_when_flag_set():
+    cell = {"row_id": 0, "col_id": 0,
+            "text_lines": [{"text": "១២,០០០", "bbox": [0, 0, 10, 10]}],
+            "bbox": [0, 0, 10, 10]}
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]),
+                     convert_numerals=True)
+    _, csv_string = result.tables_csv[0]
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert rows[0][0] == "12,000"
+
+
+def test_khmer_numerals_preserved_when_flag_not_set():
+    cell = {"row_id": 0, "col_id": 0,
+            "text_lines": [{"text": "១២,០០០", "bbox": [0, 0, 10, 10]}],
+            "bbox": [0, 0, 10, 10]}
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]),
+                     convert_numerals=False)
+    _, csv_string = result.tables_csv[0]
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert rows[0][0] == "១២,០០០"
+
+
+def test_json_not_affected_by_convert_numerals():
+    cell = {"row_id": 0, "col_id": 0,
+            "text_lines": [{"text": "១២,០០០", "bbox": [0, 0, 10, 10]}],
+            "bbox": [0, 0, 10, 10]}
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]),
+                     convert_numerals=True)
+    # JSON should still have original Khmer numerals
+    json_str = str(result.document_json)
+    assert "១២,០០០" in json_str
