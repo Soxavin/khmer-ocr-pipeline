@@ -127,3 +127,20 @@ def test_json_not_affected_by_convert_numerals():
     # JSON should still have original Khmer numerals
     json_str = str(result.document_json)
     assert "១២,០០០" in json_str
+
+
+def test_cell_missing_row_id_defaults_to_zero():
+    cell = {
+        "col_id": 0,
+        "text_lines": [{"text": "x", "bbox": [0, 0, 5, 5]}],
+        "bbox": [0, 0, 5, 5],
+    }
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]))
+
+    _, csv_string = result.tables_csv[0]
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert rows[0][0] == "x"
+
+    doc = result.document_json
+    assert doc["pages"][0]["tables"][0]["cells"][0]["row"] == 0

@@ -42,11 +42,11 @@ def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
     writer = csv.writer(buf)
     if not cells:
         return buf.getvalue()
-    max_row = max(c["row_id"] for c in cells) + 1
+    max_row = max(c.get("row_id", 0) for c in cells) + 1
     max_col = max((c.get("col_id") or 0) for c in cells) + 1
     grid = [[""] * max_col for _ in range(max_row)]
     for c in cells:
-        r = c["row_id"]
+        r = c.get("row_id", 0)
         col = c.get("col_id") or 0
         text = " ".join(
             t["text"] for t in (c.get("text_lines") or []) if t.get("text")
@@ -77,7 +77,7 @@ def _build_document_json(result: PostprocessResult) -> dict:
                         "cols": table["cols"],
                         "cells": [
                             {
-                                "row": c["row_id"],
+                                "row": c.get("row_id", 0),
                                 "col": c.get("col_id") or 0,
                                 "text": " ".join(
                                     t["text"] for t in (c.get("text_lines") or []) if t.get("text")
