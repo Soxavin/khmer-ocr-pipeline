@@ -23,6 +23,12 @@ _SAFE_TAGS = [
 def _safe_html(html: str) -> str:
     return bleach.clean(html, tags=_SAFE_TAGS, attributes={}, strip=True)
 
+
+def _clear_edit_state() -> None:
+    for key in list(st.session_state.keys()):
+        if key.startswith("edited_text_") or key.startswith("edit_"):
+            del st.session_state[key]
+
 _LABEL_COLORS = {
     "Text": "#4A90D9",
     "Table": "#E74C3C",
@@ -113,17 +119,14 @@ else:
         st.session_state["run_triggered"] = False
         st.session_state["last_uploaded_name"] = uploaded.name
         st.session_state.pop("last_key", None)
-        for key in list(st.session_state.keys()):
-            if key.startswith("edited_text_") or key.startswith("edit_"):
-                del st.session_state[key]
+        _clear_edit_state()
 
     file_size_kb = round(len(uploaded.getvalue()) / 1024, 1)
     st.markdown(f"**File:** {uploaded.name}  \n**Size:** {file_size_kb} KB")
     if Path(uploaded.name).suffix.lower() == ".pdf":
         try:
-            doc = fitz.open(stream=uploaded.getvalue(), filetype="pdf")
-            st.markdown(f"**Pages:** {len(doc)}")
-            doc.close()
+            with fitz.open(stream=uploaded.getvalue(), filetype="pdf") as doc:
+                st.markdown(f"**Pages:** {len(doc)}")
         except Exception:
             st.markdown("**Pages:** (could not read page count)")
     else:
@@ -164,11 +167,9 @@ else:
 
     if run_clicked:
         st.session_state["run_triggered"] = True
-        for key in list(st.session_state.keys()):
-            if key.startswith("edited_text_") or key.startswith("edit_"):
-                del st.session_state[key]
+        _clear_edit_state()
 
-    if run_clicked and st.session_state.get("last_key") != settings_key:
+    if run_clicked and last_key != settings_key:
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Converting pages to images...")
             try:
