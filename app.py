@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import bleach
+import fitz
 import numpy as np
 import streamlit as st
 from pathlib import Path
@@ -89,7 +90,15 @@ uploaded = st.file_uploader(
     type=["pdf", "png", "jpg", "jpeg", "tiff", "tif"],
 )
 
-if uploaded is not None:
+if uploaded is None:
+    st.markdown("### Upload a document to get started")
+    st.markdown(
+        "Supported formats: PDF, PNG, JPG, TIFF  \n"
+        "Upload a file using the uploader above, configure your options in the sidebar, "
+        "then click **Run Extraction**."
+    )
+    st.button("▶ Run Extraction", type="primary", disabled=True)
+else:
     if page_selection == "Single page":
         page_sel_part = f"page_{page_num}"
     elif page_selection == "Page range":
@@ -99,10 +108,67 @@ if uploaded is not None:
     # tables_only omitted: it gates display only, not pipeline output
     settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}"
 
-    if st.session_state.get("last_key") != settings_key:
+    # Reset run state when a different file is uploaded
+    if uploaded.name != st.session_state.get("last_uploaded_name"):
+        st.session_state["run_triggered"] = False
+        st.session_state["last_uploaded_name"] = uploaded.name
+        st.session_state.pop("last_key", None)
         for key in list(st.session_state.keys()):
             if key.startswith("edited_text_") or key.startswith("edit_"):
                 del st.session_state[key]
+
+    file_size_kb = round(len(uploaded.getvalue()) / 1024, 1)
+    st.markdown(f"**File:** {uploaded.name}  \n**Size:** {file_size_kb} KB")
+    if Path(uploaded.name).suffix.lower() == ".pdf":
+        try:
+            doc = fitz.open(stream=uploaded.getvalue(), filetype="pdf")
+            st.markdown(f"**Pages:** {len(doc)}")
+            doc.close()
+        except Exception:
+            st.markdown("**Pages:** (could not read page count)")
+    else:
+        st.markdown("**Pages:** 1 (image file)")
+
+    if page_selection == "Single page":
+        page_info = f"Single page — page {page_num}"
+    elif page_selection == "Page range":
+        page_info = f"Page range — {page_start} to {page_end}"
+    else:
+        page_info = "All pages"
+
+    preprocessing_steps = []
+    if remove_stamps:
+        preprocessing_steps.append("Stamp removal")
+    if sharpen:
+        preprocessing_steps.append("Sharpen")
+    if normalise:
+        preprocessing_steps.append("Contrast enhancement")
+    preprocessing_info = ", ".join(preprocessing_steps) if preprocessing_steps else "None"
+
+    with st.expander("Current settings", expanded=False):
+        st.markdown(
+            f"- **Scan quality:** {dpi} DPI\n"
+            f"- **Pages:** {page_info}\n"
+            f"- **Preprocessing:** {preprocessing_info}\n"
+            f"- **Extraction mode:** {extraction_mode}\n"
+            f"- **Qwen correction:** {'On' if enable_qwen else 'Off'}\n"
+            f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}"
+        )
+
+    run_triggered = st.session_state.get("run_triggered", False)
+    last_key = st.session_state.get("last_key")
+    if run_triggered and last_key is not None and last_key != settings_key:
+        st.info("Settings changed. Click **Run Extraction** to reprocess.")
+
+    run_clicked = st.button("▶ Run Extraction", type="primary")
+
+    if run_clicked:
+        st.session_state["run_triggered"] = True
+        for key in list(st.session_state.keys()):
+            if key.startswith("edited_text_") or key.startswith("edit_"):
+                del st.session_state[key]
+
+    if run_clicked and st.session_state.get("last_key") != settings_key:
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Converting pages to images...")
             try:
@@ -204,13 +270,15 @@ if uploaded is not None:
                 label=f"Stages 1–5 complete — {filtered_ingest.page_count} page(s) from {ingest_result.source_name}",
                 state="complete",
             )
-    else:
-        ingest_result = st.session_state["ingest_result"]
-        filtered_ingest = st.session_state["filtered_ingest"]
-        preprocess_result = st.session_state["preprocess_result"]
-        surya_result = st.session_state["surya_result"]
-        postprocess_result = st.session_state["postprocess_result"]
-        export_result = st.session_state["export_result"]
+    if not (st.session_state.get("run_triggered") and "export_result" in st.session_state):
+        st.stop()
+
+    ingest_result = st.session_state["ingest_result"]
+    filtered_ingest = st.session_state["filtered_ingest"]
+    preprocess_result = st.session_state["preprocess_result"]
+    surya_result = st.session_state["surya_result"]
+    postprocess_result = st.session_state["postprocess_result"]
+    export_result = st.session_state["export_result"]
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
     show_layout = st.checkbox("Show layout overlay", value=True)
