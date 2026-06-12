@@ -1,6 +1,7 @@
 from __future__ import annotations
 import difflib
 import warnings
+import unicodedata
 
 try:
     from mlx_lm import generate
@@ -34,6 +35,7 @@ def _get_qwen():
 # ---------------------------------------------------------------------------
 
 def _apply_rules(text: str) -> str:
+    text = unicodedata.normalize("NFC", text)
     for wrong, correct in RULE_BASED_CORRECTIONS.items():
         text = text.replace(wrong, correct)
     return text

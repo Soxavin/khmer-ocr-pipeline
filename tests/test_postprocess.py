@@ -155,3 +155,9 @@ def test_multi_page_each_page_corrected_independently():
     assert r.pages[0].qwen_used is False
     assert r.pages[1].qwen_used is True
     mock_gen.assert_called_once()
+
+
+def test_nfc_normalization_applied():
+    import unicodedata
+    nfd_text = "កា"
+    assert pp._apply_rules(nfd_text) == unicodedata.normalize("NFC", nfd_text)
