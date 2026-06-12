@@ -100,6 +100,9 @@ if uploaded is not None:
     settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}"
 
     if st.session_state.get("last_key") != settings_key:
+        for key in list(st.session_state.keys()):
+            if key.startswith("edited_text_") or key.startswith("edit_"):
+                del st.session_state[key]
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Converting pages to images...")
             try:
@@ -274,6 +277,8 @@ if uploaded is not None:
             )
             if edited != post_page.corrected_text:
                 st.session_state[f"edited_text_{i}"] = edited
+            else:
+                st.session_state.pop(f"edited_text_{i}", None)
 
     st.subheader("Downloads")
     # Build export JSON, substituting any analyst-edited text
