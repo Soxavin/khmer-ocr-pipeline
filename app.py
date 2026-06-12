@@ -9,7 +9,7 @@ from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
-from khmer_pipeline.postprocess import postprocess
+from khmer_pipeline.postprocess import postprocess, qwen_loaded
 from khmer_pipeline.export import export
 
 _SAFE_TAGS = [
@@ -161,6 +161,11 @@ if uploaded is not None:
                     st.write(f"Page {idx + 1} / {total}: running OCR...")
 
                 surya_result = run_surya(preprocess_result, on_page=_on_page)
+                if surya_result.warnings:
+                    st.warning(
+                        f"Stage 3: {len(surya_result.warnings)} issue(s) — "
+                        + "; ".join(surya_result.warnings[:3])
+                    )
             except Exception as e:
                 status.update(label="Stage 3 failed", state="error")
                 st.error(f"Stage 3 failed: {str(e)}")
@@ -168,6 +173,8 @@ if uploaded is not None:
                 st.stop()
 
             st.write("Running post-processing...")
+            if enable_qwen and not qwen_loaded():
+                st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
             try:
                 postprocess_result = postprocess(surya_result, skip_qwen=not enable_qwen)
             except Exception as e:

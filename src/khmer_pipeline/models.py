@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 import numpy as np
 
@@ -32,6 +32,7 @@ class SuryaPageResult:
 class SuryaResult:
     source_name: str
     pages: list[SuryaPageResult]
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass

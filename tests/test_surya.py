@@ -1,5 +1,4 @@
 from __future__ import annotations
-import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
@@ -392,11 +391,12 @@ def test_table_recognition_failure_is_isolated():
     with patch("khmer_pipeline.surya._get_predictors",
                return_value=(layout_pred, rec_pred, table_pred)), \
          patch("khmer_pipeline.surya._new_table_predictor", return_value=retry_pred):
-        with pytest.warns(UserWarning, match="Table recognition failed"):
-            r = run_surya(_make_preprocess_result(n_pages=1))
+        r = run_surya(_make_preprocess_result(n_pages=1))
 
     # The failed table is skipped; the second table is still present
     assert len(r.pages[0].tables) == 1
+    # The failure is captured in result.warnings instead of only going to stderr
+    assert any("Table recognition failed" in w for w in r.warnings)
 
 
 def test_table_recognition_retries_with_fresh_predictor_on_failure():
@@ -427,3 +427,9 @@ def test_table_recognition_retries_with_fresh_predictor_on_failure():
 
     assert len(r.pages[0].tables) == 1
     retry_pred.assert_called_once()
+
+
+def test_run_surya_warnings_empty_when_no_issues():
+    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+    assert r.warnings == []

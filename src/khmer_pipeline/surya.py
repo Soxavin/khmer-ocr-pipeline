@@ -45,11 +45,14 @@ def run_surya(
     pil_images = [Image.fromarray(img) for img in result.page_images]
     total = len(pil_images)
     pages = []
-    for idx, pil_img in enumerate(pil_images):
-        if on_page is not None:
-            on_page(idx, total)
-        pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, table_pred))
-    return SuryaResult(source_name=result.source_name, pages=pages)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for idx, pil_img in enumerate(pil_images):
+            if on_page is not None:
+                on_page(idx, total)
+            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, table_pred))
+        collected_warnings = [str(w.message) for w in caught]
+    return SuryaResult(source_name=result.source_name, pages=pages, warnings=collected_warnings)
 
 
 def _process_page(

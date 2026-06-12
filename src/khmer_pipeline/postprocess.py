@@ -30,6 +30,10 @@ def _get_qwen():
     return _qwen_model, _qwen_tokenizer
 
 
+def qwen_loaded() -> bool:
+    return _qwen_model is not None
+
+
 # ---------------------------------------------------------------------------
 # Correction layers
 # ---------------------------------------------------------------------------
