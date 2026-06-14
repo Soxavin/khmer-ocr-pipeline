@@ -144,3 +144,72 @@ def test_cell_missing_row_id_defaults_to_zero():
 
     doc = result.document_json
     assert doc["pages"][0]["tables"][0]["cells"][0]["row"] == 0
+
+
+def test_consistent_table_not_repaired():
+    from khmer_pipeline.export import _validate_and_repair_table
+    table = {
+        "rows": [{"row_id": 0}, {"row_id": 1}],
+        "cols": [{"col_id": 0}, {"col_id": 1}],
+        "cells": [
+            {"row_id": 0, "col_id": 0, "text_lines": [], "bbox": [0, 0, 10, 10]},
+            {"row_id": 0, "col_id": 1, "text_lines": [], "bbox": [10, 0, 20, 10]},
+            {"row_id": 1, "col_id": 0, "text_lines": [], "bbox": [0, 10, 10, 20]},
+            {"row_id": 1, "col_id": 1, "text_lines": [], "bbox": [10, 10, 20, 20]},
+        ],
+        "image_bbox": [0, 0, 20, 20],
+    }
+    repaired, was_repaired = _validate_and_repair_table(table)
+    assert was_repaired is False
+    assert repaired is table
+
+
+def test_inconsistent_table_repaired():
+    from khmer_pipeline.export import _validate_and_repair_table
+    table = {
+        "rows": [{"row_id": 0}, {"row_id": 1}],
+        "cols": [{"col_id": 0}, {"col_id": 1}],
+        "cells": [
+            {"row_id": 0, "col_id": 0, "text_lines": [{"text": "a"}], "bbox": [0, 0, 10, 10]},
+            {"row_id": 0, "col_id": 1, "text_lines": [{"text": "b"}], "bbox": [10, 0, 20, 10]},
+            {"row_id": 1, "col_id": 0, "text_lines": [{"text": "c"}], "bbox": [0, 10, 10, 20]},
+        ],
+        "image_bbox": [0, 0, 20, 20],
+    }
+    repaired, was_repaired = _validate_and_repair_table(table)
+    assert was_repaired is True
+    assert repaired["was_repaired"] is True
+
+    from collections import Counter
+    rows: dict[int, set] = {}
+    for c in repaired["cells"]:
+        rows.setdefault(c.get("row_id", 0), set()).add(c.get("col_id", 0))
+    col_counts = {len(cols) for cols in rows.values()}
+    assert len(col_counts) == 1  # all rows now have the same column count
+
+
+def test_repaired_table_exports_without_error():
+    table = {
+        "rows": [{"row_id": 0}, {"row_id": 1}],
+        "cols": [{"col_id": 0}, {"col_id": 1}],
+        "cells": [
+            {"row_id": 0, "col_id": 0, "text_lines": [{"text": "a"}], "bbox": [0, 0, 10, 10]},
+            {"row_id": 0, "col_id": 1, "text_lines": [{"text": "b"}], "bbox": [10, 0, 20, 10]},
+            {"row_id": 1, "col_id": 0, "text_lines": [{"text": "c"}], "bbox": [0, 10, 10, 20]},
+        ],
+        "image_bbox": [0, 0, 20, 20],
+    }
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]))
+    table_id, csv_string = result.tables_csv[0]
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert len(rows) == 2
+    assert all(len(r) == 2 for r in rows)
+    assert result.document_json["pages"][0]["tables"][0]["was_repaired"] is True
+
+
+def test_empty_table_not_repaired():
+    from khmer_pipeline.export import _validate_and_repair_table
+    table = {"rows": [], "cols": [], "cells": [], "image_bbox": [0, 0, 0, 0]}
+    repaired, was_repaired = _validate_and_repair_table(table)
+    assert was_repaired is False
+    assert repaired is table

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import io
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from .models import PostprocessResult, ExportResult
@@ -17,7 +18,48 @@ def _convert_khmer_numerals(text: str) -> str:
     return "".join(_KHMER_TO_ARABIC.get(ch, ch) for ch in text)
 
 
+def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
+    cells = table.get("cells", [])
+    if not cells:
+        return table, False
+
+    rows: dict[int, list] = {}
+    for c in cells:
+        r = c.get("row_id", 0)
+        rows.setdefault(r, []).append(c)
+
+    row_lengths = [len(cols) for cols in rows.values()]
+    if len(set(row_lengths)) == 1:
+        return table, False  # already consistent
+
+    target_cols = Counter(row_lengths).most_common(1)[0][0]
+    repaired_cells = list(cells)
+    for row_idx, row_cells in rows.items():
+        existing_col_ids = {c.get("col_id", 0) for c in row_cells}
+        for col_id in range(target_cols):
+            if col_id not in existing_col_ids:
+                repaired_cells.append({
+                    "row_id": row_idx,
+                    "col_id": col_id,
+                    "text_lines": [],
+                    "bbox": [],
+                })
+
+    repaired_table = dict(table)
+    repaired_table["cells"] = repaired_cells
+    repaired_table["was_repaired"] = True
+    return repaired_table, True
+
+
 def export(result: PostprocessResult, convert_numerals: bool = False) -> ExportResult:
+    # Repair tables in place before building the JSON, so was_repaired and
+    # the padded cell grid are reflected in both document_json and the CSVs.
+    # This mutates the input PostprocessResult's page.tables; export() is the
+    # final pipeline stage, so nothing reads the pre-repair state afterward.
+    for page in result.pages:
+        for t_idx, table in enumerate(page.tables):
+            page.tables[t_idx], _ = _validate_and_repair_table(table)
+
     document_json = _build_document_json(result)
     tables_csv: list[tuple[str, str]] = []
     for page in result.pages:
@@ -73,6 +115,7 @@ def _build_document_json(result: PostprocessResult) -> dict:
                     {
                         "table_index": t_idx,
                         "table_id": _make_table_id(result.source_name, page.page_index, t_idx),
+                        "was_repaired": table.get("was_repaired", False),
                         "rows": table["rows"],
                         "cols": table["cols"],
                         "cells": [

@@ -319,6 +319,8 @@ else:
             with st.expander(f"Tables — page {surya_page.page_index + 1} ({len(surya_page.tables)} detected)"):
                 for j, tbl in enumerate(surya_page.tables):
                     st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
+                    if tbl.get("was_repaired"):
+                        st.warning(f"Table {j+1}: structure was inconsistent and was automatically repaired. Please verify.")
                     cells = tbl["cells"]
                     if cells:
                         max_row = max(c["row_id"] for c in cells) + 1
