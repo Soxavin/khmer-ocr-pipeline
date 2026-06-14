@@ -82,7 +82,16 @@ def _process_page(
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
             region_ocr = None
         if region_ocr is not None:
-            for line, layout_bbox in zip(region_ocr.text_lines, text_regions):
+            n_lines = len(region_ocr.text_lines)
+            n_regions = len(text_regions)
+            if n_lines != n_regions:
+                warnings.warn(
+                    f"Page {page_index}: OCR returned {n_lines} text lines "
+                    f"for {n_regions} regions — pairing by index, extras dropped."
+                )
+            for idx in range(min(n_lines, n_regions)):
+                line = region_ocr.text_lines[idx]
+                layout_bbox = text_regions[idx]
                 block = _serialize_text_line(line)
                 block["label"] = layout_bbox.label
                 block["region_label"] = layout_bbox.label

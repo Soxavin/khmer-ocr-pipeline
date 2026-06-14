@@ -433,3 +433,34 @@ def test_run_surya_warnings_empty_when_no_issues():
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
     assert r.warnings == []
+
+
+def test_zip_mismatch_emits_warning_and_uses_minimum():
+    """If OCR returns fewer lines than regions, a warning is recorded on
+    SuryaResult.warnings and only the paired lines are used — no IndexError."""
+    bbox1 = _make_layout_bbox_mock("Text")
+    bbox1.bbox = [10.0, 10.0, 200.0, 50.0]
+    bbox1.position = 1
+    bbox2 = _make_layout_bbox_mock("Text")
+    bbox2.bbox = [10.0, 60.0, 200.0, 100.0]
+    bbox2.position = 2
+
+    layout_result = MagicMock()
+    layout_result.bboxes = [bbox1, bbox2]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    one_line = _make_text_line_mock(0)
+    one_line.text = "only one line"
+    one_line.bbox = bbox1.bbox
+    ocr_result = MagicMock()
+    ocr_result.text_lines = [one_line]
+    rec_pred = MagicMock(return_value=[ocr_result])
+    table_pred = MagicMock(return_value=[])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert any("pairing by index" in w for w in r.warnings)
+    assert len(r.pages[0].text_blocks) == 1
+    assert r.pages[0].text_blocks[0]["text"] == "only one line"
