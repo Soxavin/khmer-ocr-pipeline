@@ -19,6 +19,13 @@ def _convert_khmer_numerals(text: str) -> str:
 
 
 def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
+    """Pad rows that are shorter than the table's majority row length with
+    empty placeholder cells, so the CSV/JSON grid is rectangular.
+
+    Only pads short rows — rows longer than the majority length, or rows
+    with col_ids outside range(target_cols), are left as-is. Assumes Surya's
+    normal output of contiguous 0-indexed col_ids; degenerate cases are not
+    fully normalized but will not raise."""
     cells = table.get("cells", [])
     if not cells:
         return table, False
@@ -56,6 +63,9 @@ def export(result: PostprocessResult, convert_numerals: bool = False) -> ExportR
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
     # final pipeline stage, so nothing reads the pre-repair state afterward.
+    # (This also relies on CorrectedPageResult.tables being the same list
+    # object as SuryaPageResult.tables, per postprocess.py's _correct_page,
+    # so app.py's was_repaired badge sees the repair too.)
     for page in result.pages:
         for t_idx, table in enumerate(page.tables):
             page.tables[t_idx], _ = _validate_and_repair_table(table)
