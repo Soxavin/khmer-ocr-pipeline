@@ -9,6 +9,7 @@ except ImportError:
     generate = None  # type: ignore[assignment]
 
 from .models import SuryaResult, SuryaPageResult, PostprocessResult, CorrectedPageResult
+from .model_config import ANOMALY_THRESHOLD, STAGE4_MODEL_PATH
 
 # ---------------------------------------------------------------------------
 # Rule table — deliberately empty. Add targeted pairs only after review.
@@ -26,7 +27,7 @@ def _get_qwen():
     global _qwen_model, _qwen_tokenizer
     if _qwen_model is None:
         from mlx_lm import load
-        _qwen_model, _qwen_tokenizer = load("mlx-community/Qwen2.5-7B-Instruct-4bit")
+        _qwen_model, _qwen_tokenizer = load(STAGE4_MODEL_PATH)
     return _qwen_model, _qwen_tokenizer
 
 
@@ -43,9 +44,6 @@ def _apply_rules(text: str) -> str:
     for wrong, correct in RULE_BASED_CORRECTIONS.items():
         text = text.replace(wrong, correct)
     return text
-
-
-ANOMALY_THRESHOLD: float = 0.15  # tunable — proportion of foreign-script chars that triggers correction
 
 
 def _is_foreign_script(ch: str) -> bool:

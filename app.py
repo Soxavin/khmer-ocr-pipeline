@@ -12,6 +12,7 @@ from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 from khmer_pipeline.postprocess import postprocess, qwen_loaded
 from khmer_pipeline.export import export
+from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
