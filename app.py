@@ -50,6 +50,27 @@ def _draw_layout(img_array: np.ndarray, blocks: list[dict]) -> np.ndarray:
     return np.array(img)
 
 
+def _draw_layout_confidence(img_array: np.ndarray, blocks: list[dict]) -> np.ndarray:
+    """Draw bounding boxes coloured by OCR confidence score.
+    Green = high (>=CONFIDENCE_MID), yellow = medium (>=CONFIDENCE_LOW), red = low."""
+    img = Image.fromarray(img_array)
+    draw = ImageDraw.Draw(img)
+    for block in blocks:
+        conf = block.get("confidence") or 0.0
+        if conf >= CONFIDENCE_MID:
+            color = "#27AE60"   # green
+        elif conf >= CONFIDENCE_LOW:
+            color = "#F39C12"   # yellow
+        else:
+            color = "#E74C3C"   # red
+        bbox = block.get("bbox")
+        if not bbox or len(bbox) < 4:
+            continue
+        x0, y0, x1, y1 = [int(v) for v in bbox]
+        draw.rectangle([x0, y0, x1, y1], outline=color, width=2)
+    return np.array(img)
+
+
 st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
 st.title("Khmer Document Extraction Pipeline")
 st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
@@ -284,6 +305,11 @@ else:
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
     show_layout = st.checkbox("Show layout overlay", value=True)
+    overlay_mode = st.radio(
+        "Layout overlay mode",
+        ["Region type", "Confidence"],
+        horizontal=True,
+    ) if show_layout else None
 
     for i, (orig, proc, surya_page, post_page) in enumerate(
         zip(filtered_ingest.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
@@ -298,12 +324,14 @@ else:
             with col2:
                 st.image(proc, caption="Preprocessed", width="stretch")
             with col3:
-                table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
-                st.image(
-                    _draw_layout(proc, surya_page.text_blocks + table_blocks),
-                    caption="Layout detection",
-                    width="stretch",
-                )
+                if overlay_mode == "Confidence":
+                    overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
+                    overlay_caption = "Confidence (\U0001F7E2 high \U0001F7E1 medium \U0001F534 low)"
+                else:
+                    table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
+                    overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
+                    overlay_caption = "Layout detection"
+                st.image(overlay_img, caption=overlay_caption, width="stretch")
         else:
             col1, col2 = st.columns(2)
             with col1:
