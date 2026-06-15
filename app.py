@@ -93,6 +93,7 @@ with st.sidebar:
     remove_stamps = st.checkbox("Remove colored stamps", value=True)
     sharpen = st.checkbox("Sharpen text", value=True)
     normalise = st.checkbox("Enhance contrast", value=True)
+    deskew = st.checkbox("Deskew (straighten rotated scans)", value=True)
 
     st.header("Extraction")
     extraction_mode = st.radio(
@@ -152,7 +153,7 @@ else:
     else:
         page_sel_part = "all"
     # tables_only omitted: it gates display only, not pipeline output
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}_{deskew}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -180,6 +181,8 @@ else:
         page_info = "All pages"
 
     preprocessing_steps = []
+    if deskew:
+        preprocessing_steps.append("Deskew")
     if remove_stamps:
         preprocessing_steps.append("Stamp removal")
     if sharpen:
@@ -253,7 +256,7 @@ else:
 
             st.write("Cleaning pages...")
             try:
-                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise)
+                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew)
                 preprocess_result = preprocess(filtered_ingest, config)
             except Exception as e:
                 status.update(label="Stage 2 failed", state="error")

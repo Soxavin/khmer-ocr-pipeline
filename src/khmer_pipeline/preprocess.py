@@ -12,6 +12,7 @@ class PreprocessConfig:
     remove_stamps: bool = True
     sharpen: bool = True
     normalise: bool = True
+    deskew: bool = True
 
 
 def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> PreprocessResult:
@@ -28,6 +29,8 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
 
 def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    if cfg.deskew:
+        bgr = _deskew(bgr)
     if cfg.remove_stamps:
         bgr = _remove_stamps(bgr)
     if cfg.sharpen:
@@ -69,3 +72,42 @@ def _normalise(bgr: np.ndarray) -> np.ndarray:
     l_eq = clahe.apply(l)
     lab_eq = cv2.merge([l_eq, a, b])
     return cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+
+
+# Below this angle (in degrees) a rotation correction is treated as a no-op,
+# since the visual difference is negligible and avoids needless resampling.
+_DESKEW_MIN_ANGLE_DEG = 0.5
+
+
+def _skew_angle(bgr: np.ndarray) -> float:
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    # np.where on a (rows, cols) array yields (row, col) = (y, x) pairs, but
+    # minAreaRect expects (x, y) points. Swapping the axes like this mirrors
+    # the point set through y=x, which negates the angle minAreaRect returns;
+    # the final `return -angle` below cancels that out to give the correct
+    # sign, so don't "fix" this ordering without also removing the negation.
+    coords = np.column_stack(np.where(thresh > 0))
+    if coords.shape[0] == 0:
+        return 0.0
+    angle = cv2.minAreaRect(coords)[-1]
+    # Normalise to (-45, 45] so the result represents the smallest rotation
+    # needed to align the dominant content with the axes.
+    if angle > 45:
+        angle -= 90
+    elif angle < -45:
+        angle += 90
+    # See the (row, col) vs (x, y) note above: this negation is required to
+    # correct for the axis swap in `coords`.
+    return -angle
+
+
+def _deskew(bgr: np.ndarray) -> np.ndarray:
+    angle = _skew_angle(bgr)
+    if abs(angle) < _DESKEW_MIN_ANGLE_DEG:
+        return bgr
+    h, w = bgr.shape[:2]
+    matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    # INTER_CUBIC for smooth resampling; BORDER_REPLICATE avoids introducing
+    # black borders at the rotated edges, which would otherwise hurt OCR.
+    return cv2.warpAffine(bgr, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
