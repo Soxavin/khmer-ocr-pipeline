@@ -139,7 +139,14 @@ def _process_page(
             except Exception as e:
                 warnings.warn(f"Cell OCR failed: {e}")
         tbl = _serialize_table(t)
-        tbl["cells"] = _filter_phantom_cells(tbl["cells"], tbl["image_bbox"])
+        cells_before = tbl["cells"]
+        tbl["cells"] = _filter_phantom_cells(cells_before, tbl["image_bbox"])
+        removed = len(cells_before) - len(tbl["cells"])
+        if removed:
+            warnings.warn(
+                f"Page {page_index}: removed {removed} phantom cell(s) "
+                f"(outside table bounds) from table {len(tables)}."
+            )
         tbl["bbox"] = list(b.bbox)
         tables.append(tbl)
 

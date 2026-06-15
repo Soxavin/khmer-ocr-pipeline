@@ -464,3 +464,36 @@ def test_zip_mismatch_emits_warning_and_uses_minimum():
     assert any("pairing by index" in w for w in r.warnings)
     assert len(r.pages[0].text_blocks) == 1
     assert r.pages[0].text_blocks[0]["text"] == "only one line"
+
+
+def test_phantom_cell_removal_emits_warning():
+    """If a detected table cell falls entirely outside the table's image_bbox,
+    it is filtered out AND a warning recording the removed count is added to
+    SuryaResult.warnings."""
+    table_bbox = _make_layout_bbox_mock("Table")
+    table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
+    layout_result = MagicMock()
+    layout_result.bboxes = [table_bbox]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    ocr_result = MagicMock()
+    ocr_result.text_lines = []
+    rec_pred = MagicMock(return_value=[ocr_result])
+
+    # One cell inside image_bbox, one cell entirely outside it (phantom)
+    good_cell = _make_cell_mock([10.0, 10.0, 50.0, 30.0])
+    phantom_cell = _make_cell_mock([500.0, 500.0, 600.0, 600.0])
+
+    table_result = MagicMock()
+    table_result.rows = []
+    table_result.cols = []
+    table_result.cells = [good_cell, phantom_cell]
+    table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
+    table_pred = MagicMock(return_value=[table_result])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert any("phantom cell" in w for w in r.warnings)
+    assert len(r.pages[0].tables[0]["cells"]) == 1
