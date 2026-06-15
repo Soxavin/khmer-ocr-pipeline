@@ -13,8 +13,7 @@ from pathlib import Path
 
 from .ingest import ingest
 from .preprocess import preprocess, PreprocessConfig
-from .surya import run_surya
-from .postprocess import postprocess
+from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from .export import export
 from .model_config import ANOMALY_THRESHOLD
 from .memory import clear_device_cache
@@ -48,14 +47,14 @@ def run(
     print(f"  Preprocessing complete")
     clear_device_cache()
 
-    surya_result = run_surya(preprocess_result)
+    surya_result = ACTIVE_OCR_ENGINE(preprocess_result)
     if surya_result.warnings:
         for w in surya_result.warnings:
             print(f"  WARNING: {w}")
     print(f"  OCR complete — {sum(len(p.text_blocks) for p in surya_result.pages)} text blocks")
     clear_device_cache()
 
-    postprocess_result = postprocess(surya_result, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
+    postprocess_result = ACTIVE_CORRECTION_ENGINE(surya_result, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
     print(f"  Post-processing complete")
     clear_device_cache()
 

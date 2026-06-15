@@ -39,6 +39,28 @@ unexpected failure (layout/OCR/our own code) is caught, logs a
 "Critical failure processing page N" warning, and returns an empty
 `SuryaPageResult` so one bad page doesn't crash a multi-page run.
 
+## Engine Swappability (Strategy Pattern)
+
+`src/khmer_pipeline/protocols.py` defines two structural interfaces:
+`OCREngine` (Stage 3: `(PreprocessResult, on_page=...) -> SuryaResult`) and
+`CorrectionEngine` (Stage 4: `(SuryaResult, skip_qwen=..., anomaly_threshold=...)
+-> PostprocessResult`). `src/khmer_pipeline/engine_registry.py` is the single
+source of truth for which implementation is active: it imports `run_surya` and
+`postprocess` and binds them to `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`.
+
+**Rule:** orchestrators (`pipeline.py`, `app.py`) must only import execution
+functions (`ACTIVE_OCR_ENGINE`, `ACTIVE_CORRECTION_ENGINE`) from
+`engine_registry.py`, never directly from `surya.py`/`postprocess.py`.
+State-checking helpers (`models_loaded`, `preload_models`, `qwen_loaded`) are
+exempt and still imported directly from the stage modules — they're not part
+of the swappable execution path.
+
+To add a new engine: write a wrapper function matching the relevant Protocol's
+`__call__` signature exactly (including the `skip_qwen` parameter name for
+`CorrectionEngine`), then reassign `ACTIVE_OCR_ENGINE`/`ACTIVE_CORRECTION_ENGINE`
+in `engine_registry.py` — that one-line change is the only thing orchestrators
+need to swap models.
+
 ## Memory management (`memory.py`)
 
 `src/khmer_pipeline/memory.py` provides `clear_device_cache()` —

@@ -42,6 +42,12 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `SuryaResult.warnings`, and already displayed in both `app.py`
   (`st.warning`) and `pipeline.py` (`WARNING:` prefix). Don't add new
   ad-hoc UI plumbing for warnings — extend this mechanism.
+- Stage 3 (OCR) and Stage 4 (correction) execution functions are swapped via
+  `engine_registry.py` (see CONTEXT.md "Engine Swappability"). Orchestrators
+  (`pipeline.py`, `app.py`) must import `ACTIVE_OCR_ENGINE` /
+  `ACTIVE_CORRECTION_ENGINE` from there, never `run_surya`/`postprocess`
+  directly. State-checking helpers (`models_loaded`, `preload_models`,
+  `qwen_loaded`) are still imported directly from `surya.py`/`postprocess.py`.
 - Multi-page results in `app.py` use the established pagination
   pattern: `st.session_state.current_page_idx` (clamped to
   `[0, total_pages - 1]`, reset on new file upload), a "Jump to page"

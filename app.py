@@ -9,8 +9,9 @@ from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
-from khmer_pipeline.surya import run_surya, models_loaded, preload_models
-from khmer_pipeline.postprocess import postprocess, qwen_loaded
+from khmer_pipeline.surya import models_loaded, preload_models
+from khmer_pipeline.postprocess import qwen_loaded
+from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
@@ -288,7 +289,7 @@ else:
                 def _on_page(idx: int, total: int) -> None:
                     st.write(f"Page {idx + 1} / {total}: running OCR...")
 
-                surya_result = run_surya(preprocess_result, on_page=_on_page)
+                surya_result = ACTIVE_OCR_ENGINE(preprocess_result, on_page=_on_page)
                 if surya_result.warnings:
                     st.warning(
                         f"Stage 3: {len(surya_result.warnings)} issue(s) — "
@@ -306,7 +307,7 @@ else:
             if enable_qwen and not qwen_loaded():
                 st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
             try:
-                postprocess_result = postprocess(
+                postprocess_result = ACTIVE_CORRECTION_ENGINE(
                     surya_result,
                     skip_qwen=not enable_qwen,
                     anomaly_threshold=anomaly_threshold,
