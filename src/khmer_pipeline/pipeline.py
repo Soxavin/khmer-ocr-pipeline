@@ -27,6 +27,7 @@ def run(
     sharpen: bool = True,
     normalise: bool = True,
     deskew: bool = True,
+    normalise_table_backgrounds: bool = True,
     skip_qwen: bool = False,
     anomaly_threshold: float = ANOMALY_THRESHOLD,
     convert_numerals: bool = False,
@@ -42,7 +43,7 @@ def run(
     ingest_result = ingest(data, source_path.name, dpi=dpi)
     print(f"  Ingested {ingest_result.page_count} page(s)")
 
-    config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew)
+    config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
     preprocess_result = preprocess(ingest_result, config)
     print(f"  Preprocessing complete")
 
@@ -82,6 +83,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-sharpen", action="store_false", dest="sharpen")
     parser.add_argument("--no-normalise", action="store_false", dest="normalise")
     parser.add_argument("--no-deskew", action="store_false", dest="deskew")
+    parser.add_argument("--no-bg-normalise", action="store_false", dest="normalise_table_backgrounds")
     parser.add_argument("--no-qwen", action="store_true", dest="skip_qwen")
     parser.add_argument("--anomaly-threshold", type=float, default=ANOMALY_THRESHOLD, dest="anomaly_threshold")
     parser.add_argument("--convert-numerals", action="store_true", dest="convert_numerals")
@@ -94,6 +96,7 @@ if __name__ == "__main__":
         sharpen=args.sharpen,
         normalise=args.normalise,
         deskew=args.deskew,
+        normalise_table_backgrounds=args.normalise_table_backgrounds,
         skip_qwen=args.skip_qwen,
         anomaly_threshold=args.anomaly_threshold,
         convert_numerals=args.convert_numerals,

@@ -13,6 +13,7 @@ class PreprocessConfig:
     sharpen: bool = True
     normalise: bool = True
     deskew: bool = True
+    normalise_table_backgrounds: bool = True
 
 
 def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> PreprocessResult:
@@ -33,6 +34,8 @@ def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
         bgr = _deskew(bgr)
     if cfg.remove_stamps:
         bgr = _remove_stamps(bgr)
+    if cfg.normalise_table_backgrounds:
+        bgr = _normalise_table_backgrounds(bgr)
     if cfg.sharpen:
         bgr = _sharpen(bgr)
     if cfg.normalise:
@@ -72,6 +75,21 @@ def _normalise(bgr: np.ndarray) -> np.ndarray:
     l_eq = clahe.apply(l)
     lab_eq = cv2.merge([l_eq, a, b])
     return cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+
+
+# Thresholds for detecting shaded table cell backgrounds (e.g. header rows or
+# alternating-row fills) so they can be desaturated toward neutral gray/white,
+# leaving dark text pixels untouched, for a cleaner grid for Surya's table detector.
+_TABLE_BG_MIN_VALUE = 150
+_TABLE_BG_MIN_SATURATION = 30
+
+
+def _normalise_table_backgrounds(bgr: np.ndarray) -> np.ndarray:
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+    s, v = hsv[..., 1], hsv[..., 2]
+    mask = (v > _TABLE_BG_MIN_VALUE) & (s > _TABLE_BG_MIN_SATURATION)
+    s[mask] = 0
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
 
 # Below this angle (in degrees) a rotation correction is treated as a no-op,

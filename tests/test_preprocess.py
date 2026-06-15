@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 from khmer_pipeline.models import IngestResult, PreprocessResult
-from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle
+from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds
 
 
 def _make_ingest_result(n_pages: int = 1, h: int = 100, w: int = 100) -> IngestResult:
@@ -20,33 +20,33 @@ def _make_ingest_result(n_pages: int = 1, h: int = 100, w: int = 100) -> IngestR
 
 
 def test_preprocess_returns_preprocess_result():
-    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert isinstance(r, PreprocessResult)
 
 
 def test_preprocess_preserves_source_name():
-    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert r.source_name == "test.pdf"
 
 
 def test_preprocess_preserves_dpi():
-    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert r.dpi == 200
 
 
 def test_preprocess_preserves_page_count():
-    r = preprocess(_make_ingest_result(3), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(3), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert r.page_count == 3
     assert len(r.page_images) == 3
 
 
 def test_preprocess_image_shape_unchanged():
-    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert r.page_images[0].shape == (100, 100, 3)
 
 
 def test_preprocess_images_are_rgb_uint8():
-    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(_make_ingest_result(), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     arr = r.page_images[0]
     assert arr.dtype == np.uint8
     assert arr.ndim == 3
@@ -56,7 +56,7 @@ def test_preprocess_images_are_rgb_uint8():
 def test_preprocess_all_flags_false_is_passthrough():
     ingest_r = _make_ingest_result()
     original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert np.array_equal(r.page_images[0], original)
 
 
@@ -80,7 +80,7 @@ def _make_red_blob_image() -> IngestResult:
 def test_stamp_removal_changes_red_region():
     ingest_r = _make_red_blob_image()
     original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=True, sharpen=False, normalise=False, deskew=False))
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=True, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     output = r.page_images[0]
     # Image overall changed
     assert not np.array_equal(output, original)
@@ -95,14 +95,14 @@ def test_stamp_removal_changes_red_region():
 def test_sharpen_changes_pixels():
     ingest_r = _make_ingest_result()  # gradient image — not flat, so sharpening has effect
     original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=True, normalise=False, deskew=False))
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=True, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert not np.array_equal(r.page_images[0], original)
 
 
 def test_normalise_changes_pixels():
     ingest_r = _make_ingest_result()  # gradient image — CLAHE has something to work with
     original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=True, deskew=False))
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=True, deskew=False, normalise_table_backgrounds=False))
     assert not np.array_equal(r.page_images[0], original)
 
 
@@ -145,8 +145,56 @@ def test_preprocess_deskew_flag_controls_step():
         page_count=1,
     )
     original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=True))
+    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=True, normalise_table_backgrounds=False))
     assert not np.array_equal(r.page_images[0], original)
 
-    r2 = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False))
+    r2 = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
     assert np.array_equal(r2.page_images[0], original)
+
+
+def _make_colored_bg_image() -> IngestResult:
+    """100x100 white page with a 40x40 light-blue shaded region (simulating a
+    table header fill) containing a 10x10 dark 'text' block."""
+    img = np.full((100, 100, 3), 255, dtype=np.uint8)
+    img[20:60, 20:60] = [180, 220, 255]  # light blue shading (RGB)
+    img[35:45, 35:45] = [30, 30, 30]     # dark text pixels inside the shaded region
+    return IngestResult(
+        source_name="bg_test.pdf",
+        page_images=[img],
+        dpi=200,
+        page_count=1,
+    )
+
+
+def test_background_normalise_desaturates_colored_fill():
+    ingest_r = _make_colored_bg_image()
+    r = preprocess(ingest_r, PreprocessConfig(
+        remove_stamps=False, sharpen=False, normalise=False, deskew=False,
+        normalise_table_backgrounds=True,
+    ))
+    output = r.page_images[0]
+    # The light-blue shaded region (away from the dark text block) should now
+    # be near-neutral — R, G, B channels much closer together than before.
+    bg_pixel = output[25, 25].astype(int)
+    assert max(bg_pixel) - min(bg_pixel) < 15, f"expected near-neutral color, got {bg_pixel}"
+
+
+def test_background_normalise_preserves_dark_text():
+    ingest_r = _make_colored_bg_image()
+    r = preprocess(ingest_r, PreprocessConfig(
+        remove_stamps=False, sharpen=False, normalise=False, deskew=False,
+        normalise_table_backgrounds=True,
+    ))
+    output = r.page_images[0]
+    text_pixel = output[40, 40]
+    assert text_pixel.max() < 60
+
+
+def test_background_normalise_disabled_is_passthrough():
+    ingest_r = _make_colored_bg_image()
+    original = ingest_r.page_images[0].copy()
+    r = preprocess(ingest_r, PreprocessConfig(
+        remove_stamps=False, sharpen=False, normalise=False, deskew=False,
+        normalise_table_backgrounds=False,
+    ))
+    assert np.array_equal(r.page_images[0], original)

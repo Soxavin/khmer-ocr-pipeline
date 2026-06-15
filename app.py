@@ -94,6 +94,13 @@ with st.sidebar:
     sharpen = st.checkbox("Sharpen text", value=True)
     normalise = st.checkbox("Enhance contrast", value=True)
     deskew = st.checkbox("Deskew (straighten rotated scans)", value=True)
+    normalise_table_backgrounds = st.checkbox(
+        "Normalise colored table backgrounds",
+        value=True,
+        help="Flattens shaded or colored table cell backgrounds (e.g. header "
+             "row fills) toward white before OCR. Improves table-grid detection "
+             "on documents with colored cell shading.",
+    )
 
     st.header("Extraction")
     extraction_mode = st.radio(
@@ -153,7 +160,7 @@ else:
     else:
         page_sel_part = "all"
     # tables_only omitted: it gates display only, not pipeline output
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}_{deskew}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -189,6 +196,8 @@ else:
         preprocessing_steps.append("Sharpen")
     if normalise:
         preprocessing_steps.append("Contrast enhancement")
+    if normalise_table_backgrounds:
+        preprocessing_steps.append("Background normalisation")
     preprocessing_info = ", ".join(preprocessing_steps) if preprocessing_steps else "None"
 
     with st.expander("Current settings", expanded=False):
@@ -256,7 +265,7 @@ else:
 
             st.write("Cleaning pages...")
             try:
-                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew)
+                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
                 preprocess_result = preprocess(filtered_ingest, config)
             except Exception as e:
                 status.update(label="Stage 2 failed", state="error")
