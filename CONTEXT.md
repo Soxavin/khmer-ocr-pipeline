@@ -1,0 +1,77 @@
+# CONTEXT.md — Khmer OCR Pipeline
+
+Khmer-language document OCR pipeline for MEF Cambodia financial documents
+(e.g. ARDB forms). Two entry points: a Streamlit UI (`app.py`) for
+interactive use, and a CLI batch processor
+(`src/khmer_pipeline/pipeline.py`).
+
+## Tech stack
+- Python >=3.11, managed with `uv` (pyproject.toml + uv.lock)
+- OpenCV (`opencv-python-headless`) — image preprocessing
+- PyMuPDF (`fitz`) — PDF ingestion
+- `surya-ocr` (pinned `>=0.17.1,<0.18`) — layout detection, OCR, table recognition
+- `mlx-lm` + `transformers` (pinned, see pyproject.toml) — Qwen2.5-7B-Instruct-4bit text correction
+- Streamlit >=1.35 — UI
+- pytest — tests
+
+## Pipeline architecture
+
+Data flows through dataclasses in `src/khmer_pipeline/models.py`:
+
+```
+IngestResult -> PreprocessResult -> SuryaResult -> PostprocessResult -> ExportResult
+```
+
+| Stage | Module | Entry point | Notes |
+|---|---|---|---|
+| 1. Ingest | `ingest.py` | `ingest(bytes, name, dpi) -> IngestResult` | PDF/image -> page images (numpy arrays). `MAX_PAGES = 50`. |
+| 2. Preprocess | `preprocess.py` | `preprocess(IngestResult, PreprocessConfig) -> PreprocessResult` | OpenCV cleanup: deskew, stamp removal, sharpen, contrast, table-background normalisation. All steps are `PreprocessConfig` flags (default on). |
+| 3. Surya OCR | `surya.py` | `run_surya(PreprocessResult, on_page=callback) -> SuryaResult` | Layout detection + OCR + table recognition via lazily-loaded Surya model singletons. Issues (low confidence, phantom cells, OCR/table failures) collected in `SuryaResult.warnings`. |
+| 4. Postprocess | `postprocess.py` | `postprocess(SuryaResult, skip_qwen, anomaly_threshold) -> PostprocessResult` | Rule-based Khmer text correction; falls back to Qwen2.5-VL when the anomaly score (fraction of non-Khmer/non-Latin chars) exceeds `anomaly_threshold`. |
+| 5. Export | `export.py` | `export(PostprocessResult, convert_numerals, repair_tables) -> ExportResult` | Produces document JSON + per-table CSVs. Optional Khmer->Arabic numeral conversion and table-grid repair (pads short rows). |
+
+Model checkpoints and tunable thresholds (Surya checkpoints, Qwen model
+path, `ANOMALY_THRESHOLD`, `CONFIDENCE_LOW`/`CONFIDENCE_MID`) all live in
+`model_config.py` — change them there, not inline in stage modules.
+
+## UI (`app.py`)
+
+Single-file Streamlit app (~460 lines). Flow: sidebar config -> file
+upload -> "Run Extraction" button -> runs all 5 stages with per-stage
+status updates -> results display (page images with layout/confidence
+overlays, tables, OCR text, post-processing diffs, editable corrected
+text) -> downloads (patched JSON + per-table CSV). Results are cached in
+`st.session_state` keyed by a `settings_key` string so re-renders don't
+re-run the pipeline.
+
+## CLI (`pipeline.py`)
+
+```bash
+uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-deskew] [--no-qwen] ...
+```
+Same 5 stages, writes `<name>_extracted.json` + per-table CSVs to
+`output/`, prints `WARNING:`-prefixed lines for anything in
+`SuryaResult.warnings`.
+
+## Where to look for X
+
+- **Add/tune a preprocessing step** -> `preprocess.py` (`PreprocessConfig`
+  field + `_preprocess_image` step order) + sidebar checkbox in `app.py` +
+  CLI flag in `pipeline.py`. Follow the existing pattern (see `deskew`,
+  `normalise_table_backgrounds`).
+- **Change OCR/layout/table model** -> `model_config.py` (checkpoints) +
+  `surya.py` (call sites).
+- **Change correction rules / Qwen behavior** -> `postprocess.py`.
+- **Change export format / CSV/JSON shape** -> `export.py` +
+  `models.py` (`ExportResult`).
+- **UI changes** -> `app.py`.
+- **Tests** mirror `src/khmer_pipeline/` 1:1 in `tests/` (e.g.
+  `preprocess.py` <-> `tests/test_preprocess.py`).
+
+## Further history
+
+`docs/superpowers/plans/` and `docs/superpowers/specs/` contain the
+design docs and implementation plans for each stage (stages 1-6 +
+batch region OCR) — useful for "why was this built this way" context.
+
+See `CLAUDE.md` for coding conventions.
