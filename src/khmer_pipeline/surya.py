@@ -3,6 +3,7 @@ import warnings
 from typing import Any, Callable, Optional
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
+from .model_config import CONFIDENCE_LOW
 
 _layout_pred = None
 _rec_pred = None
@@ -149,6 +150,15 @@ def _process_page(
             )
         tbl["bbox"] = list(b.bbox)
         tables.append(tbl)
+
+    low_conf_blocks = sum(
+        1 for b in sorted_blocks if (b.get("confidence") or 0.0) < CONFIDENCE_LOW
+    )
+    if low_conf_blocks:
+        warnings.warn(
+            f"Page {page_index}: {low_conf_blocks} text block(s) have low OCR "
+            f"confidence (<{CONFIDENCE_LOW})."
+        )
 
     return SuryaPageResult(
         page_index=page_index,

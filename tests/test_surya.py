@@ -497,3 +497,36 @@ def test_phantom_cell_removal_emits_warning():
 
     assert any("phantom cell" in w for w in r.warnings)
     assert len(r.pages[0].tables[0]["cells"]) == 1
+
+
+def _make_low_confidence_text_line_mock(idx: int = 0) -> MagicMock:
+    line = _make_text_line_mock(idx)
+    line.confidence = 0.3  # below CONFIDENCE_LOW (0.5)
+    return line
+
+
+def test_low_confidence_block_emits_warning():
+    """If a text block's OCR confidence is below CONFIDENCE_LOW, a warning
+    noting the low-confidence block count is added to SuryaResult.warnings."""
+    layout_bboxes = [_make_layout_bbox_mock("Text")]
+    layout_result = MagicMock()
+    layout_result.bboxes = layout_bboxes
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    ocr_result = MagicMock()
+    ocr_result.text_lines = [_make_low_confidence_text_line_mock(0)]
+    rec_pred = MagicMock(return_value=[ocr_result])
+
+    table_pred = MagicMock(return_value=[])
+
+    with patch("khmer_pipeline.surya._get_predictors",
+               return_value=(layout_pred, rec_pred, table_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert any("low OCR confidence" in w for w in r.warnings)
+
+
+def test_high_confidence_blocks_emit_no_warning():
+    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+    assert not any("low OCR confidence" in w for w in r.warnings)
