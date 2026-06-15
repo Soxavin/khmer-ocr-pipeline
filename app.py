@@ -12,7 +12,7 @@ from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 from khmer_pipeline.postprocess import postprocess, qwen_loaded
 from khmer_pipeline.export import export
-from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID
+from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -103,6 +103,16 @@ with st.sidebar:
 
     st.header("Post-processing")
     enable_qwen = st.checkbox("Enable Qwen correction", value=True)
+    anomaly_threshold = st.slider(
+        "Anomaly threshold for Qwen correction",
+        min_value=0.0,
+        max_value=1.0,
+        value=ANOMALY_THRESHOLD,
+        step=0.01,
+        help="Proportion of non-Khmer/non-Latin script characters in a text "
+             "block that triggers Qwen correction. Lower = more aggressive "
+             "(more blocks sent to Qwen). Only applies when Qwen correction is enabled.",
+    )
 
     st.header("Export")
     convert_numerals = st.checkbox(
@@ -142,7 +152,7 @@ else:
     else:
         page_sel_part = "all"
     # tables_only omitted: it gates display only, not pipeline output
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -185,6 +195,7 @@ else:
             f"- **Preprocessing:** {preprocessing_info}\n"
             f"- **Extraction mode:** {extraction_mode}\n"
             f"- **Qwen correction:** {'On' if enable_qwen else 'Off'}\n"
+            f"- **Anomaly threshold:** {anomaly_threshold:.2f}\n"
             f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}\n"
             f"- **Table auto-repair:** {'On' if repair_tables else 'Off'}"
         )
@@ -274,7 +285,11 @@ else:
             if enable_qwen and not qwen_loaded():
                 st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
             try:
-                postprocess_result = postprocess(surya_result, skip_qwen=not enable_qwen)
+                postprocess_result = postprocess(
+                    surya_result,
+                    skip_qwen=not enable_qwen,
+                    anomaly_threshold=anomaly_threshold,
+                )
             except Exception as e:
                 status.update(label="Stage 4 failed", state="error")
                 st.error(f"Stage 4 failed: {str(e)}")

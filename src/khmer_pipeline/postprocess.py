@@ -112,7 +112,11 @@ def _build_diff(raw: str, corrected: str) -> str:
     return "\n".join(diff)
 
 
-def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPageResult:
+def _correct_page(
+    page: SuryaPageResult,
+    skip_qwen: bool = False,
+    anomaly_threshold: float = ANOMALY_THRESHOLD,
+) -> CorrectedPageResult:
     raw = page.ocr_text  # always copied unchanged into raw_ocr_text
 
     # Process each text block individually
@@ -120,7 +124,7 @@ def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPa
     qwen_used = False
     for block in page.text_blocks:
         block_text = _apply_rules(block.get("text", ""))
-        if not skip_qwen and _anomaly_score(block_text) >= ANOMALY_THRESHOLD:
+        if not skip_qwen and _anomaly_score(block_text) >= anomaly_threshold:
             corrected = _qwen_correct(block_text)
             if corrected != block_text:
                 block_text = corrected
@@ -146,8 +150,15 @@ def _correct_page(page: SuryaPageResult, skip_qwen: bool = False) -> CorrectedPa
     )
 
 
-def postprocess(result: SuryaResult, skip_qwen: bool = False) -> PostprocessResult:
+def postprocess(
+    result: SuryaResult,
+    skip_qwen: bool = False,
+    anomaly_threshold: float = ANOMALY_THRESHOLD,
+) -> PostprocessResult:
     return PostprocessResult(
         source_name=result.source_name,
-        pages=[_correct_page(page, skip_qwen=skip_qwen) for page in result.pages],
+        pages=[
+            _correct_page(page, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
+            for page in result.pages
+        ],
     )

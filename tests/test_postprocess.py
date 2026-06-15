@@ -189,3 +189,32 @@ def test_multi_page_each_page_corrected_independently():
     assert r.pages[0].qwen_used is False
     assert r.pages[1].qwen_used is True
     mock_gen.assert_called_once()
+
+
+def test_anomaly_threshold_can_be_lowered_to_trigger_qwen():
+    # Text with a small amount of foreign script — anomaly score > 0 but < default 0.15
+    text = "ធនាគារABCDEFGHIJKLMNOPQRSTUVWXYZ" + _SINHALA_KA  # mostly Latin/Khmer, 1 Sinhala char
+    score = pp._anomaly_score(text)
+    assert 0.0 < score < pp.ANOMALY_THRESHOLD
+
+    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
+         patch("khmer_pipeline.postprocess.generate", return_value="corrected") as mock_gen:
+        mock_get.return_value = (MagicMock(), MagicMock())
+        r = pp.postprocess(
+            _make_surya_result(text_blocks=[{"text": text, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
+            anomaly_threshold=score - 0.001,  # lower than this text's score
+        )
+    assert r.pages[0].qwen_used is True
+    mock_gen.assert_called()
+
+
+def test_anomaly_threshold_can_be_raised_to_suppress_qwen():
+    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
+         patch("khmer_pipeline.postprocess.generate", return_value="corrected") as mock_gen:
+        mock_get.return_value = (MagicMock(), MagicMock())
+        r = pp.postprocess(
+            _make_surya_result(text_blocks=[{"text": _SINHALA_KA * 10, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
+            anomaly_threshold=1.1,  # above the maximum possible score of 1.0
+        )
+    assert r.pages[0].qwen_used is False
+    mock_gen.assert_not_called()

@@ -16,6 +16,7 @@ from .preprocess import preprocess, PreprocessConfig
 from .surya import run_surya
 from .postprocess import postprocess
 from .export import export
+from .model_config import ANOMALY_THRESHOLD
 
 
 def run(
@@ -26,6 +27,7 @@ def run(
     sharpen: bool = True,
     normalise: bool = True,
     skip_qwen: bool = False,
+    anomaly_threshold: float = ANOMALY_THRESHOLD,
     convert_numerals: bool = False,
     repair_tables: bool = False,
 ) -> None:
@@ -49,7 +51,7 @@ def run(
             print(f"  WARNING: {w}")
     print(f"  OCR complete — {sum(len(p.text_blocks) for p in surya_result.pages)} text blocks")
 
-    postprocess_result = postprocess(surya_result, skip_qwen=skip_qwen)
+    postprocess_result = postprocess(surya_result, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
     print(f"  Post-processing complete")
 
     export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
@@ -79,6 +81,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-sharpen", action="store_false", dest="sharpen")
     parser.add_argument("--no-normalise", action="store_false", dest="normalise")
     parser.add_argument("--no-qwen", action="store_true", dest="skip_qwen")
+    parser.add_argument("--anomaly-threshold", type=float, default=ANOMALY_THRESHOLD, dest="anomaly_threshold")
     parser.add_argument("--convert-numerals", action="store_true", dest="convert_numerals")
     parser.add_argument("--repair-tables", action="store_true", dest="repair_tables")
     args = parser.parse_args()
@@ -89,6 +92,7 @@ if __name__ == "__main__":
         sharpen=args.sharpen,
         normalise=args.normalise,
         skip_qwen=args.skip_qwen,
+        anomaly_threshold=args.anomaly_threshold,
         convert_numerals=args.convert_numerals,
         repair_tables=args.repair_tables,
     )
