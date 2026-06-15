@@ -34,15 +34,41 @@ Model checkpoints and tunable thresholds (Surya checkpoints, Qwen model
 path, `ANOMALY_THRESHOLD`, `CONFIDENCE_LOW`/`CONFIDENCE_MID`) all live in
 `model_config.py` — change them there, not inline in stage modules.
 
+`_process_page` in `surya.py` wraps its entire body in a try/except: any
+unexpected failure (layout/OCR/our own code) is caught, logs a
+"Critical failure processing page N" warning, and returns an empty
+`SuryaPageResult` so one bad page doesn't crash a multi-page run.
+
+## Memory management (`memory.py`)
+
+`src/khmer_pipeline/memory.py` provides `clear_device_cache()` —
+`gc.collect()` + `torch.mps.empty_cache()` (PyTorch/Surya) +
+`mx.clear_cache()` (MLX/Qwen), each best-effort/wrapped in try/except.
+Called after every stage in both `pipeline.py` and `app.py`, and also
+after any page in `postprocess()` where `qwen_used` is true. Exists to
+avoid OOM on 24GB unified-memory Macs during multi-stage ML inference —
+call it after any new heavy model invocation you add.
+
 ## UI (`app.py`)
 
-Single-file Streamlit app (~460 lines). Flow: sidebar config -> file
-upload -> "Run Extraction" button -> runs all 5 stages with per-stage
-status updates -> results display (page images with layout/confidence
-overlays, tables, OCR text, post-processing diffs, editable corrected
-text) -> downloads (patched JSON + per-table CSV). Results are cached in
-`st.session_state` keyed by a `settings_key` string so re-renders don't
-re-run the pipeline.
+Single-file Streamlit app (~520 lines). Flow: sidebar config -> file
+upload -> "Run Extraction" button -> runs all 5 stages (with
+`clear_device_cache()` after each, results cached into
+`st.session_state` incrementally per stage) -> **paginated** results
+display -> downloads (patched JSON + per-table CSV).
+
+Results are cached in `st.session_state` keyed by a `settings_key`
+string so re-renders don't re-run the pipeline. Once results exist, the
+UI shows **one page at a time** via `st.session_state.current_page_idx`:
+a "Jump to page" selectbox plus Previous/Next buttons (`st.rerun()` on
+change), clamped to `[0, total_pages - 1]`. `current_page_idx` is reset
+(`st.session_state.pop(...)`) whenever a new file is uploaded. Per-page
+widget keys (`edit_{i}`, `edited_text_{i}`) are unchanged, so edits made
+on a page persist when navigating away and back.
+
+All `st.image`/`st.button`/`st.download_button` calls use `width="stretch"`
+(installed Streamlit is 1.58, which supports `width=` on all of these) —
+**do not use the deprecated `use_container_width=True`**.
 
 ## CLI (`pipeline.py`)
 
@@ -51,7 +77,8 @@ uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-des
 ```
 Same 5 stages, writes `<name>_extracted.json` + per-table CSVs to
 `output/`, prints `WARNING:`-prefixed lines for anything in
-`SuryaResult.warnings`.
+`SuryaResult.warnings`. Calls `clear_device_cache()` after preprocess,
+Surya, and postprocess (same as `app.py`).
 
 ## Where to look for X
 

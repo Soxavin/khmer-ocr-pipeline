@@ -14,6 +14,15 @@ See `CONTEXT.md` for architecture/data-flow orientation.
 - For Streamlit UI changes, clear `__pycache__` and restart/reload the
   dev server after changing pipeline function signatures or installed
   packages — stale bytecode/imports otherwise mask the fix.
+- This is a 24GB unified-memory M4 Pro Mac running PyTorch (Surya) and
+  MLX (Qwen) in the same process. After any new heavy model
+  invocation, call `clear_device_cache()` from
+  `src/khmer_pipeline/memory.py` (already wired in after each pipeline
+  stage and after any page where Qwen runs) — use `mx.clear_cache()`,
+  not the deprecated `mx.metal.clear_cache()`.
+- Streamlit width: use `width="stretch"` on `st.image`/`st.button`/
+  `st.download_button`. Never use the deprecated
+  `use_container_width=True`.
 
 ## Code conventions
 - `src/khmer_pipeline/*.py` modules use **no docstrings** — short `#`
@@ -33,6 +42,12 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `SuryaResult.warnings`, and already displayed in both `app.py`
   (`st.warning`) and `pipeline.py` (`WARNING:` prefix). Don't add new
   ad-hoc UI plumbing for warnings — extend this mechanism.
+- Multi-page results in `app.py` use the established pagination
+  pattern: `st.session_state.current_page_idx` (clamped to
+  `[0, total_pages - 1]`, reset on new file upload), a "Jump to page"
+  `st.selectbox`, and Previous/Next `st.button`s, each calling
+  `st.rerun()` on change. Render one page at a time — don't reintroduce
+  a per-page `for` loop over all results.
 
 ## Testing
 - TDD: extend/add tests in `tests/test_<module>.py` mirroring

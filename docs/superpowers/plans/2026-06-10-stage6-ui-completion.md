@@ -181,14 +181,14 @@ if uploaded is not None:
         )
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.image(orig, caption="Original", use_container_width=True)
+            st.image(orig, caption="Original", width="stretch")
         with col2:
-            st.image(proc, caption="Preprocessed", use_container_width=True)
+            st.image(proc, caption="Preprocessed", width="stretch")
         with col3:
             st.image(
                 _draw_layout(proc, surya_page.text_blocks),
                 caption="Layout detection",
-                use_container_width=True,
+                width="stretch",
             )
 
         if not tables_only and surya_page.ocr_text:
@@ -423,14 +423,14 @@ Replace the existing three-column image block:
 ```python
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.image(orig, caption="Original", use_container_width=True)
+            st.image(orig, caption="Original", width="stretch")
         with col2:
-            st.image(proc, caption="Preprocessed", use_container_width=True)
+            st.image(proc, caption="Preprocessed", width="stretch")
         with col3:
             st.image(
                 _draw_layout(proc, surya_page.text_blocks),
                 caption="Layout detection",
-                use_container_width=True,
+                width="stretch",
             )
 ```
 
@@ -440,21 +440,21 @@ With:
         if show_layout:
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.image(orig, caption="Original", use_container_width=True)
+                st.image(orig, caption="Original", width="stretch")
             with col2:
-                st.image(proc, caption="Preprocessed", use_container_width=True)
+                st.image(proc, caption="Preprocessed", width="stretch")
             with col3:
                 st.image(
                     _draw_layout(proc, surya_page.text_blocks),
                     caption="Layout detection",
-                    use_container_width=True,
+                    width="stretch",
                 )
         else:
             col1, col2 = st.columns(2)
             with col1:
-                st.image(orig, caption="Original", use_container_width=True)
+                st.image(orig, caption="Original", width="stretch")
             with col2:
-                st.image(proc, caption="Preprocessed", use_container_width=True)
+                st.image(proc, caption="Preprocessed", width="stretch")
 ```
 
 - [ ] **Step 3: Replace CSV download loop with selection checkboxes**

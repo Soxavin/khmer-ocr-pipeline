@@ -565,7 +565,7 @@ if uploaded is not None:
     cols = st.columns(cols_per_row)
     for i, img_arr in enumerate(result.page_images):
         with cols[i % cols_per_row]:
-            st.image(img_arr, caption=f"Page {i + 1}", use_container_width=True)
+            st.image(img_arr, caption=f"Page {i + 1}", width="stretch")
 ```
 
 - [ ] **Step 2: Run the app and test manually**

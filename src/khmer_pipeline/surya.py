@@ -63,111 +63,114 @@ def _process_page(
     rec_pred,
     table_pred,
 ) -> SuryaPageResult:
-    layout_result = layout_pred([pil_img])[0]
+    # --- CRASH-PROOF SAFETY NET ---
+    try:
+        layout_result = layout_pred([pil_img])[0]
 
-    # Collect page-space bboxes for all non-Table, non-degenerate layout regions
-    text_regions = [
-        b for b in layout_result.bboxes
-        if b.label != "Table"
-        and (b.bbox[2] - b.bbox[0]) >= 50
-        and (b.bbox[3] - b.bbox[1]) >= 20
-    ]
+        # Collect page-space bboxes for all non-Table, non-degenerate layout regions
+        text_regions = [
+            b for b in layout_result.bboxes
+            if b.label != "Table"
+            and (b.bbox[2] - b.bbox[0]) >= 50
+            and (b.bbox[3] - b.bbox[1]) >= 20
+        ]
 
-    # OCR all text regions in one call: one page image, one bbox per region (page-space)
-    text_blocks: list[dict] = []
-    if text_regions:
-        region_bboxes = [list(map(int, b.bbox)) for b in text_regions]
-        try:
-            region_ocr = rec_pred([pil_img], bboxes=[region_bboxes])[0]
-        except Exception as e:
-            warnings.warn(f"Text OCR failed on page {page_index}: {e}")
-            region_ocr = None
-        if region_ocr is not None:
-            n_lines = len(region_ocr.text_lines)
-            n_regions = len(text_regions)
-            if n_lines != n_regions:
+        # OCR all text regions in one call
+        text_blocks: list[dict] = []
+        if text_regions:
+            region_bboxes = [list(map(int, b.bbox)) for b in text_regions]
+            try:
+                region_ocr = rec_pred([pil_img], bboxes=[region_bboxes])[0]
+            except Exception as e:
+                warnings.warn(f"Text OCR failed on page {page_index}: {e}")
+                region_ocr = None
+            if region_ocr is not None:
+                n_lines = len(region_ocr.text_lines)
+                n_regions = len(text_regions)
+                if n_lines != n_regions:
+                    warnings.warn(
+                        f"Page {page_index}: OCR returned {n_lines} text lines "
+                        f"for {n_regions} regions — pairing by index, extras dropped."
+                    )
+                for idx in range(min(n_lines, n_regions)):
+                    line = region_ocr.text_lines[idx]
+                    layout_bbox = text_regions[idx]
+                    block = _serialize_text_line(line)
+                    block["label"] = layout_bbox.label
+                    block["region_label"] = layout_bbox.label
+                    block["reading_order"] = layout_bbox.position
+                    text_blocks.append(block)
+
+        # Sort blocks
+        def _sort_key(block: dict) -> tuple:
+            ro = block.get("reading_order") or 0
+            bbox = block.get("bbox") or [0, 0, 0, 0]
+            if ro > 0:
+                return (0, ro, 0.0, 0.0)
+            return (1, 0, bbox[1], bbox[0])
+
+        sorted_blocks = sorted(text_blocks, key=_sort_key)
+        ocr_text = "\n\n".join(b["text"] for b in sorted_blocks if b.get("text"))
+
+        # Table recognition
+        table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
+        tables: list[dict] = []
+        for b in table_bboxes:
+            crop = pil_img.crop(tuple(map(int, b.bbox)))
+            try:
+                t = table_pred([crop])[0]
+            except Exception:
+                try:
+                    t = _new_table_predictor()([crop])[0]
+                except Exception as e:
+                    warnings.warn(f"Table recognition failed on page {page_index}: {e}")
+                    continue
+            if t.cells:
+                try:
+                    cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
+                    cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
+                    for cell, line in zip(t.cells, cell_ocr.text_lines):
+                        cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
+                except Exception as e:
+                    warnings.warn(f"Cell OCR failed: {e}")
+            tbl = _serialize_table(t)
+            cells_before = tbl["cells"]
+            tbl["cells"] = _filter_phantom_cells(cells_before, tbl["image_bbox"])
+            removed = len(cells_before) - len(tbl["cells"])
+            if removed:
                 warnings.warn(
-                    f"Page {page_index}: OCR returned {n_lines} text lines "
-                    f"for {n_regions} regions — pairing by index, extras dropped."
+                    f"Page {page_index}: removed {removed} phantom cell(s) "
+                    f"(outside table bounds) from table {len(tables)}."
                 )
-            for idx in range(min(n_lines, n_regions)):
-                line = region_ocr.text_lines[idx]
-                layout_bbox = text_regions[idx]
-                block = _serialize_text_line(line)
-                block["label"] = layout_bbox.label
-                block["region_label"] = layout_bbox.label
-                block["reading_order"] = layout_bbox.position
-                text_blocks.append(block)
+            tbl["bbox"] = list(b.bbox)
+            tables.append(tbl)
 
-    # Sort blocks: primary by reading_order (if set), fallback top-to-bottom left-to-right
-    def _sort_key(block: dict) -> tuple:
-        ro = block.get("reading_order") or 0
-        bbox = block.get("bbox") or [0, 0, 0, 0]
-        if ro > 0:
-            return (0, ro, 0.0, 0.0)
-        return (1, 0, bbox[1], bbox[0])
-
-    sorted_blocks = sorted(text_blocks, key=_sort_key)
-
-    # Plain text — no region labels embedded
-    ocr_text = "\n\n".join(b["text"] for b in sorted_blocks if b.get("text"))
-
-    # Table recognition: one table_pred call per table (batch size 1).
-    # Batching multiple differently-structured table crops in a single
-    # table_pred(crops) call crashes surya 0.17.1's TableRecPredictor
-    # (decoder position_ids/cache sized from the first image only).
-    table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
-    tables: list[dict] = []
-    for b in table_bboxes:
-        crop = pil_img.crop(tuple(map(int, b.bbox)))
-        try:
-            t = table_pred([crop])[0]
-        except Exception:
-            # Retry once with a freshly-constructed TableRecPredictor: a
-            # stale decoder cache/position-id state on the shared singleton
-            # can otherwise cause a one-off tensor-shape mismatch on this crop.
-            try:
-                t = _new_table_predictor()([crop])[0]
-            except Exception as e:
-                warnings.warn(f"Table recognition failed on page {page_index}: {e}")
-                continue
-        if t.cells:
-            try:
-                cell_bboxes = [list(map(int, c.bbox)) for c in t.cells]
-                cell_ocr = rec_pred([crop], bboxes=[cell_bboxes])[0]
-                for cell, line in zip(t.cells, cell_ocr.text_lines):
-                    cell.text_lines = [{"text": line.text, "bbox": line.bbox}]
-            except Exception as e:
-                warnings.warn(f"Cell OCR failed: {e}")
-        tbl = _serialize_table(t)
-        cells_before = tbl["cells"]
-        tbl["cells"] = _filter_phantom_cells(cells_before, tbl["image_bbox"])
-        removed = len(cells_before) - len(tbl["cells"])
-        if removed:
+        low_conf_blocks = sum(
+            1 for b in sorted_blocks if (b.get("confidence") or 0.0) < CONFIDENCE_LOW
+        )
+        if low_conf_blocks:
             warnings.warn(
-                f"Page {page_index}: removed {removed} phantom cell(s) "
-                f"(outside table bounds) from table {len(tables)}."
+                f"Page {page_index}: {low_conf_blocks} text block(s) have low OCR "
+                f"confidence (<{CONFIDENCE_LOW})."
             )
-        tbl["bbox"] = list(b.bbox)
-        tables.append(tbl)
 
-    low_conf_blocks = sum(
-        1 for b in sorted_blocks if (b.get("confidence") or 0.0) < CONFIDENCE_LOW
-    )
-    if low_conf_blocks:
-        warnings.warn(
-            f"Page {page_index}: {low_conf_blocks} text block(s) have low OCR "
-            f"confidence (<{CONFIDENCE_LOW})."
+        return SuryaPageResult(
+            page_index=page_index,
+            text_blocks=sorted_blocks,
+            tables=tables,
+            ocr_text=ocr_text,
         )
 
-    return SuryaPageResult(
-        page_index=page_index,
-        text_blocks=sorted_blocks,
-        tables=tables,
-        ocr_text=ocr_text,
-    )
-
-
+    except Exception as e:
+        # --- FALLBACK: If the entire page fails (e.g., Layout crash), 
+        # we return an empty result and warn the user, rather than crashing the pipeline.
+        warnings.warn(f"Critical failure processing page {page_index}: {e}")
+        return SuryaPageResult(
+            page_index=page_index,
+            text_blocks=[],
+            tables=[],
+            ocr_text="",
+        )
 
 def _serialize_text_line(line) -> dict[str, Any]:
     return {

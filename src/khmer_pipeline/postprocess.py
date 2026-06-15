@@ -2,6 +2,7 @@ from __future__ import annotations
 import difflib
 import warnings
 import unicodedata
+from .memory import clear_device_cache
 
 try:
     from mlx_lm import generate
@@ -26,8 +27,13 @@ _qwen_tokenizer = None
 def _get_qwen():
     global _qwen_model, _qwen_tokenizer
     if _qwen_model is None:
-        from mlx_lm import load
-        _qwen_model, _qwen_tokenizer = load(STAGE4_MODEL_PATH)
+        try:
+            from mlx_lm import load
+            _qwen_model, _qwen_tokenizer = load(STAGE4_MODEL_PATH)
+        except Exception as e:
+            # If it fails to load, we warn and return None so we don't keep trying
+            warnings.warn(f"Failed to load Qwen model: {e}. Disabling Qwen fallback for this run.")
+            return None, None
     return _qwen_model, _qwen_tokenizer
 
 
@@ -84,23 +90,27 @@ def _qwen_correct(text: str) -> str:
         "Fix misread characters, wrong scripts, and missing diacritics.\n"
         "Return only the corrected Khmer text with no explanation.\n\n"
         "Example 1:\n"
-        "Wrong: \"មើន្គារំ ជពរជស\"\n"
-        "Correct: \"ធនាគារ ARDB\"\n\n"
+        "Wrong: \"មើន្គារំ ជពរជស \"\n"
+        "Correct: \"ធនាគារ ARDB \"\n\n"
         "Example 2:\n"
-        "Wrong: \"ពា សាច់ជ្រូករស់\"\n"
-        "Correct: \"៣ សាច់ជ្រូករស់\"\n\n"
+        "Wrong: \"ពា សាច់ជ្រូករស់ \"\n"
+        "Correct: \"៣ សាច់ជ្រូករស់ \"\n\n"
         "Example 3:\n"
-        "Wrong: \"មាន្រ​ ​ ​ ​ ​ ​ ​ ​\"\n"
-        "Correct: \"មាន់\"\n\n"
+        "Wrong: \"មាន្រ                                                         \"\n"
+        "Correct: \"មាន់ \"\n\n"
         f"Now correct this text:\n"
         f"Wrong: \"{text}\"\n"
-        "Correct:"
+        "Correct: "
     )
     if generate is None:
         warnings.warn("mlx_lm not installed; Qwen correction unavailable")
         return text
+        
+    model, tokenizer = _get_qwen()
+    if model is None:
+        return text  # Model failed to load previously, skip gracefully
+        
     try:
-        model, tokenizer = _get_qwen()
         return generate(model, tokenizer, prompt=prompt, max_tokens=512, verbose=False)
     except Exception as e:
         warnings.warn(f"Qwen correction failed: {e}")
@@ -155,10 +165,20 @@ def postprocess(
     skip_qwen: bool = False,
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> PostprocessResult:
+    pages = []
+    for page in result.pages:
+        corrected_page = _correct_page(
+            page, 
+            skip_qwen=skip_qwen, 
+            anomaly_threshold=anomaly_threshold
+        )
+        pages.append(corrected_page)
+        
+        # CRITICAL FOR 24GB RAM: Clear memory after every page that uses the heavy VLM
+        if corrected_page.qwen_used:
+            clear_device_cache()
+            
     return PostprocessResult(
         source_name=result.source_name,
-        pages=[
-            _correct_page(page, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
-            for page in result.pages
-        ],
+        pages=pages,
     )

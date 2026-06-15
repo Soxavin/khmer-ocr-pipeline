@@ -17,7 +17,7 @@ from .surya import run_surya
 from .postprocess import postprocess
 from .export import export
 from .model_config import ANOMALY_THRESHOLD
-
+from .memory import clear_device_cache
 
 def run(
     source_path: str | Path,
@@ -46,15 +46,18 @@ def run(
     config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
     preprocess_result = preprocess(ingest_result, config)
     print(f"  Preprocessing complete")
+    clear_device_cache()
 
     surya_result = run_surya(preprocess_result)
     if surya_result.warnings:
         for w in surya_result.warnings:
             print(f"  WARNING: {w}")
     print(f"  OCR complete — {sum(len(p.text_blocks) for p in surya_result.pages)} text blocks")
+    clear_device_cache()
 
     postprocess_result = postprocess(surya_result, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
     print(f"  Post-processing complete")
+    clear_device_cache()
 
     export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
 

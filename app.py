@@ -13,6 +13,7 @@ from khmer_pipeline.surya import run_surya, models_loaded, preload_models
 from khmer_pipeline.postprocess import postprocess, qwen_loaded
 from khmer_pipeline.export import export
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
+from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -159,7 +160,7 @@ else:
         page_sel_part = f"range_{page_start}_{page_end}"
     else:
         page_sel_part = "all"
-    # tables_only omitted: it gates display only, not pipeline output
+    
     settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}"
 
     # Reset run state when a different file is uploaded
@@ -167,6 +168,7 @@ else:
         st.session_state["run_triggered"] = False
         st.session_state["last_uploaded_name"] = uploaded.name
         st.session_state.pop("last_key", None)
+        st.session_state.pop("current_page_idx", None)  # NEW: Reset pagination index
         _clear_edit_state()
 
     file_size_kb = round(len(uploaded.getvalue()) / 1024, 1)
@@ -262,11 +264,16 @@ else:
                 dpi=ingest_result.dpi,
                 page_count=len(selected_indices),
             )
+            st.session_state["ingest_result"] = ingest_result
+            st.session_state["filtered_ingest"] = filtered_ingest
+            clear_device_cache()  # NEW: Free memory after ingest
 
             st.write("Cleaning pages...")
             try:
                 config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
                 preprocess_result = preprocess(filtered_ingest, config)
+                st.session_state["preprocess_result"] = preprocess_result
+                clear_device_cache()  # NEW: Free memory after preprocessing
             except Exception as e:
                 status.update(label="Stage 2 failed", state="error")
                 st.error(f"Stage 2 failed: {str(e)}")
@@ -287,6 +294,8 @@ else:
                         f"Stage 3: {len(surya_result.warnings)} issue(s) — "
                         + "; ".join(surya_result.warnings[:3])
                     )
+                st.session_state["surya_result"] = surya_result
+                clear_device_cache()  # NEW: Free PyTorch MPS memory after Surya
             except Exception as e:
                 status.update(label="Stage 3 failed", state="error")
                 st.error(f"Stage 3 failed: {str(e)}")
@@ -302,6 +311,8 @@ else:
                     skip_qwen=not enable_qwen,
                     anomaly_threshold=anomaly_threshold,
                 )
+                st.session_state["postprocess_result"] = postprocess_result
+                clear_device_cache()  # NEW: Free MLX memory after Qwen fallback
             except Exception as e:
                 status.update(label="Stage 4 failed", state="error")
                 st.error(f"Stage 4 failed: {str(e)}")
@@ -311,24 +322,21 @@ else:
             st.write("Exporting structured output...")
             try:
                 export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
+                st.session_state["export_result"] = export_result
+                clear_device_cache()  # NEW: Final memory cleanup
             except Exception as e:
                 status.update(label="Stage 5 failed", state="error")
                 st.error(f"Stage 5 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
 
-            st.session_state["ingest_result"] = ingest_result
-            st.session_state["filtered_ingest"] = filtered_ingest
-            st.session_state["preprocess_result"] = preprocess_result
-            st.session_state["surya_result"] = surya_result
-            st.session_state["postprocess_result"] = postprocess_result
-            st.session_state["export_result"] = export_result
             st.session_state["last_key"] = settings_key
 
             status.update(
                 label=f"Stages 1–5 complete — {filtered_ingest.page_count} page(s) from {ingest_result.source_name}",
                 state="complete",
             )
+            
     if not (st.session_state.get("run_triggered") and "export_result" in st.session_state):
         st.stop()
 
@@ -347,88 +355,139 @@ else:
         horizontal=True,
     ) if show_layout else None
 
-    for i, (orig, proc, surya_page, post_page) in enumerate(
-        zip(filtered_ingest.page_images, preprocess_result.page_images, surya_result.pages, postprocess_result.pages)
-    ):
-        st.caption(
-            f"Page {surya_page.page_index + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
+    # ==========================================
+    # PAGINATED UI STARTS HERE
+    # ==========================================
+    
+    pages_data = list(zip(
+        filtered_ingest.page_images, 
+        preprocess_result.page_images, 
+        surya_result.pages, 
+        postprocess_result.pages
+    ))
+    total_pages = len(pages_data)
+
+    if "current_page_idx" not in st.session_state:
+        st.session_state.current_page_idx = 0
+        
+    st.session_state.current_page_idx = max(0, min(st.session_state.current_page_idx, total_pages - 1))
+    current_idx = st.session_state.current_page_idx
+
+    st.markdown(f"### 📄 Reviewing Page {current_idx + 1} of {total_pages}")
+    col_select, col_nav = st.columns([2, 3])
+    
+    with col_select:
+        page_options = [f"Page {i+1}" for i in range(total_pages)]
+        selected_option = st.selectbox(
+            "Jump to Page",
+            options=page_options,
+            index=current_idx,
+            label_visibility="collapsed"
         )
-        if show_layout:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.image(orig, caption="Original", width="stretch")
-            with col2:
-                st.image(proc, caption="Preprocessed", width="stretch")
-            with col3:
-                if overlay_mode == "Confidence":
-                    overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
-                    overlay_caption = "Confidence (\U0001F7E2 high \U0001F7E1 medium \U0001F534 low)"
-                else:
-                    table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
-                    overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
-                    overlay_caption = "Layout detection"
-                st.image(overlay_img, caption=overlay_caption, width="stretch")
+        new_idx = page_options.index(selected_option)
+        if new_idx != current_idx:
+            st.session_state.current_page_idx = new_idx
+            st.rerun()
+
+    with col_nav:
+        col_prev, col_next = st.columns(2)
+        with col_prev:
+            if st.button("⬅️ Previous", disabled=(current_idx == 0), width="stretch"):
+                st.session_state.current_page_idx -= 1
+                st.rerun()
+        with col_next:
+            if st.button("Next ➡️", disabled=(current_idx == total_pages - 1), width="stretch"):
+                st.session_state.current_page_idx += 1
+                st.rerun()
+
+    st.divider()
+
+    orig, proc, surya_page, post_page = pages_data[current_idx]
+    i = current_idx  # Match original session state keys
+
+    st.caption(
+        f"Page {surya_page.page_index + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
+    )
+    if show_layout:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.image(orig, caption="Original", width="stretch")
+        with col2:
+            st.image(proc, caption="Preprocessed", width="stretch")
+        with col3:
+            if overlay_mode == "Confidence":
+                overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
+                overlay_caption = "Confidence (🟢 high 🟡 medium 🔴 low)"
+            else:
+                table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
+                overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
+                overlay_caption = "Layout detection"
+            st.image(overlay_img, caption=overlay_caption, width="stretch")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(orig, caption="Original", width="stretch")
+        with col2:
+            st.image(proc, caption="Preprocessed", width="stretch")
+
+    if not tables_only and surya_page.ocr_text:
+        with st.expander(f"OCR text — page {surya_page.page_index + 1}", expanded=True):
+            st.markdown(_safe_html(surya_page.ocr_text), unsafe_allow_html=True)
+
+    if surya_page.tables:
+        with st.expander(f"Tables — page {surya_page.page_index + 1} ({len(surya_page.tables)} detected)", expanded=True):
+            for j, tbl in enumerate(surya_page.tables):
+                st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
+                if tbl.get("was_repaired"):
+                    st.warning(f"Table {j+1}: structure was inconsistent and was automatically repaired. Please verify.")
+                cells = tbl["cells"]
+                if cells:
+                    max_row = max(c["row_id"] for c in cells) + 1
+                    max_col = max((c.get("col_id") or 0) for c in cells) + 1
+                    grid = [[""] * max_col for _ in range(max_row)]
+                    for c in cells:
+                        r = c["row_id"]
+                        col = c.get("col_id") or 0
+                        if c.get("text_lines"):
+                            text = " ".join(
+                                t["text"] for t in c["text_lines"] if t.get("text")
+                            ).strip()
+                            if 0 <= r < max_row and 0 <= col < max_col:
+                                grid[r][col] = text
+                    st.dataframe(grid)
+
+    with st.expander(f"Post-processing — page {surya_page.page_index + 1}", expanded=True):
+        if post_page.qwen_used:
+            st.markdown("**⚡ Qwen correction applied**")
         else:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(orig, caption="Original", width="stretch")
-            with col2:
-                st.image(proc, caption="Preprocessed", width="stretch")
+            st.markdown("**✓ rule-based only**")
+        if post_page.corrected_text:
+            st.write(post_page.corrected_text)
+        if post_page.correction_diff:
+            st.code(post_page.correction_diff, language="diff")
 
-        if not tables_only and surya_page.ocr_text:
-            with st.expander(f"OCR text — page {surya_page.page_index + 1}"):
-                st.markdown(_safe_html(surya_page.ocr_text), unsafe_allow_html=True)
+    with st.expander(f"Edit corrected text — page {surya_page.page_index + 1}", expanded=True):
+        edited = st.text_area(
+            "Corrected text (editable)",
+            value=st.session_state.get(f"edited_text_{i}", post_page.corrected_text),
+            height=200,
+            key=f"edit_{i}",
+        )
+        if edited != post_page.corrected_text:
+            st.session_state[f"edited_text_{i}"] = edited
+        else:
+            st.session_state.pop(f"edited_text_{i}", None)
 
-        if surya_page.tables:
-            with st.expander(f"Tables — page {surya_page.page_index + 1} ({len(surya_page.tables)} detected)"):
-                for j, tbl in enumerate(surya_page.tables):
-                    st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
-                    if tbl.get("was_repaired"):
-                        st.warning(f"Table {j+1}: structure was inconsistent and was automatically repaired. Please verify.")
-                    cells = tbl["cells"]
-                    if cells:
-                        max_row = max(c["row_id"] for c in cells) + 1
-                        max_col = max((c.get("col_id") or 0) for c in cells) + 1
-                        grid = [[""] * max_col for _ in range(max_row)]
-                        for c in cells:
-                            r = c["row_id"]
-                            col = c.get("col_id") or 0
-                            if c.get("text_lines"):
-                                text = " ".join(
-                                    t["text"] for t in c["text_lines"] if t.get("text")
-                                ).strip()
-                                if 0 <= r < max_row and 0 <= col < max_col:
-                                    grid[r][col] = text
-                        st.dataframe(grid)
-
-        with st.expander(f"Post-processing — page {surya_page.page_index + 1}"):
-            if post_page.qwen_used:
-                st.markdown("**⚡ Qwen correction applied**")
-            else:
-                st.markdown("**✓ rule-based only**")
-            if post_page.corrected_text:
-                st.write(post_page.corrected_text)
-            if post_page.correction_diff:
-                st.code(post_page.correction_diff, language="diff")
-
-        with st.expander(f"Edit corrected text — page {surya_page.page_index + 1}"):
-            edited = st.text_area(
-                "Corrected text (editable)",
-                value=st.session_state.get(f"edited_text_{i}", post_page.corrected_text),
-                height=200,
-                key=f"edit_{i}",
-            )
-            if edited != post_page.corrected_text:
-                st.session_state[f"edited_text_{i}"] = edited
-            else:
-                st.session_state.pop(f"edited_text_{i}", None)
-
+    # ==========================================
+    # DOWNLOADS SECTION
+    # ==========================================
+    st.divider()
     st.subheader("Downloads")
-    # Build export JSON, substituting any analyst-edited text
+    
     doc_json = dict(export_result.document_json)
     patched_pages = []
-    for i, page_data in enumerate(doc_json.get("pages", [])):
-        edited_text = st.session_state.get(f"edited_text_{i}")
+    for idx, page_data in enumerate(doc_json.get("pages", [])):
+        edited_text = st.session_state.get(f"edited_text_{idx}")
         if edited_text is not None:
             page_data = dict(page_data)
             page_data["corrected_text"] = edited_text
@@ -440,7 +499,9 @@ else:
         data=json.dumps(doc_json, ensure_ascii=False, indent=2),
         file_name=f"{Path(uploaded.name).stem}_extracted.json",
         mime="application/json",
+        width="stretch"
     )
+    
     skipped_tables = 0
     for table_id, csv_string in export_result.tables_csv:
         if not csv_string.strip().strip("﻿"):
@@ -452,6 +513,7 @@ else:
                 data=csv_string.encode("utf-8-sig"),
                 file_name=f"{table_id}.csv",
                 mime="text/csv",
+                width="stretch"
             )
     if skipped_tables:
         st.caption(

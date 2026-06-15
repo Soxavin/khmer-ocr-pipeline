@@ -509,9 +509,9 @@ if uploaded is not None:
         st.caption(f"Page {i + 1}")
         col1, col2 = st.columns(2)
         with col1:
-            st.image(orig, caption="Original", use_container_width=True)
+            st.image(orig, caption="Original", width="stretch")
         with col2:
-            st.image(proc, caption="Preprocessed", use_container_width=True)
+            st.image(proc, caption="Preprocessed", width="stretch")
 ```
 
 - [ ] **Step 2: Verify full test suite still passes**
