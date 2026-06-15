@@ -112,6 +112,14 @@ with st.sidebar:
              "Useful for loading into Excel or databases. "
              "Does not affect the JSON export.",
     )
+    repair_tables = st.checkbox(
+        "Auto-repair inconsistent table grids",
+        value=False,
+        help="If a detected table has rows with different numbers of cells, "
+             "pad short rows with empty cells so the CSV/JSON grid is rectangular. "
+             "Repaired tables are flagged with 'was_repaired' in the JSON and a "
+             "warning in the UI. Off by default — review the raw grid first.",
+    )
 
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
@@ -134,7 +142,7 @@ else:
     else:
         page_sel_part = "all"
     # tables_only omitted: it gates display only, not pipeline output
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -177,7 +185,8 @@ else:
             f"- **Preprocessing:** {preprocessing_info}\n"
             f"- **Extraction mode:** {extraction_mode}\n"
             f"- **Qwen correction:** {'On' if enable_qwen else 'Off'}\n"
-            f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}"
+            f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}\n"
+            f"- **Table auto-repair:** {'On' if repair_tables else 'Off'}"
         )
 
     run_triggered = st.session_state.get("run_triggered", False)
@@ -274,7 +283,7 @@ else:
 
             st.write("Exporting structured output...")
             try:
-                export_result = export(postprocess_result, convert_numerals=convert_numerals)
+                export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
             except Exception as e:
                 status.update(label="Stage 5 failed", state="error")
                 st.error(f"Stage 5 failed: {str(e)}")

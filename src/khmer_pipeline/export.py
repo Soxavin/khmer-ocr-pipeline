@@ -58,7 +58,7 @@ def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
     return repaired_table, True
 
 
-def export(result: PostprocessResult, convert_numerals: bool = False) -> ExportResult:
+def export(result: PostprocessResult, convert_numerals: bool = False, repair_tables: bool = False) -> ExportResult:
     # Repair tables in place before building the JSON, so was_repaired and
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
@@ -66,9 +66,12 @@ def export(result: PostprocessResult, convert_numerals: bool = False) -> ExportR
     # (This also relies on CorrectedPageResult.tables being the same list
     # object as SuryaPageResult.tables, per postprocess.py's _correct_page,
     # so app.py's was_repaired badge sees the repair too.)
-    for page in result.pages:
-        for t_idx, table in enumerate(page.tables):
-            page.tables[t_idx], _ = _validate_and_repair_table(table)
+    # Repair is opt-in: analysts must explicitly request it, since it
+    # rewrites the detected cell grid.
+    if repair_tables:
+        for page in result.pages:
+            for t_idx, table in enumerate(page.tables):
+                page.tables[t_idx], _ = _validate_and_repair_table(table)
 
     document_json = _build_document_json(result)
     tables_csv: list[tuple[str, str]] = []

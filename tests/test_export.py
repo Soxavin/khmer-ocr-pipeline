@@ -199,7 +199,7 @@ def test_repaired_table_exports_without_error():
         ],
         "image_bbox": [0, 0, 20, 20],
     }
-    result = export(_make_result(pages=[_make_page(0, tables=[table])]))
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]), repair_tables=True)
     table_id, csv_string = result.tables_csv[0]
     rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
     assert len(rows) == 2
@@ -213,3 +213,20 @@ def test_empty_table_not_repaired():
     repaired, was_repaired = _validate_and_repair_table(table)
     assert was_repaired is False
     assert repaired is table
+
+
+def test_table_not_repaired_by_default():
+    table = {
+        "rows": [{"row_id": 0}, {"row_id": 1}],
+        "cols": [{"col_id": 0}, {"col_id": 1}],
+        "cells": [
+            {"row_id": 0, "col_id": 0, "text_lines": [{"text": "a"}], "bbox": [0, 0, 10, 10]},
+            {"row_id": 0, "col_id": 1, "text_lines": [{"text": "b"}], "bbox": [10, 0, 20, 10]},
+            {"row_id": 1, "col_id": 0, "text_lines": [{"text": "c"}], "bbox": [0, 10, 10, 20]},
+        ],
+        "image_bbox": [0, 0, 20, 20],
+    }
+    result = export(_make_result(pages=[_make_page(0, tables=[table])]))
+    assert result.document_json["pages"][0]["tables"][0]["was_repaired"] is False
+    # Unrepaired table still has 3 cells (no padding added)
+    assert len(result.document_json["pages"][0]["tables"][0]["cells"]) == 3

@@ -27,6 +27,7 @@ def run(
     normalise: bool = True,
     skip_qwen: bool = False,
     convert_numerals: bool = False,
+    repair_tables: bool = False,
 ) -> None:
     source_path = Path(source_path)
     output_dir = Path(output_dir)
@@ -51,7 +52,7 @@ def run(
     postprocess_result = postprocess(surya_result, skip_qwen=skip_qwen)
     print(f"  Post-processing complete")
 
-    export_result = export(postprocess_result, convert_numerals=convert_numerals)
+    export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
 
     json_path = output_dir / f"{source_path.stem}_extracted.json"
     json_path.write_text(
@@ -79,6 +80,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-normalise", action="store_false", dest="normalise")
     parser.add_argument("--no-qwen", action="store_true", dest="skip_qwen")
     parser.add_argument("--convert-numerals", action="store_true", dest="convert_numerals")
+    parser.add_argument("--repair-tables", action="store_true", dest="repair_tables")
     args = parser.parse_args()
     run(
         args.input, args.output,
@@ -88,4 +90,5 @@ if __name__ == "__main__":
         normalise=args.normalise,
         skip_qwen=args.skip_qwen,
         convert_numerals=args.convert_numerals,
+        repair_tables=args.repair_tables,
     )
