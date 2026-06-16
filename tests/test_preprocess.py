@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 from khmer_pipeline.models import IngestResult, PreprocessResult
-from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds
+from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds, _crop_margins, _cap_resolution
 
 
 def _make_ingest_result(n_pages: int = 1, h: int = 100, w: int = 100) -> IngestResult:
@@ -144,12 +144,10 @@ def test_preprocess_deskew_flag_controls_step():
         dpi=200,
         page_count=1,
     )
-    original = ingest_r.page_images[0].copy()
-    r = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=True, normalise_table_backgrounds=False))
-    assert not np.array_equal(r.page_images[0], original)
-
-    r2 = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
-    assert np.array_equal(r2.page_images[0], original)
+    r_deskewed = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=True, normalise_table_backgrounds=False))
+    r_raw = preprocess(ingest_r, PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
+    # The two outputs share the same crop but differ in rotation correction
+    assert not np.array_equal(r_deskewed.page_images[0], r_raw.page_images[0])
 
 
 def _make_colored_bg_image() -> IngestResult:
@@ -192,9 +190,54 @@ def test_background_normalise_preserves_dark_text():
 
 def test_background_normalise_disabled_is_passthrough():
     ingest_r = _make_colored_bg_image()
-    original = ingest_r.page_images[0].copy()
     r = preprocess(ingest_r, PreprocessConfig(
         remove_stamps=False, sharpen=False, normalise=False, deskew=False,
         normalise_table_backgrounds=False,
     ))
-    assert np.array_equal(r.page_images[0], original)
+    # Light-blue region should NOT be desaturated when the flag is off
+    bg_pixel = r.page_images[0][25, 25].astype(int)
+    assert max(bg_pixel) - min(bg_pixel) >= 15, f"expected colored region preserved, got {bg_pixel}"
+
+
+# --- _crop_margins ---
+
+def test_crop_margins_trims_white_border():
+    img = np.full((100, 100, 3), 255, dtype=np.uint8)
+    img[45:55, 45:55] = 0  # small black square at center
+    result = _crop_margins(img)
+    assert result.shape[0] < 100 and result.shape[1] < 100
+
+def test_crop_margins_blank_image_returns_original():
+    img = np.full((80, 80, 3), 255, dtype=np.uint8)
+    result = _crop_margins(img)
+    assert result.shape == img.shape
+
+def test_crop_margins_preserves_dtype():
+    img = np.zeros((60, 60, 3), dtype=np.uint8)
+    img[10:50, 10:50] = 200
+    result = _crop_margins(img)
+    assert result.dtype == np.uint8
+
+
+# --- _cap_resolution ---
+
+def test_cap_resolution_downscales_large_image():
+    img = np.zeros((3000, 2000, 3), dtype=np.uint8)
+    result = _cap_resolution(img, max_dim=2048)
+    assert max(result.shape[:2]) == 2048
+
+def test_cap_resolution_does_not_upscale_small_image():
+    img = np.zeros((800, 600, 3), dtype=np.uint8)
+    result = _cap_resolution(img, max_dim=2048)
+    assert result.shape == img.shape
+
+def test_cap_resolution_preserves_aspect_ratio():
+    img = np.zeros((3000, 1500, 3), dtype=np.uint8)
+    result = _cap_resolution(img, max_dim=2048)
+    h, w = result.shape[:2]
+    assert abs(w / h - 0.5) < 0.01
+
+def test_cap_resolution_preserves_dtype():
+    img = np.zeros((4000, 3000, 3), dtype=np.uint8)
+    result = _cap_resolution(img, max_dim=2048)
+    assert result.dtype == np.uint8

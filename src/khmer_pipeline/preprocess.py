@@ -28,8 +28,39 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
     )
 
 
+_CROP_MARGINS_BORDER_THRESH = 240   # pixels above this value are treated as empty border
+_CROP_MARGINS_PAD = 20              # px of content margin kept after crop
+_CAP_RESOLUTION_MAX_DIM = 2048      # longest edge cap before downscaling
+
+
+def _crop_margins(bgr: np.ndarray, border_thresh: int = _CROP_MARGINS_BORDER_THRESH) -> np.ndarray:
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, border_thresh, 255, cv2.THRESH_BINARY_INV)
+    coords = cv2.findNonZero(thresh)
+    if coords is None:
+        return bgr
+    x, y, w, h = cv2.boundingRect(coords)
+    h_img, w_img = gray.shape
+    x1 = max(0, x - _CROP_MARGINS_PAD)
+    y1 = max(0, y - _CROP_MARGINS_PAD)
+    x2 = min(w_img, x + w + _CROP_MARGINS_PAD)
+    y2 = min(h_img, y + h + _CROP_MARGINS_PAD)
+    return bgr[y1:y2, x1:x2]
+
+
+def _cap_resolution(bgr: np.ndarray, max_dim: int = _CAP_RESOLUTION_MAX_DIM) -> np.ndarray:
+    h, w = bgr.shape[:2]
+    if max(h, w) <= max_dim:
+        return bgr
+    scale = max_dim / max(h, w)
+    new_w, new_h = int(w * scale), int(h * scale)
+    return cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    bgr = _crop_margins(bgr)
+    bgr = _cap_resolution(bgr)
     if cfg.deskew:
         bgr = _deskew(bgr)
     if cfg.remove_stamps:
@@ -40,7 +71,8 @@ def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
         bgr = _sharpen(bgr)
     if cfg.normalise:
         bgr = _normalise(bgr)
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return np.ascontiguousarray(rgb)
 
 
 def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
