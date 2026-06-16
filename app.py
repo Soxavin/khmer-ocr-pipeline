@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import json
 import time
 import bleach
@@ -294,10 +295,13 @@ else:
                     st.write("Loading Surya models — first run takes about a minute...")
                 preload_models()
 
+                ocr_progress = st.progress(0, text="Starting OCR...")
+
                 def _on_page(idx: int, total: int) -> None:
-                    st.write(f"Page {idx + 1} / {total}: running OCR...")
+                    ocr_progress.progress((idx + 1) / total, text=f"OCR: Page {idx + 1} of {total}")
 
                 surya_result = ACTIVE_OCR_ENGINE(preprocess_result, on_page=_on_page)
+                ocr_progress.progress(1.0, text="OCR Complete!")
                 if surya_result.warnings:
                     st.warning(
                         f"Stage 3: {len(surya_result.warnings)} issue(s) — "
@@ -522,9 +526,31 @@ else:
         width="stretch"
     )
 
-    all_text = "\n\n---\n\n".join(
-        p.get("corrected_text", "") for p in patched_pages if p.get("corrected_text")
+    _stage_times = st.session_state.get("stage_times", {})
+    _timing_lines = "\n".join(
+        f"  {name:<28}: {secs:.1f}s" for name, secs in _stage_times.items()
     )
+    _divider = "=" * 72
+    _txt_header = (
+        f"{_divider}\n"
+        f"KHMER DOCUMENT EXTRACTION REPORT\n"
+        f"{_divider}\n"
+        f"Source        : {uploaded.name}\n"
+        f"Extracted     : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Pages         : {filtered_ingest.page_count}\n"
+        f"DPI           : {dpi}\n"
+        f"Preprocessing : {preprocessing_info}\n"
+        f"Mode          : {extraction_mode}\n"
+        f"Qwen          : {'Enabled' if enable_qwen else 'Disabled'} (threshold: {anomaly_threshold:.2f})\n"
+        + (f"{'-' * 72}\n{_timing_lines}\n" if _timing_lines else "")
+        + _divider
+    )
+    _page_sections = [
+        f"--- Page {idx + 1} of {len(patched_pages)} ---\n\n{p.get('corrected_text', '')}"
+        for idx, p in enumerate(patched_pages)
+        if p.get("corrected_text")
+    ]
+    all_text = _txt_header + "\n\n" + "\n\n".join(_page_sections)
     st.download_button(
         label="⬇ Download extracted text (.txt)",
         data=all_text.encode("utf-8"),
