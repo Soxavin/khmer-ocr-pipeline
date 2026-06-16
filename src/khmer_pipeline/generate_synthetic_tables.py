@@ -12,7 +12,7 @@ except ImportError:
 
 _FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
 _DEFAULT_COUNT = 3
-_VIEWPORT_WIDTH = 900   # px — wide enough for 4-col tables without wrapping
+_VIEWPORT_WIDTH = 1100  # px — table width + 120px horizontal padding from .page margins
 
 _TABLE_TEMPLATES: list[dict] = [
     {
@@ -106,9 +106,15 @@ def _build_html(font_family: str, title: str, data: list[list[str]]) -> str:
   tbody tr:nth-child(odd) {{
     background-color: #ffffff;
   }}
+  .page {{
+    padding: 60px;
+    background: white;
+    display: inline-block;
+  }}
 </style>
 </head>
 <body>
+<div class="page">
 <table>
   <thead>
     <tr><th colspan="{ncols}">{title}</th></tr>
@@ -117,6 +123,7 @@ def _build_html(font_family: str, title: str, data: list[list[str]]) -> str:
   <tbody>
 {body_rows}  </tbody>
 </table>
+</div>
 </body>
 </html>"""
 
@@ -144,7 +151,7 @@ def generate_synthetic_table(
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": _VIEWPORT_WIDTH, "height": 800})
         page.set_content(html, wait_until="networkidle")  # ensures Google Fonts load
-        page.locator("table").screenshot(path=str(img_path))
+        page.locator(".page").screenshot(path=str(img_path))
         browser.close()
 
     # Merged title row: value in col-0, empty strings for remaining columns
