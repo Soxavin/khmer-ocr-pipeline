@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import time
 import bleach
 import fitz
 import numpy as np
@@ -170,6 +171,7 @@ else:
         st.session_state["last_uploaded_name"] = uploaded.name
         st.session_state.pop("last_key", None)
         st.session_state.pop("current_page_idx", None)  # NEW: Reset pagination index
+        st.session_state.pop("stage_times", None)
         _clear_edit_state()
 
     file_size_kb = round(len(uploaded.getvalue()) / 1024, 1)
@@ -227,8 +229,10 @@ else:
         _clear_edit_state()
 
     if run_clicked and last_key != settings_key:
+        stage_times: dict[str, float] = {}
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Converting pages to images...")
+            _t0 = time.perf_counter()
             try:
                 uploaded.seek(0)
                 ingest_result = ingest(uploaded.read(), uploaded.name, dpi=dpi)
@@ -237,6 +241,7 @@ else:
                 st.error(f"Stage 1 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
+            stage_times["Stage 1 — Ingest"] = time.perf_counter() - _t0
 
             total_pages = ingest_result.page_count
             if page_selection == "Single page":
@@ -270,6 +275,7 @@ else:
             clear_device_cache()  # NEW: Free memory after ingest
 
             st.write("Cleaning pages...")
+            _t0 = time.perf_counter()
             try:
                 config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
                 preprocess_result = preprocess(filtered_ingest, config)
@@ -280,7 +286,9 @@ else:
                 st.error(f"Stage 2 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
+            stage_times["Stage 2 — Preprocess"] = time.perf_counter() - _t0
 
+            _t0 = time.perf_counter()
             try:
                 if not models_loaded():
                     st.write("Loading Surya models — first run takes about a minute...")
@@ -302,10 +310,12 @@ else:
                 st.error(f"Stage 3 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
+            stage_times["Stage 3 — OCR"] = time.perf_counter() - _t0
 
             st.write("Running post-processing...")
             if enable_qwen and not qwen_loaded():
                 st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
+            _t0 = time.perf_counter()
             try:
                 postprocess_result = ACTIVE_CORRECTION_ENGINE(
                     surya_result,
@@ -319,8 +329,10 @@ else:
                 st.error(f"Stage 4 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
+            stage_times["Stage 4 — Post-process"] = time.perf_counter() - _t0
 
             st.write("Exporting structured output...")
+            _t0 = time.perf_counter()
             try:
                 export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
                 st.session_state["export_result"] = export_result
@@ -330,7 +342,9 @@ else:
                 st.error(f"Stage 5 failed: {str(e)}")
                 st.button("Retry", on_click=lambda: st.session_state.clear())
                 st.stop()
+            stage_times["Stage 5 — Export"] = time.perf_counter() - _t0
 
+            st.session_state["stage_times"] = stage_times
             st.session_state["last_key"] = settings_key
 
             status.update(
@@ -349,6 +363,11 @@ else:
     export_result = st.session_state["export_result"]
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
+    if "stage_times" in st.session_state:
+        cols = st.columns(len(st.session_state["stage_times"]))
+        for col, (name, secs) in zip(cols, st.session_state["stage_times"].items()):
+            col.metric(name, f"{secs:.1f}s")
+
     show_layout = st.checkbox("Show layout overlay", value=True)
     overlay_mode = st.radio(
         "Layout overlay mode",
@@ -502,7 +521,18 @@ else:
         mime="application/json",
         width="stretch"
     )
-    
+
+    all_text = "\n\n---\n\n".join(
+        p.get("corrected_text", "") for p in patched_pages if p.get("corrected_text")
+    )
+    st.download_button(
+        label="⬇ Download extracted text (.txt)",
+        data=all_text.encode("utf-8"),
+        file_name=f"{Path(uploaded.name).stem}_extracted.txt",
+        mime="text/plain",
+        width="stretch",
+    )
+
     skipped_tables = 0
     for table_id, csv_string in export_result.tables_csv:
         if not csv_string.strip().strip("﻿"):
