@@ -1,8 +1,8 @@
 from __future__ import annotations
 import difflib
+import json
 import warnings
 import unicodedata
-from .memory import clear_device_cache
 
 try:
     from mlx_lm import generate
@@ -11,18 +11,21 @@ except ImportError:
 
 from .models import SuryaResult, SuryaPageResult, PostprocessResult, CorrectedPageResult
 from .model_config import ANOMALY_THRESHOLD, STAGE4_MODEL_PATH
+from .memory import clear_device_cache
 
 # ---------------------------------------------------------------------------
 # Rule table — deliberately empty. Add targeted pairs only after review.
 # ---------------------------------------------------------------------------
 RULE_BASED_CORRECTIONS: dict[str, str] = {}
 
+_BATCH_MIN_TOKENS = 512
+_BATCH_TOKENS_PER_STRING = 100
+
 # ---------------------------------------------------------------------------
 # Qwen2.5-VL module-level singletons (lazy-loaded on first use)
 # ---------------------------------------------------------------------------
 _qwen_model = None
 _qwen_tokenizer = None
-
 
 def _get_qwen():
     global _qwen_model, _qwen_tokenizer
@@ -31,26 +34,23 @@ def _get_qwen():
             from mlx_lm import load
             _qwen_model, _qwen_tokenizer = load(STAGE4_MODEL_PATH)
         except Exception as e:
-            # If it fails to load, we warn and return None so we don't keep trying
+            # Crash-proofing: If it fails to load, warn and return None 
+            # so we don't keep trying and crashing the pipeline.
             warnings.warn(f"Failed to load Qwen model: {e}. Disabling Qwen fallback for this run.")
             return None, None
     return _qwen_model, _qwen_tokenizer
 
-
 def qwen_loaded() -> bool:
     return _qwen_model is not None
-
 
 # ---------------------------------------------------------------------------
 # Correction layers
 # ---------------------------------------------------------------------------
-
 def _apply_rules(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     for wrong, correct in RULE_BASED_CORRECTIONS.items():
         text = text.replace(wrong, correct)
     return text
-
 
 def _is_foreign_script(ch: str) -> bool:
     """Returns True if character belongs to a script that should not appear
@@ -66,7 +66,6 @@ def _is_foreign_script(ch: str) -> bool:
         0x3040 <= cp <= 0x30FF     # Hiragana/Katakana
     )
 
-
 def _anomaly_score(text: str) -> float:
     """Returns a score from 0.0 (clean) to 1.0 (highly anomalous).
     Score is the proportion of characters from wrong scripts.
@@ -77,72 +76,103 @@ def _anomaly_score(text: str) -> float:
     foreign_count = sum(1 for ch in text if _is_foreign_script(ch))
     return foreign_count / total
 
-
 def _detect_errors(text: str) -> bool:
     """Thin wrapper kept for backward compatibility with existing tests."""
     return _anomaly_score(text) >= ANOMALY_THRESHOLD
 
-
-def _qwen_correct(text: str) -> str:
+# ---------------------------------------------------------------------------
+# BATCHED VLM CORRECTION (Speed Optimization)
+# ---------------------------------------------------------------------------
+def _qwen_correct_batch(texts: list[str]) -> list[str]:
+    # Single prompt for all anomalous blocks on a page; falls back to originals on parse failure.
+    if not texts:
+        return []
+        
     prompt = (
-        "You are correcting Khmer OCR errors in Khmer financial document text.\n"
-        "The document is a daily market price table from Cambodia.\n"
+        "You are correcting Khmer OCR errors in a list of strings from a Cambodian financial document.\n"
         "Fix misread characters, wrong scripts, and missing diacritics.\n"
-        "Return only the corrected Khmer text with no explanation.\n\n"
-        "Example 1:\n"
-        "Wrong: \"មើន្គារំ ជពរជស \"\n"
-        "Correct: \"ធនាគារ ARDB \"\n\n"
-        "Example 2:\n"
-        "Wrong: \"ពា សាច់ជ្រូករស់ \"\n"
-        "Correct: \"៣ សាច់ជ្រូករស់ \"\n\n"
-        "Example 3:\n"
-        "Wrong: \"មាន្រ                                                         \"\n"
-        "Correct: \"មាន់ \"\n\n"
-        f"Now correct this text:\n"
-        f"Wrong: \"{text}\"\n"
-        "Correct: "
+        "Return ONLY a valid JSON array of strings containing the corrected text. "
+        "Do not include any explanations, markdown formatting, or code blocks.\n\n"
+        f"Input list: {json.dumps(texts, ensure_ascii=False)}\n\n"
+        "Output JSON array:"
     )
+    
     if generate is None:
         warnings.warn("mlx_lm not installed; Qwen correction unavailable")
-        return text
+        return texts
         
     model, tokenizer = _get_qwen()
     if model is None:
-        return text  # Model failed to load previously, skip gracefully
+        return texts  # Model failed to load previously, skip gracefully
         
     try:
-        return generate(model, tokenizer, prompt=prompt, max_tokens=512, verbose=False)
+        max_tokens = max(_BATCH_MIN_TOKENS, len(texts) * _BATCH_TOKENS_PER_STRING)
+        raw_output = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+        
+        # Clean up common LLM markdown quirks
+        cleaned_output = raw_output.strip()
+        if cleaned_output.startswith("```json"):
+            cleaned_output = cleaned_output[7:]
+        if cleaned_output.startswith("```"):
+            cleaned_output = cleaned_output[3:]
+        if cleaned_output.endswith("```"):
+            cleaned_output = cleaned_output[:-3]
+        cleaned_output = cleaned_output.strip()
+        
+        parsed = json.loads(cleaned_output)
+        
+        # Validate structure: must be a list of strings of the exact same length
+        if isinstance(parsed, list) and len(parsed) == len(texts) and all(isinstance(x, str) for x in parsed):
+            return parsed
+        else:
+            warnings.warn(f"Qwen batch correction returned invalid structure. Falling back to original texts.")
+            return texts
+            
+    except json.JSONDecodeError:
+        warnings.warn("Qwen batch correction failed to parse JSON. Falling back to original texts.")
+        return texts
     except Exception as e:
-        warnings.warn(f"Qwen correction failed: {e}")
-        return text
-
+        warnings.warn(f"Qwen batch correction failed: {e}")
+        return texts
 
 def _build_diff(raw: str, corrected: str) -> str:
     diff = difflib.ndiff(raw.splitlines(), corrected.splitlines())
     return "\n".join(diff)
 
-
+# ---------------------------------------------------------------------------
+# Page & Pipeline Orchestration
+# ---------------------------------------------------------------------------
 def _correct_page(
     page: SuryaPageResult,
     skip_qwen: bool = False,
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> CorrectedPageResult:
     raw = page.ocr_text  # always copied unchanged into raw_ocr_text
-
-    # Process each text block individually
+    
     corrected_block_texts = []
     qwen_used = False
+    indices_needing_qwen = []
+    
+    # 1. FAST PASS: Apply rules and identify anomalies
     for block in page.text_blocks:
         block_text = _apply_rules(block.get("text", ""))
-        if not skip_qwen and _anomaly_score(block_text) >= anomaly_threshold:
-            corrected = _qwen_correct(block_text)
-            if corrected != block_text:
-                block_text = corrected
-                qwen_used = True
         corrected_block_texts.append(block_text)
+        
+        if not skip_qwen and _anomaly_score(block_text) >= anomaly_threshold:
+            indices_needing_qwen.append(len(corrected_block_texts) - 1)
+            
+    # 2. BATCHED VLM PASS: Call the heavy model exactly ONCE per page (if needed)
+    if indices_needing_qwen:
+        batch_texts = [corrected_block_texts[i] for i in indices_needing_qwen]
+        batch_corrected = _qwen_correct_batch(batch_texts)
+        
+        # Map the corrected texts back to their original indices
+        for idx, corrected_text in zip(indices_needing_qwen, batch_corrected):
+            if corrected_text != corrected_block_texts[idx]:
+                corrected_block_texts[idx] = corrected_text
+                qwen_used = True
 
-    # Rebuild corrected_text from corrected blocks
-    # If page has no text blocks (table-only page), fall back to rule-corrected ocr_text
+    # 3. Rebuild corrected_text from corrected blocks
     if corrected_block_texts:
         corrected_text = "\n\n".join(t for t in corrected_block_texts if t)
     else:
@@ -158,7 +188,6 @@ def _correct_page(
         correction_diff=diff,
         qwen_used=qwen_used,
     )
-
 
 def postprocess(
     result: SuryaResult,

@@ -113,7 +113,7 @@ def test_qwen_used_true_when_errors():
     # A text block with Sinhala density >= ANOMALY_THRESHOLD forces the Qwen path
     sinhala_text = "text " + _SINHALA_KA * 3 + " more"
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value="corrected") as _:
+         patch("khmer_pipeline.postprocess.generate", return_value='["corrected"]') as _:
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(_make_surya_result(
             ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
@@ -133,7 +133,7 @@ def test_qwen_failure_falls_back_gracefully():
                 ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
             ))
         assert len(w) == 1
-        assert "Qwen correction failed" in str(w[0].message)
+        assert "Qwen batch correction failed" in str(w[0].message)
     # corrected_text equals rule-applied block text (Qwen failed, returned input unchanged)
     assert r.pages[0].corrected_text == pp._apply_rules(sinhala_text)
     # Qwen was attempted but failed and changed nothing, so it was not "applied"
@@ -181,7 +181,7 @@ def test_multi_page_each_page_corrected_independently():
         pages=[_make_page(0, clean_text), _make_page(1, dirty_text)],
     )
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value="fixed") as mock_gen:
+         patch("khmer_pipeline.postprocess.generate", return_value='["fixed"]') as mock_gen:
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(multi)
 
@@ -198,7 +198,7 @@ def test_anomaly_threshold_can_be_lowered_to_trigger_qwen():
     assert 0.0 < score < pp.ANOMALY_THRESHOLD
 
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value="corrected") as mock_gen:
+         patch("khmer_pipeline.postprocess.generate", return_value='["corrected"]') as mock_gen:
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(
             _make_surya_result(text_blocks=[{"text": text, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
