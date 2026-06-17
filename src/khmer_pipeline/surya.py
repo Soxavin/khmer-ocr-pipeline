@@ -1,5 +1,6 @@
 from __future__ import annotations
 import html as _html_mod
+import time
 import warnings
 from html.parser import HTMLParser
 from typing import Any, Callable, Optional
@@ -7,10 +8,15 @@ from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
 from .model_config import CONFIDENCE_LOW
 
+_BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)
+
+
+def _log(msg: str) -> None:
+    print(f"[Surya] {msg}", flush=True)
+
 _manager = None
 _layout_pred = None
 _rec_pred = None
-_table_pred = None
 
 
 def models_loaded() -> bool:
@@ -22,24 +28,25 @@ def preload_models() -> None:
 
 
 def _get_predictors():
-    global _manager, _layout_pred, _rec_pred, _table_pred
+    global _manager, _layout_pred, _rec_pred
     if _manager is None:
+        _log("Initializing SuryaInferenceManager...")
+        t0 = time.perf_counter()
         from surya.inference import SuryaInferenceManager
         from surya.layout import LayoutPredictor
         from surya.recognition import RecognitionPredictor
-        from surya.table_rec import TableRecPredictor
         _manager = SuryaInferenceManager()
         _layout_pred = LayoutPredictor(manager=_manager)
         _rec_pred = RecognitionPredictor(manager=_manager)
-        _table_pred = TableRecPredictor(manager=_manager)
-    return _layout_pred, _rec_pred, _table_pred
+        _log(f"Manager ready in {time.perf_counter()-t0:.1f}s")
+    return _layout_pred, _rec_pred
 
 
 def run_surya(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
 ) -> SuryaResult:
-    layout_pred, rec_pred, table_pred = _get_predictors()
+    layout_pred, rec_pred = _get_predictors()
     pil_images = [Image.fromarray(img) for img in result.page_images]
     total = len(pil_images)
     pages = []
@@ -48,7 +55,7 @@ def run_surya(
         for idx, pil_img in enumerate(pil_images):
             if on_page is not None:
                 on_page(idx, total)
-            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, table_pred))
+            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred))
         collected_warnings = [str(w.message) for w in caught]
     return SuryaResult(source_name=result.source_name, pages=pages, warnings=collected_warnings)
 
@@ -73,24 +80,123 @@ def _html_to_text(html_str: str) -> str:
     return stripper.get_text()
 
 
+class _TableHTMLParser(HTMLParser):
+    # Parse <table><tr><td/th> HTML into a row/col grid.
+
+    def __init__(self):
+        super().__init__()
+        self._rows: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+        self._current_colspan = 1
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "tr":
+            self._current_row = []
+        elif tag in ("td", "th"):
+            self._current_cell = []
+            self._current_colspan = 1
+            for name, value in attrs:
+                if name == "colspan" and value and value.isdigit():
+                    self._current_colspan = int(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._current_cell is not None:
+            text = " ".join(self._current_cell).strip()
+            if self._current_row is not None:
+                self._current_row.append(text)
+                # Pad spanned columns so col_id indices stay aligned.
+                for _ in range(self._current_colspan - 1):
+                    self._current_row.append("")
+            self._current_cell = None
+        elif tag == "tr" and self._current_row is not None:
+            if self._current_row:
+                self._rows.append(self._current_row)
+            self._current_row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+    def grid(self) -> dict[tuple[int, int], str]:
+        return {
+            (r, c): text
+            for r, row in enumerate(self._rows)
+            for c, text in enumerate(row)
+        }
+
+
+def _parse_html_table(html: str) -> dict[tuple[int, int], str]:
+    parser = _TableHTMLParser()
+    parser.feed(_html_mod.unescape(html))
+    return parser.grid()
+
+
+def _find_matching_html(layout_bbox: list[float], table_html_map: dict[tuple, str]) -> str:
+    # Layout and recognition are separate passes; bboxes for the same region differ
+    # slightly. Match by closest bbox within tolerance rather than exact key.
+    if not table_html_map:
+        return ""
+    lx0, ly0, lx1, ly1 = layout_bbox
+    best_html = ""
+    min_diff = float("inf")
+    for key, html in table_html_map.items():
+        kx0, ky0, kx1, ky1 = key
+        diff = abs(lx0 - kx0) + abs(ly0 - ky0) + abs(lx1 - kx1) + abs(ly1 - ky1)
+        if diff < min_diff:
+            min_diff = diff
+            best_html = html
+    return best_html if min_diff < _BBOX_MATCH_TOLERANCE else ""
+
+
+def _build_table_from_grid(grid: dict[tuple[int, int], str], html: str,
+                           region_bbox: list[float]) -> dict[str, Any]:
+    # Single source of truth: the VLM's HTML grid. Text is already in its
+    # correct cell, so no index-join against a second (geometric) grid.
+    if not grid:
+        flat = _html_to_text(html)
+        cell = {"row_id": 0, "col_id": 0, "cell_id": 0, "bbox": [], "polygon": [],
+                "text_lines": [{"text": flat, "bbox": []}] if flat else []}
+        return {"rows": [{"row_id": 0}], "cols": [{"col_id": 0}],
+                "cells": [cell], "image_bbox": list(region_bbox)}
+    n_rows = max(r for r, _ in grid) + 1
+    n_cols = max(c for _, c in grid) + 1
+    cells = []
+    for cid, ((r, c), text) in enumerate(sorted(grid.items())):
+        cells.append({"row_id": r, "col_id": c, "cell_id": cid,
+                      "bbox": [], "polygon": [],
+                      "text_lines": [{"text": text, "bbox": []}] if text else []})
+    return {"rows": [{"row_id": i} for i in range(n_rows)],
+            "cols": [{"col_id": j} for j in range(n_cols)],
+            "cells": cells, "image_bbox": list(region_bbox)}
+
+
 def _process_page(
     page_index: int,
     pil_img: Image.Image,
     layout_pred,
     rec_pred,
-    table_pred,
 ) -> SuryaPageResult:
     try:
+        _log(f"Page {page_index}: layout detection...")
+        t0 = time.perf_counter()
         layout_result = layout_pred([pil_img])[0]
+        _log(f"Page {page_index}: layout done in {time.perf_counter()-t0:.1f}s → {len(layout_result.bboxes)} regions")
 
         if layout_result.error:
             warnings.warn(f"Layout failed on page {page_index}; returning empty result.")
             return SuryaPageResult(page_index=page_index, text_blocks=[], tables=[], ocr_text="")
 
-        # OCR all text blocks in one batched call; Surya 0.20 handles Table/skip labels internally
         text_blocks: list[dict] = []
+        # Maps rounded table bbox → VLM-generated HTML (contains <table><tr><td> structure).
+        # Populated from OCR blocks labelled "Table"; used later to fill cell text.
+        table_html_map: dict[tuple, str] = {}
+
         try:
+            _log(f"Page {page_index}: OCR recognition...")
+            t0 = time.perf_counter()
             page_ocr = rec_pred([pil_img], layout_results=[layout_result])[0]
+            _log(f"Page {page_index}: OCR done in {time.perf_counter()-t0:.1f}s → {len(page_ocr.blocks)} blocks")
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index}: {e}")
             page_ocr = None
@@ -99,6 +205,15 @@ def _process_page(
             for block in page_ocr.blocks:
                 if block.skipped or block.error:
                     continue
+
+                if block.label == "Table":
+                    # Store the VLM's HTML output keyed by rounded bbox.
+                    # Do NOT include in text_blocks — table content belongs in cells.
+                    if block.html:
+                        key = tuple(round(v) for v in block.bbox)
+                        table_html_map[key] = block.html
+                    continue
+
                 text = _html_to_text(block.html)
                 if not text:
                     continue
@@ -112,49 +227,27 @@ def _process_page(
                     "reading_order": block.reading_order,
                 })
 
-        # Blocks from Surya 0.20 are pre-ordered by layout reading order;
-        # sort again defensively in case of fallback-path interleaving
         text_blocks.sort(key=lambda b: b.get("reading_order", 0))
         ocr_text = "\n\n".join(b["text"] for b in text_blocks if b.get("text"))
 
-        # Table recognition
         table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
         tables: list[dict] = []
         for b in table_bboxes:
-            crop = pil_img.crop(tuple(int(v) for v in b.bbox))
-            try:
-                t = table_pred([crop])[0]
-            except Exception as e:
-                warnings.warn(f"Table recognition failed on page {page_index}: {e}")
-                continue
-
-            tbl = _serialize_table(t)
-
-            # Per-cell OCR: batch all cell crops in a single manager call
-            if t.cells:
-                cell_crops = [crop.crop(tuple(int(v) for v in c.bbox)) for c in t.cells]
-                try:
-                    cell_ocrs = rec_pred(cell_crops)
-                    for cell_dict, cell_ocr in zip(tbl["cells"], cell_ocrs):
-                        combined = " ".join(
-                            _html_to_text(blk.html)
-                            for blk in cell_ocr.blocks
-                            if not blk.skipped and not blk.error and blk.html
-                        ).strip()
-                        cell_dict["text_lines"] = (
-                            [{"text": combined, "bbox": cell_dict["bbox"]}] if combined else []
-                        )
-                except Exception as e:
-                    warnings.warn(f"Cell OCR failed: {e}")
-
-            cells_before = tbl["cells"]
-            tbl["cells"] = _filter_phantom_cells(cells_before, tbl["image_bbox"])
-            removed = len(cells_before) - len(tbl["cells"])
-            if removed:
+            table_html = _find_matching_html(b.bbox, table_html_map)
+            if not table_html:
                 warnings.warn(
-                    f"Page {page_index}: removed {removed} phantom cell(s) "
-                    f"(outside table bounds) from table {len(tables)}."
+                    f"Page {page_index}: no OCR HTML for table {len(tables)}; cells will be empty."
                 )
+                tbl = {"rows": [], "cols": [], "cells": [], "image_bbox": list(b.bbox)}
+            else:
+                grid = _parse_html_table(table_html)
+                if not grid:
+                    warnings.warn(
+                        f"Page {page_index}: VLM produced no <table> structure for table "
+                        f"{len(tables)}; using flat text in first cell."
+                    )
+                tbl = _build_table_from_grid(grid, table_html, b.bbox)
+                _log(f"Page {page_index}: built table with {len(tbl['cells'])} cells from HTML")
             tbl["bbox"] = list(b.bbox)
             tables.append(tbl)
 
@@ -182,26 +275,3 @@ def _process_page(
             tables=[],
             ocr_text="",
         )
-
-
-def _serialize_table(t) -> dict[str, Any]:
-    cells = []
-    for c in t.cells:
-        cell_dict = c.model_dump()
-        cell_dict["text_lines"] = []  # populated by per-cell OCR step
-        cells.append(cell_dict)
-    return {
-        "rows": [r.model_dump() for r in t.rows],
-        "cols": [col.model_dump() for col in t.cols],
-        "cells": cells,
-        "image_bbox": list(t.image_bbox),
-    }
-
-
-def _filter_phantom_cells(cells: list[dict], parent_bbox: list[float]) -> list[dict]:
-    px0, py0, px1, py1 = parent_bbox
-    return [
-        c for c in cells
-        if not (c["bbox"][2] <= px0 or c["bbox"][0] >= px1 or
-                c["bbox"][3] <= py0 or c["bbox"][1] >= py1)
-    ]
