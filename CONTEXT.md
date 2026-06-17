@@ -9,7 +9,7 @@ interactive use, and a CLI batch processor
 - Python >=3.11, managed with `uv` (pyproject.toml + uv.lock)
 - OpenCV (`opencv-python-headless`) — image preprocessing
 - PyMuPDF (`fitz`) — PDF ingestion
-- `surya-ocr` (pinned `>=0.17.1,<0.18`) — layout detection, OCR, table recognition
+- `surya-ocr` (pinned `>=0.20.0,<0.21`) — layout detection, OCR, table recognition; on Apple Silicon uses the built-in llamacpp Metal backend (`SURYA_INFERENCE_BACKEND=llamacpp`)
 - `mlx-lm` + `transformers` (pinned, see pyproject.toml) — Qwen2.5-7B-Instruct-4bit text correction
 - Streamlit >=1.35 — UI
 - pytest — tests
@@ -64,8 +64,9 @@ need to swap models.
 ## Memory management (`memory.py`)
 
 `src/khmer_pipeline/memory.py` provides `clear_device_cache()` —
-`gc.collect()` + `torch.mps.empty_cache()` (PyTorch/Surya) +
-`mx.clear_cache()` (MLX/Qwen), each best-effort/wrapped in try/except.
+`gc.collect()` + `mx.clear_cache()` (MLX/Qwen), each best-effort/wrapped
+in try/except. Surya 0.20+ delegates to a C++ `llama-server` process that
+manages its own VRAM, so `torch.mps.empty_cache()` is no longer called.
 Called after every stage in both `pipeline.py` and `app.py`, and also
 after any page in `postprocess()` where `qwen_used` is true. Exists to
 avoid OOM on 24GB unified-memory Macs during multi-stage ML inference —
@@ -101,6 +102,19 @@ Same 5 stages, writes `<name>_extracted.json` + per-table CSVs to
 `output/`, prints `WARNING:`-prefixed lines for anything in
 `SuryaResult.warnings`. Calls `clear_device_cache()` after preprocess,
 Surya, and postprocess (same as `app.py`).
+
+## Benchmark runner (`run_benchmark.py`)
+
+```bash
+OPENAI_API_KEY=... uv run python -m khmer_pipeline.run_benchmark [--data-dir ./synthetic_data] [--output-csv ./benchmark_results.csv]
+```
+Scans `--data-dir` for `*_ground_truth.json` files, runs the full pipeline
+on each paired `.png` (with `remove_stamps=False` — synthetic images have
+blue header stamps that stamp removal would incorrectly erase), calls
+`evaluate_ocr_quality()` (GPT-4o LLM judge), and writes a CSV with columns:
+`Image_File, Font, Template, Overall_Score, Estimated_CER,
+Hallucinations_Count, Omissions_Count, Reasoning`. Calls
+`clear_device_cache()` after each image. Requires `OPENAI_API_KEY`.
 
 ## Where to look for X
 
