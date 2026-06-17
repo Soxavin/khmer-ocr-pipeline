@@ -11,12 +11,19 @@ from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
-from khmer_pipeline.surya import models_loaded, preload_models
+from khmer_pipeline.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
 from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
+
+
+@st.cache_resource(show_spinner="Loading Surya OCR models — first run takes ~30s...")
+def _preload_surya() -> bool:
+    preload_models()
+    return True
+
 
 _SAFE_TAGS = [
     "p", "br", "b", "i", "em", "strong", "span",
@@ -76,6 +83,7 @@ def _draw_layout_confidence(img_array: np.ndarray, blocks: list[dict]) -> np.nda
 
 
 st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
+_preload_surya()
 st.title("Khmer Document Extraction Pipeline")
 st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
 
@@ -291,10 +299,6 @@ else:
 
             _t0 = time.perf_counter()
             try:
-                if not models_loaded():
-                    st.write("Loading Surya models — first run takes about a minute...")
-                preload_models()
-
                 ocr_progress = st.progress(0, text="Starting OCR...")
 
                 def _on_page(idx: int, total: int) -> None:

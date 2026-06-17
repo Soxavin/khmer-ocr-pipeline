@@ -5,8 +5,9 @@
 
 export SURYA_INFERENCE_BACKEND=llamacpp
 export SURYA_LLAMACPP_BINARY=$(which llama-server)
-export LLAMA_CPP_NGL=99            # offload all model layers to Metal GPU
-export SURYA_INFERENCE_PARALLEL=8  # concurrent page inferences
+export LLAMA_CPP_NGL=99              # offload all model layers to Metal GPU
+export SURYA_INFERENCE_PARALLEL=1    # 1 slot: we process pages sequentially
+export SURYA_INFERENCE_KEEP_ALIVE=true  # keep model in Metal GPU VRAM between calls
 
 echo "Surya llamacpp Metal backend activated."
 echo "  llama-server: $SURYA_LLAMACPP_BINARY"
