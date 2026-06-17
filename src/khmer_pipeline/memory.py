@@ -14,14 +14,9 @@ def clear_device_cache() -> None:
     # 1. Standard Python garbage collection
     gc.collect()
     
-    # 2. Clear PyTorch MPS cache (used by Surya OCR)
-    try:
-        import torch
-        if torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-    except Exception:
-        pass # PyTorch might not be installed or MPS not available
-        
+    # 2. Surya 0.20+ runs via a C++ llama-server process and manages its own VRAM;
+    #    PyTorch MPS cache flush is no longer needed for the OCR stage.
+
     # 3. Clear MLX cache (used by Qwen VLM fallback)
     try:
         import mlx.core as mx

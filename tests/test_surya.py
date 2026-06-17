@@ -17,18 +17,23 @@ def _make_preprocess_result(n_pages: int = 2) -> PreprocessResult:
     )
 
 
-def _make_text_line_mock(idx: int = 0) -> MagicMock:
-    """Matches surya.recognition.schema.TextLine in the new Surya API."""
-    line = MagicMock()
-    line.text = f"ខ្មែរ {idx}"
-    line.bbox = [10.0, 10.0, 200.0, 50.0]
-    line.polygon = [[10.0, 10.0], [200.0, 10.0], [200.0, 50.0], [10.0, 50.0]]
-    line.confidence = 0.95
-    return line
+def _make_block_mock(idx: int = 0, label: str = "Text") -> MagicMock:
+    """Matches surya.recognition.schema.BlockOCRResult in Surya 0.20."""
+    block = MagicMock()
+    block.skipped = False
+    block.error = False
+    block.html = f"<p>ខ្មែរ {idx}</p>"
+    block.bbox = [10.0, 10.0, 200.0, 50.0]
+    block.polygon = [[10.0, 10.0], [200.0, 10.0], [200.0, 50.0], [10.0, 50.0]]
+    block.confidence = 0.95
+    block.label = label
+    block.raw_label = label
+    block.reading_order = idx
+    return block
 
 
 def _make_layout_bbox_mock(label: str = "Text") -> MagicMock:
-    """Matches surya.layout.schema.LayoutBox in the new Surya API."""
+    """Matches surya.layout.schema.LayoutBox in Surya 0.20."""
     b = MagicMock()
     b.label = label
     b.bbox = [10.0, 10.0, 200.0, 50.0]
@@ -47,13 +52,12 @@ def _make_cell_mock(bbox: list) -> MagicMock:
         "row_id": 0,
         "col_id": 0,
         "cell_id": 0,
-        "text_lines": None,
     }
     return cell
 
 
 def _make_predictors(with_table: bool = False):
-    """Returns (layout_pred, rec_pred, table_pred) mocks for the new Surya API."""
+    """Returns (layout_pred, rec_pred, table_pred) mocks for Surya 0.20 API."""
     layout_bboxes = [_make_layout_bbox_mock("Text")]
     if with_table:
         table_bbox = _make_layout_bbox_mock("Table")
@@ -61,12 +65,13 @@ def _make_predictors(with_table: bool = False):
         layout_bboxes.append(table_bbox)
 
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = layout_bboxes
     layout_pred = MagicMock(return_value=[layout_result])
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [_make_text_line_mock(0)]
-    rec_pred = MagicMock(return_value=[ocr_result])
+    page_ocr = MagicMock()
+    page_ocr.blocks = [_make_block_mock(0)]
+    rec_pred = MagicMock(return_value=[page_ocr])
 
     if with_table:
         table_result = MagicMock()
@@ -163,8 +168,7 @@ def test_run_surya_table_dict_has_required_keys():
 
 
 def test_table_bbox_is_page_space_layout_bbox():
-    """tbl['bbox'] must be the page-space bbox of the "Table" layout region
-    (used to draw the layout overlay), not the crop-relative image_bbox."""
+    """tbl['bbox'] must be the page-space bbox of the Table layout region, not the crop-relative image_bbox."""
     with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result(n_pages=1))
     table = r.pages[0].tables[0]
@@ -179,12 +183,9 @@ def test_phantom_cells_outside_bbox_are_discarded():
     layout_bboxes.append(table_bbox)
 
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = layout_bboxes
     layout_pred = MagicMock(return_value=[layout_result])
-
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [_make_text_line_mock(0)]
-    rec_pred = MagicMock(return_value=[ocr_result])
 
     inside_cell = _make_cell_mock([10.0, 10.0, 50.0, 40.0])
     outside_cell = _make_cell_mock([-50.0, -50.0, -10.0, -10.0])
@@ -196,6 +197,13 @@ def test_phantom_cells_outside_bbox_are_discarded():
     table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
     table_pred = MagicMock(return_value=[table_result])
 
+    # rec_pred: first call for page text, second call for 2 cell crops
+    page_ocr = MagicMock()
+    page_ocr.blocks = [_make_block_mock(0)]
+    cell_ocr = MagicMock()
+    cell_ocr.blocks = []
+    rec_pred = MagicMock(side_effect=[[page_ocr], [cell_ocr, cell_ocr]])
+
     with patch("khmer_pipeline.surya._get_predictors", return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
@@ -205,10 +213,11 @@ def test_phantom_cells_outside_bbox_are_discarded():
 
 
 def test_table_cells_get_ocr_text():
-    """rec_pred must be called with cell bboxes and text_lines set on each cell."""
+    """Cell crops are batched into a single rec_pred call; text lands in each cell dict's text_lines."""
     layout_bboxes = [_make_layout_bbox_mock("Table")]
     layout_bboxes[0].bbox = [10.0, 60.0, 200.0, 150.0]
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = layout_bboxes
     layout_pred = MagicMock(return_value=[layout_result])
 
@@ -221,39 +230,31 @@ def test_table_cells_get_ocr_text():
     table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
     table_pred = MagicMock(return_value=[table_result])
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [_make_text_line_mock(0)]
-    rec_pred = MagicMock(return_value=[ocr_result])
+    # First call: page text OCR (Table block is skipped by RecognitionPredictor)
+    skipped_block = MagicMock()
+    skipped_block.skipped = True
+    skipped_block.error = False
+    page_ocr = MagicMock()
+    page_ocr.blocks = [skipped_block]
 
-    with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred, table_pred)):
-        run_surya(_make_preprocess_result(n_pages=1))
+    # Second call: cell crop OCR
+    cell_block = _make_block_mock(0)
+    cell_ocr = MagicMock()
+    cell_ocr.blocks = [cell_block]
 
-    # rec_pred called once for cell OCR (no non-table bboxes on this page)
-    assert rec_pred.call_count == 1
-    assert cell.text_lines is not None
-    assert cell.text_lines[0]["text"] == "ខ្មែរ 0"
-
-
-def test_small_region_skipped():
-    """Layout bbox smaller than 50×20 pixels produces no text blocks."""
-    tiny_bbox = _make_layout_bbox_mock("Text")
-    tiny_bbox.bbox = [10.0, 10.0, 40.0, 25.0]   # 30×15 — below both thresholds
-
-    layout_result = MagicMock()
-    layout_result.bboxes = [tiny_bbox]
-    layout_pred = MagicMock(return_value=[layout_result])
-
-    rec_pred = MagicMock()
-
-    table_pred = MagicMock(return_value=[])
+    rec_pred = MagicMock(side_effect=[[page_ocr], [cell_ocr]])
 
     with patch("khmer_pipeline.surya._get_predictors",
                return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
-    assert r.pages[0].text_blocks == []
-    rec_pred.assert_not_called()
+    # rec_pred called twice: once for page text, once for cell crops
+    assert rec_pred.call_count == 2
+
+    table = r.pages[0].tables[0]
+    assert len(table["cells"]) == 1
+    assert table["cells"][0]["text_lines"]
+    assert "ខ្មែរ" in table["cells"][0]["text_lines"][0]["text"]
 
 
 def test_region_label_in_text_blocks():
@@ -275,56 +276,49 @@ def test_ocr_text_has_no_region_labels():
 
 
 def test_per_region_ocr_batched_in_single_call():
-    """Multiple non-Table regions are OCR'd via one rec_pred call: one page image, multiple page-space bboxes."""
+    """All text regions on a page are OCR'd in a single rec_pred call via layout_results."""
     bbox1 = _make_layout_bbox_mock("Text")
     bbox1.bbox = [10.0, 10.0, 200.0, 50.0]
-    bbox1.position = 1
+    bbox1.position = 0
 
     bbox2 = _make_layout_bbox_mock("Text")
     bbox2.bbox = [10.0, 100.0, 200.0, 150.0]
-    bbox2.position = 2
+    bbox2.position = 1
 
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = [bbox1, bbox2]
     layout_pred = MagicMock(return_value=[layout_result])
 
-    line1 = _make_text_line_mock(0)
-    line1.text = "ខ្មែរ first"
-    line1.bbox = bbox1.bbox
+    block1 = _make_block_mock(0)
+    block1.html = "<p>ខ្មែរ first</p>"
+    block1.reading_order = 0
 
-    line2 = _make_text_line_mock(1)
-    line2.text = "ខ្មែរ second"
-    line2.bbox = bbox2.bbox
+    block2 = _make_block_mock(1)
+    block2.html = "<p>ខ្មែរ second</p>"
+    block2.reading_order = 1
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [line1, line2]
-    rec_pred = MagicMock(return_value=[ocr_result])
+    page_ocr = MagicMock()
+    page_ocr.blocks = [block1, block2]
+    rec_pred = MagicMock(return_value=[page_ocr])
     table_pred = MagicMock(return_value=[])
 
     with patch("khmer_pipeline.surya._get_predictors",
                return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
-    # One call covering all text regions on the page
+    # One call with layout_results (not per-region bbox batching)
     assert rec_pred.call_count == 1
+    call_kwargs = rec_pred.call_args[1]
+    assert "layout_results" in call_kwargs
 
-    # Single page image, with one bbox-list containing both region bboxes
-    call_args = rec_pred.call_args
-    images_arg = call_args[0][0]
-    bboxes_arg = call_args[1]["bboxes"]
-    assert len(images_arg) == 1
-    assert len(bboxes_arg) == 1
-    assert len(bboxes_arg[0]) == 2
-
-    # Both regions' text made it into the result
     texts = [b["text"] for b in r.pages[0].text_blocks]
     assert "ខ្មែរ first" in texts
     assert "ខ្មែរ second" in texts
 
 
 def test_multiple_tables_get_one_table_pred_call_each():
-    """Each detected Table region gets its own table_pred([crop]) call (avoids
-    batching differently-sized table images, which crashes surya 0.17.1)."""
+    """Each detected Table region gets its own table_pred([crop]) call."""
     table_bbox1 = _make_layout_bbox_mock("Table")
     table_bbox1.bbox = [10.0, 60.0, 200.0, 150.0]
 
@@ -332,6 +326,7 @@ def test_multiple_tables_get_one_table_pred_call_each():
     table_bbox2.bbox = [10.0, 200.0, 300.0, 400.0]
 
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = [table_bbox1, table_bbox2]
     layout_pred = MagicMock(return_value=[layout_result])
 
@@ -354,7 +349,6 @@ def test_multiple_tables_get_one_table_pred_call_each():
                return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
-    # One call per table, each with a single-image list
     assert table_pred.call_count == 2
     for call in table_pred.call_args_list:
         images_arg = call[0][0]
@@ -364,9 +358,7 @@ def test_multiple_tables_get_one_table_pred_call_each():
 
 
 def test_table_recognition_failure_is_isolated():
-    """If table_pred raises for one table (and the retry with a fresh
-    predictor also fails), other tables on the page still process and the
-    page does not crash."""
+    """If table_pred raises for one table, other tables on the page still process."""
     table_bbox1 = _make_layout_bbox_mock("Table")
     table_bbox1.bbox = [10.0, 60.0, 200.0, 150.0]
 
@@ -374,6 +366,7 @@ def test_table_recognition_failure_is_isolated():
     table_bbox2.bbox = [10.0, 200.0, 300.0, 400.0]
 
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = [table_bbox1, table_bbox2]
     layout_pred = MagicMock(return_value=[layout_result])
 
@@ -386,47 +379,12 @@ def test_table_recognition_failure_is_isolated():
     table_pred = MagicMock(side_effect=[RuntimeError("boom"), [table_result_2]])
     rec_pred = MagicMock()
 
-    retry_pred = MagicMock(side_effect=RuntimeError("boom again"))
-
     with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred, table_pred)), \
-         patch("khmer_pipeline.surya._new_table_predictor", return_value=retry_pred):
+               return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
-    # The failed table is skipped; the second table is still present
     assert len(r.pages[0].tables) == 1
-    # The failure is captured in result.warnings instead of only going to stderr
     assert any("Table recognition failed" in w for w in r.warnings)
-
-
-def test_table_recognition_retries_with_fresh_predictor_on_failure():
-    """If table_pred raises on the shared singleton, retry once with a
-    freshly-constructed TableRecPredictor before giving up on the table."""
-    table_bbox = _make_layout_bbox_mock("Table")
-    table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
-
-    layout_result = MagicMock()
-    layout_result.bboxes = [table_bbox]
-    layout_pred = MagicMock(return_value=[layout_result])
-
-    table_result = MagicMock()
-    table_result.rows = []
-    table_result.cols = []
-    table_result.cells = []
-    table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
-
-    table_pred = MagicMock(side_effect=RuntimeError("tensor mismatch"))
-    rec_pred = MagicMock()
-
-    retry_pred = MagicMock(return_value=[table_result])
-
-    with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred, table_pred)), \
-         patch("khmer_pipeline.surya._new_table_predictor", return_value=retry_pred):
-        r = run_surya(_make_preprocess_result(n_pages=1))
-
-    assert len(r.pages[0].tables) == 1
-    retry_pred.assert_called_once()
 
 
 def test_run_surya_warnings_empty_when_no_issues():
@@ -435,52 +393,15 @@ def test_run_surya_warnings_empty_when_no_issues():
     assert r.warnings == []
 
 
-def test_zip_mismatch_emits_warning_and_uses_minimum():
-    """If OCR returns fewer lines than regions, a warning is recorded on
-    SuryaResult.warnings and only the paired lines are used — no IndexError."""
-    bbox1 = _make_layout_bbox_mock("Text")
-    bbox1.bbox = [10.0, 10.0, 200.0, 50.0]
-    bbox1.position = 1
-    bbox2 = _make_layout_bbox_mock("Text")
-    bbox2.bbox = [10.0, 60.0, 200.0, 100.0]
-    bbox2.position = 2
-
-    layout_result = MagicMock()
-    layout_result.bboxes = [bbox1, bbox2]
-    layout_pred = MagicMock(return_value=[layout_result])
-
-    one_line = _make_text_line_mock(0)
-    one_line.text = "only one line"
-    one_line.bbox = bbox1.bbox
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [one_line]
-    rec_pred = MagicMock(return_value=[ocr_result])
-    table_pred = MagicMock(return_value=[])
-
-    with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred, table_pred)):
-        r = run_surya(_make_preprocess_result(n_pages=1))
-
-    assert any("pairing by index" in w for w in r.warnings)
-    assert len(r.pages[0].text_blocks) == 1
-    assert r.pages[0].text_blocks[0]["text"] == "only one line"
-
-
 def test_phantom_cell_removal_emits_warning():
-    """If a detected table cell falls entirely outside the table's image_bbox,
-    it is filtered out AND a warning recording the removed count is added to
-    SuryaResult.warnings."""
+    """A phantom cell (outside table image_bbox) is filtered and a warning is recorded."""
     table_bbox = _make_layout_bbox_mock("Table")
     table_bbox.bbox = [10.0, 60.0, 200.0, 150.0]
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = [table_bbox]
     layout_pred = MagicMock(return_value=[layout_result])
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = []
-    rec_pred = MagicMock(return_value=[ocr_result])
-
-    # One cell inside image_bbox, one cell entirely outside it (phantom)
     good_cell = _make_cell_mock([10.0, 10.0, 50.0, 30.0])
     phantom_cell = _make_cell_mock([500.0, 500.0, 600.0, 600.0])
 
@@ -491,6 +412,15 @@ def test_phantom_cell_removal_emits_warning():
     table_result.image_bbox = [0.0, 0.0, 190.0, 90.0]
     table_pred = MagicMock(return_value=[table_result])
 
+    skipped_block = MagicMock()
+    skipped_block.skipped = True
+    skipped_block.error = False
+    page_ocr = MagicMock()
+    page_ocr.blocks = [skipped_block]
+    cell_ocr = MagicMock()
+    cell_ocr.blocks = []
+    rec_pred = MagicMock(side_effect=[[page_ocr], [cell_ocr, cell_ocr]])
+
     with patch("khmer_pipeline.surya._get_predictors",
                return_value=(layout_pred, rec_pred, table_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
@@ -499,24 +429,23 @@ def test_phantom_cell_removal_emits_warning():
     assert len(r.pages[0].tables[0]["cells"]) == 1
 
 
-def _make_low_confidence_text_line_mock(idx: int = 0) -> MagicMock:
-    line = _make_text_line_mock(idx)
-    line.confidence = 0.3  # below CONFIDENCE_LOW (0.5)
-    return line
+def _make_low_confidence_block_mock(idx: int = 0) -> MagicMock:
+    block = _make_block_mock(idx)
+    block.confidence = 0.3  # below CONFIDENCE_LOW (0.5)
+    return block
 
 
 def test_low_confidence_block_emits_warning():
-    """If a text block's OCR confidence is below CONFIDENCE_LOW, a warning
-    noting the low-confidence block count is added to SuryaResult.warnings."""
+    """A text block with confidence below CONFIDENCE_LOW adds a warning to SuryaResult.warnings."""
     layout_bboxes = [_make_layout_bbox_mock("Text")]
     layout_result = MagicMock()
+    layout_result.error = False
     layout_result.bboxes = layout_bboxes
     layout_pred = MagicMock(return_value=[layout_result])
 
-    ocr_result = MagicMock()
-    ocr_result.text_lines = [_make_low_confidence_text_line_mock(0)]
-    rec_pred = MagicMock(return_value=[ocr_result])
-
+    page_ocr = MagicMock()
+    page_ocr.blocks = [_make_low_confidence_block_mock(0)]
+    rec_pred = MagicMock(return_value=[page_ocr])
     table_pred = MagicMock(return_value=[])
 
     with patch("khmer_pipeline.surya._get_predictors",
