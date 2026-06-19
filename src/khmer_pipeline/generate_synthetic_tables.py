@@ -151,6 +151,11 @@ def generate_synthetic_table(
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": _VIEWPORT_WIDTH, "height": 800})
         page.set_content(html, wait_until="networkidle")  # ensures Google Fonts load
+        page.evaluate("document.fonts.ready")  # Playwright auto-awaits the returned promise
+        if not page.evaluate(f'document.fonts.check(\'16px "{font_family}"\')'):
+            raise RuntimeError(
+                f"Font '{font_family}' did not load — aborting to avoid a fallback-font image."
+            )
         page.locator(".page").screenshot(path=str(img_path))
         browser.close()
 
