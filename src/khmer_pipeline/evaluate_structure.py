@@ -1,4 +1,5 @@
 from __future__ import annotations
+import difflib
 import re
 import unicodedata
 
@@ -91,6 +92,19 @@ def _grid_cols(grid: list[list[str]]) -> int:
     return max((len(row) for row in grid), default=0)
 
 
+def _align_rows(gt_sigs: list[tuple], pred_sigs: list[tuple]) -> list[tuple[int, int]]:
+    # Monotonic GT->pred row alignment. equal/replace blocks pair rows by
+    # position within the block; delete (GT-only) and insert (extra pred) unmatched.
+    pairs: list[tuple[int, int]] = []
+    sm = difflib.SequenceMatcher(None, gt_sigs, pred_sigs, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("equal", "replace"):
+            for k in range(min(i2 - i1, j2 - j1)):
+                pairs.append((i1 + k, j1 + k))
+        # delete / insert -> no pairs
+    return pairs
+
+
 def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> dict:
     if gt_grid is None:
         return {
@@ -121,19 +135,18 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     pred_cols = _grid_cols(pred_stripped)
 
     cells_total = gt_rows * gt_cols
+
+    gt_sigs = [tuple(_norm(c) for c in row) for row in gt_stripped]
+    pred_sigs = [tuple(_norm(c) for c in row) for row in pred_stripped]
     cells_correct = 0
-
-    if cells_total > 0:
-        for r, gt_row in enumerate(gt_stripped):
-            for c in range(gt_cols):
-                gt_val = _norm(gt_row[c] if c < len(gt_row) else "")
-                if r < len(pred_stripped) and c < len(pred_stripped[r]):
-                    pred_val = _norm(pred_stripped[r][c])
-                else:
-                    pred_val = ""
-                if gt_val == pred_val:
-                    cells_correct += 1
-
+    for gi, pj in _align_rows(gt_sigs, pred_sigs):
+        gt_row = gt_stripped[gi]
+        pred_row = pred_stripped[pj]
+        for c in range(gt_cols):
+            gt_val = _norm(gt_row[c]) if c < len(gt_row) else ""
+            pred_val = _norm(pred_row[c]) if c < len(pred_row) else ""
+            if gt_val == pred_val:
+                cells_correct += 1
     cell_accuracy = cells_correct / cells_total if cells_total > 0 else 0.0
 
     # multiset content recall: non-empty GT cells present in pred multiset

@@ -5,6 +5,9 @@ Khmer-language document OCR pipeline for MEF Cambodia financial documents
 interactive use, and a CLI batch processor
 (`src/khmer_pipeline/pipeline.py`).
 
+> For the *why* behind major design decisions (the table-cell redesign, the
+> evaluation framework, benchmark results), see `docs/PROJECT_LOG.md`.
+
 ## Tech stack
 - Python >=3.11, managed with `uv` (pyproject.toml + uv.lock)
 - OpenCV (`opencv-python-headless`) — image preprocessing

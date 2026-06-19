@@ -5,6 +5,7 @@ import pytest
 from khmer_pipeline.evaluate_structure import (
     _norm,
     _strip_title_row,
+    _align_rows,
     _levenshtein,
     cer,
     gt_table_grid,
@@ -228,15 +229,15 @@ def test_evaluate_table_no_pred_tables():
     assert result["cells_total"] == 4
 
 def test_evaluate_table_extra_leading_row_shifts():
-    # pred has an extra non-title row prepended — causes a positional shift
-    # because it has content in both cells it won't be stripped as a title row
+    # pred has an extra non-title row prepended; _strip_title_row won't remove it
+    # because it has content in both cells. Row alignment now recovers accuracy.
     gt_grid = [["ក", "ខ"], ["1", "2"]]
     pred_grid = [["extra", "row"], ["ក", "ខ"], ["1", "2"]]
     pred_table = _make_table_from_grid(pred_grid)
     result = evaluate_table([pred_table], gt_grid)
-    # positional accuracy should be low (shifted: "extra"!="ក", "row"!="ខ", "ក"!="1", "ខ"!="2")
-    assert result["cell_accuracy"] == pytest.approx(0.0)
-    # content recall should be high (all gt values are in pred somewhere)
+    # row alignment maps GT rows to the matching pred rows → accuracy == 1.0
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+    # content recall should also be high
     assert result["cell_content_recall"] == pytest.approx(1.0)
 
 def test_evaluate_table_none_gt_grid():
@@ -262,6 +263,62 @@ def test_evaluate_table_title_strip_applied():
     pred_table = _make_table_from_grid(pred_grid)
     result = evaluate_table([pred_table], gt_grid)
     assert result["cell_accuracy"] == pytest.approx(1.0)
+
+# --- _align_rows ---
+
+def test_align_rows_identical():
+    sigs = [("a",), ("b",), ("c",)]
+    pairs = _align_rows(sigs, sigs)
+    assert pairs == [(0, 0), (1, 1), (2, 2)]
+
+def test_align_rows_extra_leading_pred_row():
+    # gt=[A,B,C], pred=[X,A,B,C] — X is extra; GT rows map to later pred rows
+    A, B, C, X = ("a",), ("b",), ("c",), ("x",)
+    pairs = _align_rows([A, B, C], [X, A, B, C])
+    # A→1, B→2, C→3 (X at index 0 is unmatched insert)
+    assert (0, 1) in pairs
+    assert (1, 2) in pairs
+    assert (2, 3) in pairs
+    assert len(pairs) == 3
+
+def test_align_rows_deleted_gt_row():
+    # gt=[A,B,C], pred=[A,C] — B is deleted (no pair for GT index 1)
+    A, B, C = ("a",), ("b",), ("c",)
+    pairs = _align_rows([A, B, C], [A, C])
+    gt_indices = [gi for gi, _ in pairs]
+    assert 1 not in gt_indices  # B (GT index 1) is unmatched
+    assert (0, 0) in pairs
+    assert (2, 1) in pairs
+
+# --- evaluate_table alignment cases ---
+
+def test_evaluate_table_extra_leading_title_row_accuracy_one():
+    # pred identical to GT but with an extra title-like first row that isn't stripped
+    gt_grid = [["ក", "ខ", "គ"], ["1", "2", "3"], ["4", "5", "6"]]
+    pred_grid = [["TITLE", "TITLE", "TITLE"], ["ក", "ខ", "គ"], ["1", "2", "3"], ["4", "5", "6"]]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], gt_grid)
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+
+def test_evaluate_table_hallucinated_middle_row():
+    # pred has an extra row inserted in the middle; surrounding rows still align
+    gt_grid = [["ក", "ខ"], ["1", "2"], ["3", "4"]]
+    pred_grid = [["ក", "ខ"], ["HALLUC", "ROW"], ["1", "2"], ["3", "4"]]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], gt_grid)
+    # rows ក/ខ and 3/4 align perfectly; row 1/2 also aligns → all GT rows covered
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+
+def test_evaluate_table_missing_middle_row():
+    # pred is missing the middle GT row → those GT cells count as misses
+    gt_grid = [["ក", "ខ"], ["1", "2"], ["3", "4"]]
+    pred_grid = [["ក", "ខ"], ["3", "4"]]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], gt_grid)
+    # GT row ["1","2"] has no paired pred row → 2 misses out of 6 total cells
+    assert result["cell_accuracy"] < 1.0
+    # content recall may stay high since "1","2" are not in pred at all here
+    assert result["cells_total"] == 6
 
 # --- evaluate_text ---
 
