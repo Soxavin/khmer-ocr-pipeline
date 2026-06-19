@@ -175,7 +175,7 @@ def generate_synthetic_table(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic Khmer table images for font benchmarking.")
-    parser.add_argument("--output-dir", default="./synthetic_data", help="Directory for output files")
+    parser.add_argument("--output-dir", default="eval/datasets/synthetic_tables", help="Directory for output files")
     parser.add_argument("--font", default="all", help="Font family name, or 'all' to generate for all fonts")
     parser.add_argument("--count", type=int, default=_DEFAULT_COUNT, help="Number of tables per font")
     args = parser.parse_args()

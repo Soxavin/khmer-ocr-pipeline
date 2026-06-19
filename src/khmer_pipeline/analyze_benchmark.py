@@ -3,18 +3,39 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+_RUNS_ROOT = Path("eval/runs")
 
-def analyze(csv_paths: list[Path]) -> None:
+
+def _load_rows(paths) -> list[dict]:
     rows = []
-    for csv_path in csv_paths:
+    for p in paths:
+        p = Path(p)
+        # if a directory, read results.csv inside it
+        if p.is_dir():
+            csv_path = p / "results.csv"
+        else:
+            csv_path = p
         if not csv_path.exists():
             print(f"Note: {csv_path} not found — skipping.")
             continue
         rows.extend(csv.DictReader(csv_path.open(encoding="utf-8")))
+    return rows
 
+
+def _latest_run_dir() -> Path | None:
+    if not _RUNS_ROOT.exists():
+        return None
+    subdirs = [d for d in _RUNS_ROOT.iterdir() if d.is_dir()]
+    if not subdirs:
+        return None
+    return max(subdirs, key=lambda d: d.stat().st_mtime)
+
+
+def summarize(rows: list[dict]) -> str:
     if not rows:
-        print("No results")
-        return
+        return "No results."
+
+    lines = []
 
     by_engine: dict[str, list] = defaultdict(list)
     by_font: dict[str, list] = defaultdict(list)
@@ -46,11 +67,23 @@ def analyze(csv_paths: list[Path]) -> None:
         f" {'TextCER':>8} {'TabRatio':>9} {'ParaRec':>8} {'ParaLeak':>9}"
     )
 
-    def print_group_table(groups: dict[str, list], label: str) -> None:
-        print(f"\n=== Per-{label} Summary ({len(rows)} images) ===")
-        print(header)
+    # per-Engine summary for model-vs-model comparison
+    lines.append(f"\n=== Per-Engine Summary ({len(rows)} images) ===")
+    eng_header = f"{'Engine':<28} {'CellAcc':>8} {'TableCER':>9} {'TextCER':>8}"
+    lines.append(eng_header)
+    for name, items in sorted(by_engine.items()):
+        lines.append(
+            f"{name:<28}"
+            f" {avg(items, 'Cell_Accuracy'):>8.3f}"
+            f" {avg(items, 'Table_CER'):>9.3f}"
+            f" {avg(items, 'Text_CER'):>8.3f}"
+        )
+
+    def add_group_table(groups: dict[str, list], label: str) -> None:
+        lines.append(f"\n=== Per-{label} Summary ({len(rows)} images) ===")
+        lines.append(header)
         for name, items in sorted(groups.items()):
-            print(
+            lines.append(
                 f"{name:<28}"
                 f" {avg(items, 'Cell_Accuracy'):>8.3f}"
                 f" {avg(items, 'Cell_Content_Recall'):>10.3f}"
@@ -61,28 +94,16 @@ def analyze(csv_paths: list[Path]) -> None:
                 f" {total(items, 'Paragraph_Leak'):>9}"
             )
 
-    # per-Engine summary for model-vs-model comparison
-    print(f"\n=== Per-Engine Summary ({len(rows)} images) ===")
-    eng_header = f"{'Engine':<28} {'CellAcc':>8} {'TableCER':>9} {'TextCER':>8}"
-    print(eng_header)
-    for name, items in sorted(by_engine.items()):
-        print(
-            f"{name:<28}"
-            f" {avg(items, 'Cell_Accuracy'):>8.3f}"
-            f" {avg(items, 'Table_CER'):>9.3f}"
-            f" {avg(items, 'Text_CER'):>8.3f}"
-        )
-
-    print_group_table(by_font, "Font")
-    print_group_table(by_template, "Template")
-    print_group_table(by_dataset, "Dataset")
+    add_group_table(by_font, "Font")
+    add_group_table(by_template, "Template")
+    add_group_table(by_dataset, "Dataset")
 
     # best/worst by Cell_Accuracy
     scored = [r for r in rows if r.get("Cell_Accuracy")]
     if scored:
         best = max(scored, key=lambda r: float(r["Cell_Accuracy"]))
         worst = min(scored, key=lambda r: float(r["Cell_Accuracy"]))
-        print(
+        lines.append(
             f"\n=== Best & Worst by Cell_Accuracy ===\n"
             f"Best:  {best['Image_File']} | Font: {best.get('Font', '')} | Template: {best.get('Template', '')}"
             f" | Cell_Accuracy: {best['Cell_Accuracy']}\n"
@@ -93,13 +114,27 @@ def analyze(csv_paths: list[Path]) -> None:
     cer_scored = [r for r in rows if r.get("Table_CER")]
     if cer_scored:
         lowest = min(cer_scored, key=lambda r: float(r["Table_CER"]))
-        print(
+        lines.append(
             f"\n=== Lowest Table_CER ===\n"
             f"{lowest['Image_File']} | Font: {lowest.get('Font', '')} | Template: {lowest.get('Template', '')}"
             f" | Table_CER: {lowest['Table_CER']}"
         )
 
+    return "\n".join(lines)
+
+
+def analyze(paths) -> None:
+    if not paths:
+        latest = _latest_run_dir()
+        if latest is None:
+            print("No results")
+            return
+        paths = [latest]
+
+    rows = _load_rows(paths)
+    print(summarize(rows))
+
 
 if __name__ == "__main__":
-    paths = [Path(p) for p in sys.argv[1:]] if len(sys.argv) > 1 else [Path("./benchmark_results.csv")]
-    analyze(paths)
+    input_paths = sys.argv[1:] if len(sys.argv) > 1 else []
+    analyze(input_paths)

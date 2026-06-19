@@ -109,15 +109,15 @@ Surya, and postprocess (same as `app.py`).
 ## Benchmark runner (`run_benchmark.py`)
 
 ```bash
-OPENAI_API_KEY=... uv run python -m khmer_pipeline.run_benchmark [--data-dir ./synthetic_data] [--output-csv ./benchmark_results.csv]
+uv run python -m khmer_pipeline.run_benchmark [--data-dir eval/datasets/synthetic_tables eval/datasets/synthetic_documents] [--run-dir eval/runs/my_run]
 ```
 Scans `--data-dir` for `*_ground_truth.json` files, runs the full pipeline
-on each paired `.png` (with `remove_stamps=False` — synthetic images have
-blue header stamps that stamp removal would incorrectly erase), calls
-`evaluate_ocr_quality()` (GPT-4o LLM judge), and writes a CSV with columns:
-`Image_File, Font, Template, Overall_Score, Estimated_CER,
-Hallucinations_Count, Omissions_Count, Reasoning`. Calls
-`clear_device_cache()` after each image. Requires `OPENAI_API_KEY`.
+on each paired `.png` (raw render — no preprocessing), and writes one run
+folder under `eval/runs/<YYYYMMDD_HHMMSS>_<engine>/` containing
+`results.csv`, `manifest.json` (provenance + aggregates), and `summary.txt`
+(captured analyze output). Calls `clear_device_cache()` after each image.
+No API key required. See `eval/README.md` for full CLI options and metric
+definitions.
 
 ## Where to look for X
 

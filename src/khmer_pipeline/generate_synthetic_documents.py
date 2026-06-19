@@ -276,8 +276,8 @@ def main() -> None:
         description="Generate full-page A4 Khmer document images for benchmark testing."
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("./synthetic_documents"),
-        help="Directory to write PNG + JSON pairs (default: ./synthetic_documents)",
+        "--output-dir", type=Path, default=Path("eval/datasets/synthetic_documents"),
+        help="Directory to write PNG + JSON pairs (default: eval/datasets/synthetic_documents)",
     )
     parser.add_argument(
         "--font", default="all",

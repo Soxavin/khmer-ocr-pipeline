@@ -8,12 +8,17 @@ import numpy as np
 import pytest
 
 from khmer_pipeline.run_benchmark import (
-    _default_output,
+    _default_run_dir,
     _done_keys,
     _engine_name,
+    _git_commit,
     _raw_preprocess_result,
+    _tool_versions,
+    _write_manifest,
+    _DEFAULT_DATASETS,
 )
 from khmer_pipeline.models import IngestResult, PreprocessResult
+from khmer_pipeline.analyze_benchmark import summarize
 
 
 def test_engine_name(monkeypatch):
@@ -32,9 +37,9 @@ def test_engine_name_fallback(monkeypatch):
     assert _engine_name() == "ocr"
 
 
-def test_default_output():
-    result = _default_output("run_surya", datetime(2026, 6, 19, 13, 5, 9))
-    assert result == Path("benchmark_results_run_surya_20260619_130509.csv")
+def test_default_run_dir():
+    result = _default_run_dir("run_surya", datetime(2026, 6, 19, 13, 5, 9))
+    assert result == Path("eval/runs/20260619_130509_run_surya")
 
 
 def test_done_keys_missing_file(tmp_path):
@@ -71,17 +76,73 @@ def test_raw_preprocess_result_preserves_images():
     assert pre.page_count == 1
 
 
+def test_git_commit_returns_types():
+    sha, dirty = _git_commit()
+    assert isinstance(sha, str)
+    assert isinstance(dirty, bool)
+
+
+def test_git_commit_never_raises():
+    # should never raise regardless of environment
+    result = _git_commit()
+    assert len(result) == 2
+
+
+def test_tool_versions_has_keys():
+    v = _tool_versions()
+    assert isinstance(v, dict)
+    assert "surya_ocr" in v
+    assert "python" in v
+
+
+def test_tool_versions_never_raises():
+    v = _tool_versions()
+    assert v is not None
+
+
+def test_write_manifest(tmp_path):
+    run_dir = tmp_path / "20260619_130509_run_test"
+    run_dir.mkdir()
+    dataset_counts = [
+        ("synthetic_tables", Path("eval/datasets/synthetic_tables"), 5),
+        ("synthetic_documents", Path("eval/datasets/synthetic_documents"), 5),
+    ]
+    aggregates = {
+        "avg_cell_accuracy": 0.643,
+        "avg_cell_content_recall": 0.78,
+        "avg_table_cer": 0.147,
+        "avg_text_cer": 0.219,
+    }
+    _write_manifest(run_dir, "run_test", False, dataset_counts, aggregates)
+
+    manifest_path = run_dir / "manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert "run_id" in manifest
+    assert manifest["engine"] == "run_test"
+    assert "correction" in manifest
+    assert "git_commit" in manifest
+    assert "versions" in manifest
+    assert "datasets" in manifest
+    assert len(manifest["datasets"]) == 2
+    assert "image_count" in manifest
+    assert manifest["image_count"] == 10
+    assert "aggregates" in manifest
+
+
 def test_argparse_data_dir_default():
     import argparse
     # reconstruct the parser the same way __main__ does
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", nargs="+", default=[Path("./synthetic_data"), Path("./synthetic_documents")], type=Path)
-    parser.add_argument("--output-csv", default=None, type=Path)
+    parser.add_argument("--data-dir", nargs="+", default=_DEFAULT_DATASETS, type=Path)
+    parser.add_argument("--run-dir", default=None, type=Path)
     parser.add_argument("--with-correction", action="store_true", default=False)
     parser.add_argument("--resume", action="store_true", default=False)
     args = parser.parse_args([])
-    assert isinstance(args.data_dir, list)
-    assert all(isinstance(d, Path) for d in args.data_dir)
+    assert args.data_dir == _DEFAULT_DATASETS
+    assert args.data_dir[0] == Path("eval/datasets/synthetic_tables")
+    assert args.data_dir[1] == Path("eval/datasets/synthetic_documents")
 
 
 def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
@@ -149,13 +210,18 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_text", lambda text, pred, gt: canned_text_metrics)
     monkeypatch.setattr("khmer_pipeline.run_benchmark.clear_device_cache", lambda: None)
 
-    output_csv = tmp_path / "out.csv"
+    run_dir = tmp_path / "run"
 
     from khmer_pipeline.run_benchmark import run_benchmark
-    run_benchmark([data_dir], output_csv=output_csv)
+    run_benchmark([data_dir], run_dir=run_dir)
 
-    assert output_csv.exists()
-    with output_csv.open(encoding="utf-8") as f:
+    # run dir must exist and contain the three artifacts
+    assert run_dir.exists()
+    assert (run_dir / "results.csv").exists()
+    assert (run_dir / "manifest.json").exists()
+    assert (run_dir / "summary.txt").exists()
+
+    with (run_dir / "results.csv").open(encoding="utf-8") as f:
         reader = csv.DictReader(f)
         field_names = reader.fieldnames
         data_rows = list(reader)
@@ -166,3 +232,45 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     assert len(data_rows) == 1
     assert data_rows[0]["Engine"] == "run_fake"
     assert data_rows[0]["Dataset"] == "synthetic_data"
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["image_count"] == 1
+
+
+def test_summarize_empty():
+    assert summarize([]) == "No results."
+
+
+def test_summarize_with_rows():
+    rows = [
+        {
+            "Engine": "run_fake", "Corrected": "False",
+            "Dataset": "synthetic_tables", "Image_File": "table_0.png",
+            "Font": "Battambang", "Template": "tmpl_a",
+            "Tables_Expected": "1", "Tables_Found": "1",
+            "GT_Rows": "2", "GT_Cols": "2", "Pred_Rows": "2", "Pred_Cols": "2",
+            "Cell_Accuracy": "0.800", "Cell_Content_Recall": "0.900",
+            "Table_CER": "0.100", "Text_CER": "0.150",
+            "Paragraph_Recall": "1.000", "Paragraph_Leak": "0",
+            "Error": "",
+        },
+        {
+            "Engine": "run_fake", "Corrected": "False",
+            "Dataset": "synthetic_tables", "Image_File": "table_1.png",
+            "Font": "Hanuman", "Template": "tmpl_b",
+            "Tables_Expected": "1", "Tables_Found": "1",
+            "GT_Rows": "3", "GT_Cols": "2", "Pred_Rows": "3", "Pred_Cols": "2",
+            "Cell_Accuracy": "0.600", "Cell_Content_Recall": "0.700",
+            "Table_CER": "0.200", "Text_CER": "0.250",
+            "Paragraph_Recall": "0.800", "Paragraph_Leak": "0",
+            "Error": "",
+        },
+    ]
+    result = summarize(rows)
+    assert isinstance(result, str)
+    assert "Per-Engine" in result
+    assert "Per-Font" in result
+    assert "Per-Template" in result
+    assert "Per-Dataset" in result
+    assert "Best & Worst by Cell_Accuracy" in result
+    assert "Lowest Table_CER" in result

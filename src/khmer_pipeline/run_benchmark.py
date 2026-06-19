@@ -1,8 +1,11 @@
 from __future__ import annotations
 import csv
+import importlib.metadata
 import json
+import platform
+import subprocess
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .ingest import ingest
@@ -10,6 +13,12 @@ from .models import PreprocessResult
 from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text
 from .memory import clear_device_cache
+from .analyze_benchmark import summarize
+
+_EVAL_ROOT = Path("eval")
+_DATASETS_ROOT = _EVAL_ROOT / "datasets"
+_RUNS_ROOT = _EVAL_ROOT / "runs"
+_DEFAULT_DATASETS = [_DATASETS_ROOT / "synthetic_tables", _DATASETS_ROOT / "synthetic_documents"]
 
 _CSV_FIELDS = [
     "Engine", "Corrected",
@@ -34,9 +43,9 @@ def _engine_name() -> str:
     return getattr(ACTIVE_OCR_ENGINE, "__name__", "ocr")
 
 
-def _default_output(engine: str, now) -> Path:
+def _default_run_dir(engine: str, now) -> Path:
     # now: datetime, injected for tests
-    return Path(f"benchmark_results_{engine}_{now:%Y%m%d_%H%M%S}.csv")
+    return _RUNS_ROOT / f"{now:%Y%m%d_%H%M%S}_{engine}"
 
 
 def _done_keys(csv_path: Path) -> set[tuple[str, str]]:
@@ -58,27 +67,110 @@ def _raw_preprocess_result(ingest_result) -> PreprocessResult:
     )
 
 
+def _git_commit() -> tuple[str, bool]:
+    try:
+        repo_root = Path(__file__).resolve().parents[2]
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        sha = sha_result.stdout.strip() if sha_result.returncode == 0 else "unknown"
+        dirty_result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        dirty = bool(dirty_result.stdout.strip()) if dirty_result.returncode == 0 else False
+        return sha, dirty
+    except Exception:
+        return ("unknown", False)
+
+
+def _tool_versions() -> dict:
+    versions: dict = {}
+    try:
+        versions["surya_ocr"] = importlib.metadata.version("surya-ocr")
+    except Exception:
+        versions["surya_ocr"] = "unknown"
+    try:
+        versions["python"] = platform.python_version()
+    except Exception:
+        versions["python"] = "unknown"
+    return versions
+
+
+def _write_manifest(
+    run_dir: Path,
+    engine: str,
+    with_correction: bool,
+    dataset_counts: list[tuple[str, Path, int]],
+    aggregates: dict,
+) -> None:
+    try:
+        sha, dirty = _git_commit()
+        versions = _tool_versions()
+        total_images = sum(c for _, _, c in dataset_counts)
+        manifest = {
+            "run_id": run_dir.name,
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "engine": engine,
+            "correction": with_correction,
+            "preprocessing": "none (raw render)",
+            "git_commit": sha,
+            "git_dirty": dirty,
+            "versions": versions,
+            "datasets": [
+                {"name": name, "path": str(path), "images": count}
+                for name, path, count in dataset_counts
+            ],
+            "image_count": total_images,
+            "aggregates": aggregates,
+        }
+        (run_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"[WARN] Could not write manifest.json: {exc}")
+
+
 def run_benchmark(
     data_dirs: list[Path],
-    output_csv: Path | None = None,
+    run_dir: Path | None = None,
     with_correction: bool = False,
     resume: bool = False,
 ) -> None:
     engine = _engine_name()
-    if output_csv is None:
-        output_csv = _default_output(engine, datetime.now())
+    if run_dir is None:
+        run_dir = _default_run_dir(engine, datetime.now())
 
-    done = _done_keys(output_csv) if resume and output_csv.exists() else set()
-    append_mode = resume and output_csv.exists() and bool(done)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    results_csv = run_dir / "results.csv"
 
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    done = _done_keys(results_csv) if resume and results_csv.exists() else set()
+    append_mode = resume and results_csv.exists() and bool(done)
+
     file_mode = "a" if append_mode else "w"
 
     processed = 0
     ok_count = 0
-    acc_vals: list[float] = []
 
-    with output_csv.open(file_mode, newline="", encoding="utf-8") as f:
+    # per-dataset image counts: name -> (path, count)
+    ds_counts: dict[str, tuple[Path, int]] = {}
+    # metric accumulator for aggregates
+    metric_vals: dict[str, list[float]] = {
+        "cell_accuracy": [],
+        "cell_content_recall": [],
+        "table_cer": [],
+        "text_cer": [],
+    }
+
+    all_rows: list[dict] = []
+
+    with results_csv.open(file_mode, newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
         if not append_mode:
             writer.writeheader()
@@ -86,6 +178,9 @@ def run_benchmark(
 
         for data_dir in data_dirs:
             dataset_name = data_dir.name
+            if dataset_name not in ds_counts:
+                ds_counts[dataset_name] = (data_dir, 0)
+
             gt_files = sorted(data_dir.glob("*_ground_truth.json"))
             if not gt_files:
                 print(f"No ground truth files found in {data_dir}")
@@ -152,8 +247,17 @@ def run_benchmark(
                     }
                     print(f"[OK] {img_path.name}  cell_acc={row['Cell_Accuracy']}")
                     ok_count += 1
-                    if row["Cell_Accuracy"]:
-                        acc_vals.append(float(row["Cell_Accuracy"]))
+
+                    # accumulate metrics for aggregates (skip blank)
+                    for csv_key, acc_key in [
+                        ("Cell_Accuracy", "cell_accuracy"),
+                        ("Cell_Content_Recall", "cell_content_recall"),
+                        ("Table_CER", "table_cer"),
+                        ("Text_CER", "text_cer"),
+                    ]:
+                        if row[csv_key]:
+                            metric_vals[acc_key].append(float(row[csv_key]))
+
                 except Exception as exc:
                     print(f"[ERROR] {img_path.name}: {exc}")
                     row = {
@@ -174,18 +278,43 @@ def run_benchmark(
                 writer.writerow(row)
                 f.flush()
                 processed += 1
+                all_rows.append(row)
+                # increment per-dataset count
+                ds_counts[dataset_name] = (ds_counts[dataset_name][0], ds_counts[dataset_name][1] + 1)
                 clear_device_cache()
 
     if processed == 0 and not done:
         print("No images processed.")
         return
 
-    avg_acc = sum(acc_vals) / len(acc_vals) if acc_vals else 0.0
+    def _avg_metric(key: str) -> float:
+        vals = metric_vals[key]
+        return round(sum(vals) / len(vals), 3) if vals else 0.0
+
+    aggregates = {
+        "avg_cell_accuracy": _avg_metric("cell_accuracy"),
+        "avg_cell_content_recall": _avg_metric("cell_content_recall"),
+        "avg_table_cer": _avg_metric("table_cer"),
+        "avg_text_cer": _avg_metric("text_cer"),
+    }
+
+    dataset_counts = [
+        (name, path, count) for name, (path, count) in ds_counts.items()
+    ]
+
+    _write_manifest(run_dir, engine, with_correction, dataset_counts, aggregates)
+
+    # write summary.txt from analyze_benchmark.summarize
+    summary_text = summarize(all_rows)
+    (run_dir / "summary.txt").write_text(summary_text, encoding="utf-8")
+
     print(
         f"\nBenchmark complete. Processed {processed} images "
-        f"({ok_count} ok). Avg Cell_Accuracy: {avg_acc:.3f}"
+        f"({ok_count} ok). "
+        f"Avg Cell_Accuracy: {aggregates['avg_cell_accuracy']:.3f} | "
+        f"Avg Table_CER: {aggregates['avg_table_cer']:.3f}"
     )
-    print(f"Results written to: {output_csv}")
+    print(f"Run directory: {run_dir}")
 
 
 if __name__ == "__main__":
@@ -193,17 +322,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data-dir",
         nargs="+",
-        default=[Path("./synthetic_data"), Path("./synthetic_documents")],
+        default=_DEFAULT_DATASETS,
         type=Path,
     )
-    parser.add_argument("--output-csv", default=None, type=Path)
+    parser.add_argument("--run-dir", default=None, type=Path)
     parser.add_argument("--with-correction", action="store_true", default=False)
     parser.add_argument("--resume", action="store_true", default=False)
     args = parser.parse_args()
 
     run_benchmark(
         args.data_dir,
-        args.output_csv,
+        run_dir=args.run_dir,
         with_correction=args.with_correction,
         resume=args.resume,
     )

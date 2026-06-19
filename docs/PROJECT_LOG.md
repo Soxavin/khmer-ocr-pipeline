@@ -144,6 +144,12 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - **Outcome.** A fair, complete, reproducible harness ready for swapping in other
   OCR models via the engine registry.
 
+### 2.8 Evaluation artifact organization
+
+- **Problem.** Datasets (`synthetic_data/`, `synthetic_documents/`) sat at the repo root, auto-named CSVs scattered there too (`benchmark_results_<engine>_<ts>.csv`), and `analyze`'s positional arg glob could silently mix rows from two different runs. No record existed of *what* a result file covered, *by* which code version, or on *what* dataset.
+- **Decision.** Consolidate under a single `eval/` home: datasets move to `eval/datasets/{synthetic_tables,synthetic_documents}/`; each benchmark run gets `eval/runs/<YYYYMMDD_HHMMSS>_<engine>/` containing `results.csv` + `manifest.json` (run_id, engine, correction, git commit + dirty flag, surya/python versions, per-dataset image counts, aggregate metrics) + `summary.txt` (captured analyze output). `analyze_benchmark` defaults to the latest run dir when called with no args. A committed `eval/README.md` documents layout, CLI, manifest schema, metric definitions, and compare-run workflow.
+- **Outcome.** Every run is self-describing and citable by `run_id`. The old glob-contamination footgun is gone (one run = one folder). Generators default into the new paths; `.gitignore` swaps old patterns for `eval/datasets/` + `eval/runs/`.
+
 ### 2.7 Metric robustness — row-aligned cell accuracy
 
 - **Problem.** The first real benchmark showed `Cell_Accuracy` averaging 0.266,
@@ -192,8 +198,8 @@ typefaces, an expected limitation for OCR rather than a pipeline defect.
 column drift. Rare; logged rather than chased. A column-alignment counterpart to
 §2.7 is the natural future fix if it proves common.
 
-*(Numbers from `benchmark_results_run_surya_*.csv`; regenerate with
-`uv run python -m khmer_pipeline.run_benchmark` then `… analyze_benchmark`.)*
+*(Numbers from `eval/runs/<ts>_run_surya/results.csv`; regenerate with
+`uv run python -m khmer_pipeline.run_benchmark` then `uv run python -m khmer_pipeline.analyze_benchmark`.)*
 
 ---
 
