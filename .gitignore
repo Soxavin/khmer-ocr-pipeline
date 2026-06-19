@@ -7,3 +7,12 @@ dist/
 *.egg-info/
 .superpowers/
 .DS_Store
+
+# Sensitive inputs — never commit
+sample_data/
+.streamlit/
+
+# Generated benchmark / synthetic outputs
+synthetic_data/
+synthetic_documents/
+benchmark_results*.csv
