@@ -15,3 +15,4 @@ sample_data/
 # Generated benchmark / synthetic outputs
 eval/datasets/
 eval/runs/
+inspect_report.json

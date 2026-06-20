@@ -147,7 +147,74 @@ uv run python -m khmer_pipeline.analyze_benchmark \
 
 ---
 
-## 7. Conventions
+## 7. Real Documents
+
+Real MEF PDFs are stored under `eval/datasets/real/` following the same `*_ground_truth.json` schema used by synthetic datasets, so `run_benchmark` / `evaluate_structure` / `analyze_benchmark` work unchanged.
+
+### Convention
+
+```
+eval/datasets/real/
+├── <stem>_p<N>.png                # page render (born-digital or scan)
+└── <stem>_p<N>_ground_truth.json  # ground truth (auto-harvested or hand-labeled)
+```
+
+`eval/datasets/` is gitignored — real documents are not committed to the repo.
+
+### Step 1: Diagnose your PDFs
+
+```bash
+uv run python -m khmer_pipeline.inspect_pdf path/to/real_docs/ --output inspect_report.json
+```
+
+Each PDF is classified as:
+
+| Classification | Meaning |
+|---|---|
+| `born_digital_unicode` | Has a real Khmer Unicode text layer — harvest automatically |
+| `likely_legacy_encoded` | Text layer exists but uses Latin code points for Khmer glyphs (Limon/ABC legacy fonts). **CER metrics will be invalid** until text is re-encoded or the limitation is documented. This is a headline finding for the thesis. |
+| `scanned_image_only` | No text layer; images only — must be hand-labeled |
+| `mixed_or_unknown` | Ambiguous — inspect manually |
+
+Thresholds used: `_MIN_TEXT_CHARS=100`, `_UNICODE_KHMER_RATIO=0.5`, `_LEGACY_KHMER_RATIO=0.15`.
+
+### Step 2: Harvest born-digital PDFs
+
+```bash
+uv run python -m khmer_pipeline.harvest_ground_truth path/to/doc.pdf \
+    --output-dir eval/datasets/real --dpi 200
+```
+
+This renders each page to `<stem>_p<N>.png` and emits `<stem>_p<N>_ground_truth.json` with paragraphs extracted from the text layer (NFC-normalized). `tables` is intentionally left empty (`[]`).
+
+**After harvesting you must:**
+
+1. **Verify paragraphs** — text-layer extraction is unordered and may merge or split lines. Edit each `_ground_truth.json` by hand to match the actual document.
+2. **Hand-fill tables** — add `{"data": [[cell, ...], ...]}` entries to the `"tables"` list for every table on the page.
+3. **Hand-label scanned pages** — for `scanned_image_only` PDFs, create the `_ground_truth.json` entirely by hand using the same schema.
+
+### Ground-truth JSON schema (full-page documents)
+
+```json
+{
+  "font_family": "real",
+  "template": "<pdf-stem>",
+  "document_type": "real",
+  "paragraphs": ["paragraph text ...", "..."],
+  "tables": [{"data": [["col1", "col2"], ["val1", "val2"]]}],
+  "footer": ""
+}
+```
+
+### Run benchmark on real documents
+
+```bash
+uv run python -m khmer_pipeline.run_benchmark --data-dir eval/datasets/real
+```
+
+---
+
+## 8. Conventions
 
 - **Never edit `results.csv` in place.** If a run is wrong, create a new one.
 - **New model = new run folder.** Register it via `engine_registry.py` and run normally.

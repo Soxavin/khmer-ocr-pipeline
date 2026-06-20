@@ -131,6 +131,10 @@ def test_gt_table_grid_docs():
 def test_gt_table_grid_neither():
     assert gt_table_grid({"font_family": "x"}) is None
 
+def test_gt_table_grid_empty_tables_list():
+    # harvested GT has tables=[] — must return None, not IndexError
+    assert gt_table_grid({"tables": []}) is None
+
 # --- gt_paragraph_lines ---
 
 def test_gt_paragraph_lines_docs():

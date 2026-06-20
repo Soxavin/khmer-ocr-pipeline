@@ -47,7 +47,7 @@ def cer(reference: str, hypothesis: str) -> float:
 
 
 def gt_table_grid(gt: dict) -> list[list[str]] | None:
-    if "tables" in gt:
+    if "tables" in gt and gt["tables"]:
         return gt["tables"][0]["data"]
     if "data" in gt:
         return gt["data"]
