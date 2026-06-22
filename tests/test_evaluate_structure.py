@@ -235,6 +235,19 @@ def test_evaluate_table_no_pred_tables():
     assert result["tables_found"] == 0
     assert result["cells_total"] == 4
 
+def test_evaluate_table_combines_fragmented_tables():
+    # real docs: Surya fragments one logical table into many regions;
+    # evaluate_table must score the union of all detected tables, not just [0].
+    gt_grid = [["ក", "ខ"], ["1", "2"], ["3", "4"]]
+    t1 = _make_table_from_grid([["ក", "ខ"]])
+    t2 = _make_table_from_grid([["1", "2"], ["3", "4"]])
+    result = evaluate_table([t1, t2], gt_grid)
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+    assert result["table_cer"] == pytest.approx(0.0)
+    assert result["tables_found"] == 2  # fragmentation signal preserved
+    assert result["cells_total"] == 6
+    assert result["cells_correct"] == 6
+
 def test_evaluate_table_extra_leading_row_shifts():
     # pred has an extra non-title row prepended; _strip_title_row won't remove it
     # because it has content in both cells. Row alignment now recovers accuracy.

@@ -128,10 +128,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     gt_rows = len(gt_stripped)
     gt_cols = _grid_cols(gt_stripped)
 
-    if pred_tables:
-        pred_stripped = _strip_title_row(pred_table_grid(pred_tables[0]))
-    else:
-        pred_stripped = []
+    # combine ALL detected tables (real docs fragment one table into many regions)
+    combined = [row for t in pred_tables for row in pred_table_grid(t)]
+    pred_stripped = _strip_title_row(combined)
 
     pred_rows = len(pred_stripped)
     pred_cols = _grid_cols(pred_stripped)
