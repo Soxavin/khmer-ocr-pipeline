@@ -217,6 +217,28 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   reserved for legacy/scanned docs with mis-ordered Khmer. Honest thesis takeaway:
   a general LLM did not help; deterministic Unicode normalization does, modestly.
 
+### 2.11 Productionization polish (single-user desktop)
+
+- **llama-server lifecycle.** Surya keeps a resident `llama-server` (Metal,
+  `KEEP_ALIVE=true`); a crash/unclean exit can orphan it (leaked unified memory +
+  port). Added `stop-metal-macos.sh` (graceful then forced kill, reports PIDs) and a
+  `backend_status.py` helper (`llama_server_running()` via `pgrep`) surfaced as a
+  sidebar 🟢/⚪ indicator. **No** auto-kill-on-exit in CLI/benchmark — a blanket kill
+  would also stop a server a concurrently-running app is using; explicit teardown only.
+- **Memory guard.** Added a soft `st.warning` in `app.py` when a job exceeds
+  `_MEMORY_WARN_PAGES` (scaled by DPI). The definitive limit is **measured** via a
+  stress test on a large scanned PDF (method + result in `docs/OPERATIONS.md`);
+  the constant is provisional until that run.
+- **Reproducibility freeze.** Synthetic generators previously pulled fonts live from
+  `fonts.googleapis.com` (non-deterministic, network-dependent). Vendored the 5 OFL
+  Khmer fonts under `fonts/` (+ `MANIFEST.txt` with sha256 + OFL-1.1 license texts)
+  and switched both generators to embed them as base64 `@font-face` via a shared
+  `fonts.py` helper — datasets now regenerate **byte-for-byte offline**. Verified one
+  doc + one table render correctly with no network. Fonts are OFL-1.1 → redistributable.
+- **Docker — declined (future work).** Deliberately not containerized: macOS containers
+  can't reach Metal and MLX doesn't run on Linux, so a container would drop to CPU.
+  Reconsider only for a Linux/CUDA multi-user server pivot. (See `docs/OPERATIONS.md`.)
+
 ---
 
 ## 3. Results Snapshot
