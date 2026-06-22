@@ -279,3 +279,22 @@ def test_summarize_with_rows():
     assert "Per-Dataset" in result
     assert "Best & Worst by Cell_Accuracy" in result
     assert "Lowest Table_CER" in result
+
+
+def test_summarize_zero_tables_expected_no_crash():
+    # real docs labelled paragraphs-only have Tables_Expected="0" for every row;
+    # the Tables_Found/Expected ratio must not divide by zero
+    rows = [
+        {
+            "Engine": "run_surya", "Corrected": "False",
+            "Dataset": "real", "Image_File": "doc_p1.png",
+            "Font": "real", "Template": "real",
+            "Tables_Expected": "0", "Tables_Found": "0",
+            "GT_Rows": "0", "GT_Cols": "0", "Pred_Rows": "0", "Pred_Cols": "0",
+            "Cell_Accuracy": "0.000", "Cell_Content_Recall": "0.000",
+            "Table_CER": "0.000", "Text_CER": "0.950", "Document_CER": "0.303",
+            "Paragraph_Recall": "0.387", "Paragraph_Leak": "232", "Error": "",
+        },
+    ]
+    result = summarize(rows)  # must not raise ZeroDivisionError
+    assert "Per-Dataset" in result

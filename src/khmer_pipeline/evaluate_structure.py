@@ -107,8 +107,10 @@ def _align_rows(gt_sigs: list[tuple], pred_sigs: list[tuple]) -> list[tuple[int,
 
 def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> dict:
     if gt_grid is None:
+        # No GT table grid (e.g. real docs labelled paragraphs-only): still report
+        # how many tables the OCR actually detected, but no cell-level scoring.
         return {
-            "tables_found": 0,
+            "tables_found": len(pred_tables),
             "gt_rows": 0,
             "gt_cols": 0,
             "pred_rows": 0,

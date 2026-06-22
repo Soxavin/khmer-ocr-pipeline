@@ -251,6 +251,14 @@ def test_evaluate_table_none_gt_grid():
     assert result["gt_rows"] == 0
     assert result["gt_cols"] == 0
 
+def test_evaluate_table_none_gt_grid_still_reports_detection():
+    # real docs labelled paragraphs-only have no GT grid, but we still want to
+    # know how many tables the OCR actually detected
+    pred_table = _make_table_from_grid([["ក", "ខ"], ["1", "2"]])
+    result = evaluate_table([pred_table], None)
+    assert result["tables_found"] == 1
+    assert result["cell_accuracy"] == 0.0  # no GT grid → no cell scoring
+
 def test_evaluate_table_dim_mismatch():
     gt_grid = [["ក", "ខ", "គ"], ["1", "2", "3"]]
     pred_grid = [["ក", "ខ"], ["1", "2"]]

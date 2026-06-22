@@ -58,9 +58,10 @@ def summarize(rows: list[dict]) -> str:
     def ratio(items: list, found_key: str, expected_key: str) -> float:
         found_vals = [float(i[found_key]) for i in items if i.get(found_key)]
         exp_vals = [float(i[expected_key]) for i in items if i.get(expected_key)]
-        if not found_vals or not exp_vals:
+        denom = sum(exp_vals)
+        if not found_vals or denom == 0:
             return 0.0
-        return sum(found_vals) / sum(exp_vals)
+        return sum(found_vals) / denom
 
     header = (
         f"{'Group':<28} {'CellAcc':>8} {'ContentRec':>10} {'TableCER':>9}"
