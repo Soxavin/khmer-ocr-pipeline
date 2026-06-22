@@ -1,0 +1,12 @@
+Vendored Khmer fonts for synthetic-data generation (reproducibility freeze).
+All fonts are licensed under the SIL Open Font License 1.1 (OFL-1.1),
+which permits bundling and redistribution. License text per font in OFL-*.txt.
+Source: https://github.com/google/fonts (ofl/<family>/) — fetched 2026-06-22.
+
+family               | file                          | license  | sha256
+---------------------+-------------------------------+----------+-------------------------------------------------------------------
+Noto Sans Khmer      | NotoSansKhmer-Variable.ttf    | OFL-1.1  | f37a8431a0c5d5ed2f81a767417546aca576a81fb7eff9c924d46aecf828f2ca
+Battambang           | Battambang-Regular.ttf        | OFL-1.1  | 1fd3eb9960911396cb7955f2c68afe5ee21c2c14f8097e945d05b768ed4de942
+Hanuman              | Hanuman-Variable.ttf          | OFL-1.1  | 0cb2c9dd733d7357d5b673f55d756ff9ef50dd68af9dc217c0d5a71719665536
+Moul                 | Moul-Regular.ttf              | OFL-1.1  | c0445e86767edf1bfb08a6fe65bd38f350b588c641af7e2e88a59d72ccecd9c3
+Fasthand             | Fasthand-Regular.ttf          | OFL-1.1  | f4a151d4d01ab2daf53e67904efd2b943c17ac7b7351de4e6ee7bda7697b0a13

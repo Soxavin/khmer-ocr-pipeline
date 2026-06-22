@@ -10,6 +10,8 @@ try:
 except ImportError:
     sync_playwright = None  # type: ignore[assignment]
 
+from .fonts import font_face_style_tag
+
 _FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
 _DEFAULT_COUNT = 3
 _VIEWPORT_WIDTH = 1100  # px — table width + 120px horizontal padding from .page margins
@@ -52,13 +54,6 @@ _TABLE_TEMPLATES: list[dict] = [
     },
 ]
 
-_GOOGLE_FONTS_LINK = (
-    '<link href="https://fonts.googleapis.com/css2?'
-    "family=Battambang&family=Hanuman&family=Moul&family=Fasthand"
-    '&family=Noto+Sans+Khmer&display=swap" rel="stylesheet">'
-)
-
-
 def _build_html(font_family: str, title: str, data: list[list[str]]) -> str:
     ncols = len(data[0])
 
@@ -72,7 +67,7 @@ def _build_html(font_family: str, title: str, data: list[list[str]]) -> str:
 <html lang="km">
 <head>
 <meta charset="UTF-8">
-{_GOOGLE_FONTS_LINK}
+{font_face_style_tag(font_family)}
 <style>
   body {{
     font-family: '{font_family}', sans-serif;
@@ -150,7 +145,7 @@ def generate_synthetic_table(
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": _VIEWPORT_WIDTH, "height": 800})
-        page.set_content(html, wait_until="networkidle")  # ensures Google Fonts load
+        page.set_content(html, wait_until="networkidle")  # fonts are inlined (offline)
         page.evaluate("document.fonts.ready")  # Playwright auto-awaits the returned promise
         if not page.evaluate(f'document.fonts.check(\'16px "{font_family}"\')'):
             raise RuntimeError(

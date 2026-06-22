@@ -13,15 +13,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-_FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
+from .fonts import font_face_style_tag
 
-_FONT_URL_PARAMS: dict[str, str] = {
-    "Noto Sans Khmer": "Noto+Sans+Khmer",
-    "Battambang": "Battambang",
-    "Hanuman": "Hanuman",
-    "Moul": "Moul",
-    "Fasthand": "Fasthand",
-}
+_FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
 
 _DOCUMENT_TEMPLATES: list[dict] = [
     {
@@ -94,7 +88,7 @@ _HTML_TEMPLATE = """\
 <html lang="km">
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family={font_url_param}&display=swap" rel="stylesheet">
+{font_face_tag}
 <style>
   body {{
     margin: 0;
@@ -205,7 +199,6 @@ _HTML_TEMPLATE = """\
 
 
 def _build_html(tmpl: dict, font: str, rows: list[list[str]]) -> str:
-    font_url_param = _FONT_URL_PARAMS.get(font, font.replace(" ", "+"))
     headers = tmpl["table_headers"]
     col_count = len(headers)
 
@@ -218,7 +211,7 @@ def _build_html(tmpl: dict, font: str, rows: list[list[str]]) -> str:
     )
 
     return _HTML_TEMPLATE.format(
-        font_url_param=font_url_param,
+        font_face_tag=font_face_style_tag(font),
         font_name=font,
         org_header=tmpl["org_header"],
         org_name=tmpl["org_name"],
