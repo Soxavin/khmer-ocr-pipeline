@@ -241,6 +241,13 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["image_count"] == 1
 
+    # prediction dump for the processed image
+    pred_file = run_dir / "predictions" / "table_0_Battambang.txt"
+    assert pred_file.exists(), "prediction dump file should be created for successful images"
+    dump_text = pred_file.read_text(encoding="utf-8")
+    assert "--- GROUND TRUTH (pooled) ---" in dump_text
+    assert "--- OCR PREDICTION (pooled) ---" in dump_text
+
 
 def test_summarize_empty():
     assert summarize([]) == "No results."

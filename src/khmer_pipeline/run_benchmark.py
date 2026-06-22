@@ -11,7 +11,7 @@ from pathlib import Path
 from .ingest import ingest
 from .models import PreprocessResult
 from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
-from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document
+from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document, pool_gt_text, pool_pred_text
 from .memory import clear_device_cache
 from .analyze_benchmark import summarize
 
@@ -148,6 +148,8 @@ def run_benchmark(
         run_dir = _default_run_dir(engine, datetime.now())
 
     run_dir.mkdir(parents=True, exist_ok=True)
+    pred_dir = run_dir / "predictions"
+    pred_dir.mkdir(parents=True, exist_ok=True)
     results_csv = run_dir / "results.csv"
 
     done = _done_keys(results_csv) if resume and results_csv.exists() else set()
@@ -250,6 +252,19 @@ def run_benchmark(
                     }
                     print(f"[OK] {img_path.name}  cell_acc={row['Cell_Accuracy']}")
                     ok_count += 1
+
+                    try:
+                        dump = (
+                            f"=== {img_path.name} ===\n"
+                            f"Document_CER: {row['Document_CER']}\n"
+                            f"\n--- GROUND TRUTH (pooled) ---\n"
+                            f"{pool_gt_text(gt)}\n"
+                            f"\n--- OCR PREDICTION (pooled) ---\n"
+                            f"{pool_pred_text(ocr_text, pred_tables)}\n"
+                        )
+                        (pred_dir / f"{img_path.stem}.txt").write_text(dump, encoding="utf-8")
+                    except Exception as exc:
+                        print(f"[WARN] Could not write prediction dump for {img_path.name}: {exc}")
 
                     # accumulate metrics for aggregates (skip blank)
                     for csv_key, acc_key in [

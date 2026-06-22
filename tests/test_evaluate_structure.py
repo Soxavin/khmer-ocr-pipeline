@@ -14,6 +14,8 @@ from khmer_pipeline.evaluate_structure import (
     evaluate_table,
     evaluate_text,
     evaluate_document,
+    pool_gt_text,
+    pool_pred_text,
 )
 
 # --- _norm ---
@@ -385,6 +387,75 @@ def test_evaluate_text_no_leak():
     pred_tables = [{"cells": [cell]}]
     result = evaluate_text("body text", pred_tables, gt)
     assert result["paragraph_leak"] == 0
+
+# --- pool_gt_text ---
+
+def test_pool_gt_text_paragraphs_and_footer():
+    gt = {
+        "paragraphs": ["para one", "para two"],
+        "tables": [{"data": [["cell A", "cell B"]]}],
+        "footer": "foot",
+    }
+    result = pool_gt_text(gt)
+    lines = result.split("\n")
+    assert "para one" in lines
+    assert "para two" in lines
+    assert "cell A" in lines
+    assert "cell B" in lines
+    assert "foot" in lines
+
+def test_pool_gt_text_isolated_data_schema():
+    gt = {"data": [["ក", "ខ"], ["1", "2"]]}
+    result = pool_gt_text(gt)
+    lines = result.split("\n")
+    assert "ក" in lines
+    assert "ខ" in lines
+    assert "1" in lines
+    assert "2" in lines
+
+def test_pool_gt_text_empty_gt():
+    assert pool_gt_text({}) == ""
+
+def test_pool_gt_text_missing_keys():
+    # missing paragraphs/tables/footer should not raise
+    gt = {"paragraphs": ["hello"]}
+    result = pool_gt_text(gt)
+    assert "hello" in result
+
+def test_pool_gt_text_empty_footer_omitted():
+    gt = {"paragraphs": ["text"], "tables": [], "footer": ""}
+    result = pool_gt_text(gt)
+    assert result == "text"
+
+def test_pool_gt_text_skips_empty_cells():
+    gt = {"data": [["", "hello", ""]]}
+    result = pool_gt_text(gt)
+    assert result == "hello"
+
+# --- pool_pred_text ---
+
+def test_pool_pred_text_ocr_and_cells():
+    cell = {"row_id": 0, "col_id": 0, "text_lines": [{"text": "cell content"}]}
+    result = pool_pred_text("ocr text", [{"cells": [cell]}])
+    lines = result.split("\n")
+    assert "ocr text" in lines
+    assert "cell content" in lines
+
+def test_pool_pred_text_empty_ocr_omitted():
+    cell = {"row_id": 0, "col_id": 0, "text_lines": [{"text": "cell only"}]}
+    result = pool_pred_text("", [{"cells": [cell]}])
+    assert result == "cell only"
+    # empty string not included as a blank line
+    assert not result.startswith("\n")
+
+def test_pool_pred_text_no_tables():
+    result = pool_pred_text("just ocr", [])
+    assert result == "just ocr"
+
+def test_pool_pred_text_empty_cells_skipped():
+    cell = {"row_id": 0, "col_id": 0, "text_lines": [{"text": ""}]}
+    result = pool_pred_text("ocr", [{"cells": [cell]}])
+    assert result == "ocr"
 
 # --- evaluate_document ---
 
