@@ -184,7 +184,7 @@ def _process_page(
         _log(f"Page {page_index}: layout done in {time.perf_counter()-t0:.1f}s → {len(layout_result.bboxes)} regions")
 
         if layout_result.error:
-            warnings.warn(f"Layout failed on page {page_index}; returning empty result.")
+            warnings.warn(f"Layout failed on page {page_index + 1}; returning empty result.")
             return SuryaPageResult(page_index=page_index, text_blocks=[], tables=[], ocr_text="")
 
         text_blocks: list[dict] = []
@@ -198,7 +198,7 @@ def _process_page(
             page_ocr = rec_pred([pil_img], layout_results=[layout_result])[0]
             _log(f"Page {page_index}: OCR done in {time.perf_counter()-t0:.1f}s → {len(page_ocr.blocks)} blocks")
         except Exception as e:
-            warnings.warn(f"Text OCR failed on page {page_index}: {e}")
+            warnings.warn(f"Text OCR failed on page {page_index + 1}: {e}")
             page_ocr = None
 
         if page_ocr is not None:
@@ -236,15 +236,15 @@ def _process_page(
             table_html = _find_matching_html(b.bbox, table_html_map)
             if not table_html:
                 warnings.warn(
-                    f"Page {page_index}: no OCR HTML for table {len(tables)}; cells will be empty."
+                    f"Page {page_index + 1}: no OCR HTML for table {len(tables) + 1}; cells will be empty."
                 )
                 tbl = {"rows": [], "cols": [], "cells": [], "image_bbox": list(b.bbox)}
             else:
                 grid = _parse_html_table(table_html)
                 if not grid:
                     warnings.warn(
-                        f"Page {page_index}: VLM produced no <table> structure for table "
-                        f"{len(tables)}; using flat text in first cell."
+                        f"Page {page_index + 1}: VLM produced no <table> structure for table "
+                        f"{len(tables) + 1}; using flat text in first cell."
                     )
                 tbl = _build_table_from_grid(grid, table_html, b.bbox)
                 _log(f"Page {page_index}: built table with {len(tbl['cells'])} cells from HTML")
@@ -256,7 +256,7 @@ def _process_page(
         )
         if low_conf_blocks:
             warnings.warn(
-                f"Page {page_index}: {low_conf_blocks} text block(s) have low OCR "
+                f"Page {page_index + 1}: {low_conf_blocks} text block(s) have low OCR "
                 f"confidence (<{CONFIDENCE_LOW})."
             )
 
@@ -268,7 +268,7 @@ def _process_page(
         )
 
     except Exception as e:
-        warnings.warn(f"Critical failure processing page {page_index}: {e}")
+        warnings.warn(f"Critical failure processing page {page_index + 1}: {e}")
         return SuryaPageResult(
             page_index=page_index,
             text_blocks=[],

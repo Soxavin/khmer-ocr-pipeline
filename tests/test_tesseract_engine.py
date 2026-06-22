@@ -226,7 +226,7 @@ def test_run_tesseract_on_page_callback_invoked(fake_pytesseract):
 
 
 def test_run_tesseract_swallows_page_errors(monkeypatch):
-    # image_to_data raises on page 0, succeeds on page 1.
+    # image_to_data raises on the first page, succeeds on the second.
     call_count = [0]
 
     def flaky(img, **kwargs):
@@ -248,4 +248,4 @@ def test_run_tesseract_swallows_page_errors(monkeypatch):
     assert r.pages[0].text_blocks == []  # errored → empty
     assert r.pages[0].ocr_text == ""
     assert len(r.pages[1].text_blocks) == 2  # succeeded
-    assert any("Page 0 failed" in w for w in r.warnings)
+    assert any("Page 1 failed" in w for w in r.warnings)

@@ -1,10 +1,13 @@
 from __future__ import annotations
 import datetime
+import io
 import json
 import time
+import zipfile
 import bleach
 import fitz
 import numpy as np
+import pandas as pd
 import streamlit as st
 from pathlib import Path
 from PIL import Image, ImageDraw
@@ -17,6 +20,10 @@ from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_
 from khmer_pipeline.export import export
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
+from khmer_pipeline.backend_status import llama_server_running
+
+# Provisional until the memory stress test sets a measured value (docs/OPERATIONS.md).
+_MEMORY_WARN_PAGES = 20
 
 
 @st.cache_resource(show_spinner="Loading Surya OCR models — first run takes ~30s...")
@@ -40,6 +47,21 @@ def _clear_edit_state() -> None:
     for key in list(st.session_state.keys()):
         if key.startswith("edited_text_") or key.startswith("edit_"):
             del st.session_state[key]
+
+
+def _unique_headers(headers: list[str]) -> list[str]:
+    # pandas/pyarrow reject blank or duplicate column names; make them unique.
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for idx, h in enumerate(headers):
+        label = h.strip() if (h and h.strip()) else f"col{idx + 1}"
+        if label in seen:
+            seen[label] += 1
+            label = f"{label} ({seen[label]})"
+        else:
+            seen[label] = 1
+        out.append(label)
+    return out
 
 _LABEL_COLORS = {
     "Text": "#4A90D9",
@@ -88,6 +110,11 @@ st.title("Khmer Document Extraction Pipeline")
 st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
 
 with st.sidebar:
+    if llama_server_running():
+        st.caption("🟢 OCR backend running")
+    else:
+        st.caption("⚪ OCR backend not detected — run `source setup-metal-macos.sh`")
+
     st.header("Document settings")
     dpi = st.select_slider("Scan quality (DPI)", options=[150, 200, 300], value=200)
     st.caption("200 for digital PDFs, 300 for scanned documents.")
@@ -122,7 +149,13 @@ with st.sidebar:
     tables_only = extraction_mode == "Tables only"
 
     st.header("Post-processing")
-    enable_qwen = st.checkbox("Enable Qwen correction", value=True)
+    enable_qwen = st.checkbox(
+        "Enable Qwen correction (experimental, slow)",
+        value=False,
+        help="One-time ~4GB model download, then a slow per-run load on a 24GB "
+             "Mac. Off by default — the deterministic Khmer normalizer always "
+             "runs and is usually sufficient.",
+    )
     anomaly_threshold = st.slider(
         "Anomaly threshold for Qwen correction",
         min_value=0.0,
@@ -185,14 +218,30 @@ else:
 
     file_size_kb = round(len(uploaded.getvalue()) / 1024, 1)
     st.markdown(f"**File:** {uploaded.name}  \n**Size:** {file_size_kb} KB")
+    doc_page_count = 1
     if Path(uploaded.name).suffix.lower() == ".pdf":
         try:
             with fitz.open(stream=uploaded.getvalue(), filetype="pdf") as doc:
-                st.markdown(f"**Pages:** {len(doc)}")
+                doc_page_count = len(doc)
+                st.markdown(f"**Pages:** {doc_page_count}")
         except Exception:
+            doc_page_count = 0
             st.markdown("**Pages:** (could not read page count)")
     else:
         st.markdown("**Pages:** 1 (image file)")
+
+    # Memory soft guard — estimate pages to be processed, scaled by DPI vs the 200 baseline.
+    if page_selection == "Single page":
+        _est_pages = 1
+    elif page_selection == "Page range":
+        _est_pages = max(1, int(page_end) - int(page_start) + 1)
+    else:
+        _est_pages = doc_page_count
+    if _est_pages * (dpi / 200.0) > _MEMORY_WARN_PAGES:
+        st.warning(
+            f"Large job (~{_est_pages} page(s) at {dpi} DPI) — near the ~{_MEMORY_WARN_PAGES}-page "
+            "memory limit on a 24 GB Mac. If it stalls, process in smaller page ranges."
+        )
 
     if page_selection == "Single page":
         page_info = f"Single page — page {page_num}"
@@ -376,6 +425,24 @@ else:
         for col, (name, secs) in zip(cols, st.session_state["stage_times"].items()):
             col.metric(name, f"{secs:.1f}s")
 
+    # Results overview — document-level summary for at-a-glance review / demo
+    total_tables = sum(len(p.tables) for p in surya_result.pages)
+    n_warnings = len(surya_result.warnings)
+    ov1, ov2, ov3 = st.columns(3)
+    ov1.metric("Pages", filtered_ingest.page_count)
+    ov2.metric("Tables detected", total_tables)
+    ov3.metric("Warnings", n_warnings)
+    if n_warnings:
+        st.warning(f"Extraction complete with {n_warnings} warning(s) — review the panel below.")
+    else:
+        st.success("Extraction complete — review the pages below.")
+
+    # Persistent warnings panel (the in-run st.warning vanishes after pagination reruns)
+    if surya_result.warnings:
+        with st.expander(f"⚠️ Pipeline warnings ({n_warnings})", expanded=False):
+            for w in surya_result.warnings:
+                st.markdown(f"- {w}")
+
     show_layout = st.checkbox("Show layout overlay", value=True)
     overlay_mode = st.radio(
         "Layout overlay mode",
@@ -433,37 +500,59 @@ else:
     orig, proc, surya_page, post_page = pages_data[current_idx]
     i = current_idx  # Match original session state keys
 
-    st.caption(
-        f"Page {surya_page.page_index + 1} — {len(surya_page.text_blocks)} block(s), {len(surya_page.tables)} table(s)"
+    # Per-page quality banner — at-a-glance trust signal before the detail tabs
+    low_conf = sum(1 for b in surya_page.text_blocks if (b.get("confidence") or 0.0) < CONFIDENCE_LOW)
+    n_page_tables = len(surya_page.tables)
+    qcols = st.columns(4)
+    qcols[0].metric("Text blocks", len(surya_page.text_blocks))
+    qcols[1].metric("Tables", n_page_tables)
+    qcols[2].metric("Low-confidence", low_conf)
+    qcols[3].metric("Qwen", "Yes" if post_page.qwen_used else "No")
+    if n_page_tables > 1:
+        st.caption("⚠ Multiple table regions detected — a single table may have been fragmented; verify the grids in the Tables tab.")
+    if low_conf:
+        st.caption("⚠ Some blocks have low OCR confidence — switch the overlay to 'Confidence' to locate them.")
+
+    tab_images, tab_text, tab_tables, tab_corrected, tab_edit = st.tabs(
+        ["🖼 Images", "📝 Text", "📊 Tables", "✓ Corrected", "✏️ Edit"]
     )
-    if show_layout:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.image(orig, caption="Original", width="stretch")
-        with col2:
-            st.image(proc, caption="Preprocessed", width="stretch")
-        with col3:
-            if overlay_mode == "Confidence":
-                overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
-                overlay_caption = "Confidence (🟢 high 🟡 medium 🔴 low)"
-            else:
-                table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
-                overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
-                overlay_caption = "Layout detection"
-            st.image(overlay_img, caption=overlay_caption, width="stretch")
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(orig, caption="Original", width="stretch")
-        with col2:
-            st.image(proc, caption="Preprocessed", width="stretch")
 
-    if not tables_only and surya_page.ocr_text:
-        with st.expander(f"OCR text — page {surya_page.page_index + 1}", expanded=True):
+    with tab_images:
+        if show_layout:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.image(orig, caption="Original", width="stretch")
+            with col2:
+                st.image(proc, caption="Preprocessed", width="stretch")
+            with col3:
+                if overlay_mode == "Confidence":
+                    overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
+                    overlay_caption = "Confidence (🟢 high 🟡 medium 🔴 low)"
+                else:
+                    table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
+                    overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
+                    overlay_caption = "Layout detection"
+                st.image(overlay_img, caption=overlay_caption, width="stretch")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.image(orig, caption="Original", width="stretch")
+            with col2:
+                st.image(proc, caption="Preprocessed", width="stretch")
+
+    with tab_text:
+        if tables_only:
+            st.caption("Text output is hidden in 'Tables only' extraction mode.")
+        elif surya_page.ocr_text:
             st.markdown(_safe_html(surya_page.ocr_text), unsafe_allow_html=True)
+        else:
+            st.caption("No OCR text on this page.")
 
-    if surya_page.tables:
-        with st.expander(f"Tables — page {surya_page.page_index + 1} ({len(surya_page.tables)} detected)", expanded=True):
+    with tab_tables:
+        if not surya_page.tables:
+            st.caption("No tables detected on this page.")
+        else:
+            st.write(f"{len(surya_page.tables)} table(s) detected")
             for j, tbl in enumerate(surya_page.tables):
                 st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
                 if tbl.get("was_repaired"):
@@ -482,9 +571,18 @@ else:
                             ).strip()
                             if 0 <= r < max_row and 0 <= col < max_col:
                                 grid[r][col] = text
-                    st.dataframe(grid)
+                    use_header = st.checkbox(
+                        "Use first row as header", value=True, key=f"hdr_{i}_{j}"
+                    )
+                    if use_header and len(grid) > 1:
+                        st.dataframe(
+                            pd.DataFrame(grid[1:], columns=_unique_headers(grid[0])),
+                            width="stretch",
+                        )
+                    else:
+                        st.dataframe(grid, width="stretch")
 
-    with st.expander(f"Post-processing — page {surya_page.page_index + 1}", expanded=True):
+    with tab_corrected:
         if post_page.qwen_used:
             st.markdown("**⚡ Qwen correction applied**")
         else:
@@ -494,7 +592,7 @@ else:
         if post_page.correction_diff:
             st.code(post_page.correction_diff, language="diff")
 
-    with st.expander(f"Edit corrected text — page {surya_page.page_index + 1}", expanded=True):
+    with tab_edit:
         edited = st.text_area(
             "Corrected text (editable)",
             value=st.session_state.get(f"edited_text_{i}", post_page.corrected_text),
@@ -560,6 +658,26 @@ else:
         data=all_text.encode("utf-8"),
         file_name=f"{Path(uploaded.name).stem}_extracted.txt",
         mime="text/plain",
+        width="stretch",
+    )
+
+    # One-click bundle: JSON + .txt report + every non-empty table CSV
+    _stem = Path(uploaded.name).stem
+    _zip_buf = io.BytesIO()
+    with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+        _zf.writestr(
+            f"{_stem}_extracted.json",
+            json.dumps(doc_json, ensure_ascii=False, indent=2),
+        )
+        _zf.writestr(f"{_stem}_extracted.txt", all_text)
+        for table_id, csv_string in export_result.tables_csv:
+            if csv_string.strip().strip("﻿"):
+                _zf.writestr(f"{table_id}.csv", csv_string.encode("utf-8-sig"))
+    st.download_button(
+        label="⬇ Download everything (.zip)",
+        data=_zip_buf.getvalue(),
+        file_name=f"{_stem}_extracted.zip",
+        mime="application/zip",
         width="stretch",
     )
 

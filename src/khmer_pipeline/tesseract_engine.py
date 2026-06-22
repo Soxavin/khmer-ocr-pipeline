@@ -104,7 +104,7 @@ def run_tesseract(
                     ocr_text=ocr_text,
                 ))
             except Exception as e:
-                _warnings.warn(f"Page {idx} failed in Tesseract engine: {e}")
+                _warnings.warn(f"Page {idx + 1} failed in Tesseract engine: {e}")
                 pages.append(SuryaPageResult(
                     page_index=idx, text_blocks=[], tables=[], ocr_text=""
                 ))
