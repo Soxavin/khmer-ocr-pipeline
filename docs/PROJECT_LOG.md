@@ -201,6 +201,36 @@ column drift. Rare; logged rather than chased. A column-alignment counterpart to
 *(Numbers from `eval/runs/<ts>_run_surya/results.csv`; regenerate with
 `uv run python -m khmer_pipeline.run_benchmark` then `uv run python -m khmer_pipeline.analyze_benchmark`.)*
 
+### Real-document results (first real MEF doc, 2026-06-22)
+
+A real born-digital MEF daily market-price PDF (3 pages, dense Khmer price tables),
+hand-labelled as ground truth (paragraphs). Run `eval/runs/20260622_114939_run_surya`.
+
+| Page | Tables_Found | Document_CER | Note |
+|---|---|---|---|
+| p1 | 1 | 0.30 | clean single table |
+| p2 | **8** | **0.70** | one table fragmented into 8 regions |
+| p3 | 1 | 0.22 | clean single table |
+
+**Key finding — the bottleneck is layout/table-structure, not character recognition.**
+Inspecting the saved OCR-vs-GT prediction dumps: the model's *character* recognition
+is strong (~90%+ of product names and **all** numeric values correct, only minor
+slips like `ត្រកួន→ត្រកូន`, riel sign `៛→រ`). But on the dense page 2, Surya's layout
+model **fragmented one table into 8 regions**, which serialized the content
+column-wise (all names, then all numbers, then all percentages) and destroyed the
+row↔value associations. Because CER is order-sensitive, this *reordering* — not bad
+OCR — is what drives `Document_CER` to 0.70 (vs 0.22–0.30 on the cleanly-detected
+pages). Two minor noise artifacts on page 2: a hallucinated Kannada line and a
+repeated column header.
+
+**Implications.** (1) Raw Khmer OCR quality on real born-digital docs is better than a
+flat CER suggests. (2) For financial tables the metric that matters is *structural*
+(`Cell_Accuracy` — does item N map to price N?), and `Tables_Found vs Expected` is a
+useful **fragmentation** signal. (3) Reducing table-region fragmentation on dense
+tables is the highest-value engineering target for real-world use. (4) The
+born-digital PDF's own embedded text layer is garbled (broken ToUnicode CMap), so OCR
+on rendered pixels is genuinely necessary — text extraction is not a shortcut.
+
 ---
 
 ## 4. Lessons / Principles
