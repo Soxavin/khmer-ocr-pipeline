@@ -142,6 +142,7 @@ def run_benchmark(
     run_dir: Path | None = None,
     with_correction: bool = False,
     resume: bool = False,
+    use_qwen: bool = False,
 ) -> None:
     engine = _engine_name()
     if run_dir is None:
@@ -216,7 +217,7 @@ def run_benchmark(
                     ocr_result = ACTIVE_OCR_ENGINE(pre)
 
                     if with_correction:
-                        corrected_result = ACTIVE_CORRECTION_ENGINE(ocr_result)
+                        corrected_result = ACTIVE_CORRECTION_ENGINE(ocr_result, skip_qwen=not use_qwen)
                         # tables are unchanged by correction; use corrected page text for text metrics
                         pred_tables = [t for page in ocr_result.pages for t in page.tables]
                         ocr_text = "\n".join(p.corrected_text for p in corrected_result.pages)
@@ -348,6 +349,9 @@ if __name__ == "__main__":
     parser.add_argument("--run-dir", default=None, type=Path)
     parser.add_argument("--with-correction", action="store_true", default=False)
     parser.add_argument("--resume", action="store_true", default=False)
+    parser.add_argument("--qwen", action="store_true", default=False, dest="use_qwen",
+                        help="With --with-correction, also run the slow Qwen LLM pass "
+                             "(default: deterministic normalizer only).")
     args = parser.parse_args()
 
     run_benchmark(
@@ -355,4 +359,5 @@ if __name__ == "__main__":
         run_dir=args.run_dir,
         with_correction=args.with_correction,
         resume=args.resume,
+        use_qwen=args.use_qwen,
     )

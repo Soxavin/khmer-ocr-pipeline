@@ -182,6 +182,41 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   clusters**, which inflates its CER; this is a real property of the engine, not a
   measurement artifact, and is reported as-is.
 
+### 2.10 Stage 4 redesign — Qwen demoted to opt-in, deterministic Khmer normalizer
+
+- **Problem.** Stage 4 was both slow and useless: it loaded Qwen2.5-**7B-Instruct**
+  (~4GB, slow per-run load on the 24GB Mac) — a *general* LLM never trained for
+  Khmer OCR — yet the deterministic layer was a **no-op** (`RULE_BASED_CORRECTIONS`
+  empty → only NFC). Qwen fired only on blocks with ≥15% *foreign-script* chars
+  (rare on clean Khmer), but `enable_qwen` defaulted **on**, so every fresh run
+  risked the load for no benefit.
+- **Decision.** (1) **Qwen → opt-in**: `postprocess`/`_correct_page` now default
+  `skip_qwen=True`; UI checkbox defaults off (relabelled "experimental, slow");
+  CLI `--no-qwen` replaced by `--qwen`; `run_benchmark` gained `--qwen`. The
+  deterministic layer always runs. (2) New **`khmer_normalize.py`** — a 100%-local
+  deterministic normalizer: NFC + strip noise format chars (ZWSP/BOM/soft-hyphen;
+  ZWNJ/ZWJ preserved) + collapse duplicate combining marks + whitespace tidy
+  (**Tier A**), plus an opt-in canonical cluster reorder (**Tier B**).
+- **Validation (variance-free A/B on fixed OCR output, 33 images).** Comparing
+  `CER(GT, raw)` vs `CER(GT, normalize)` on the saved prediction dumps (so OCR
+  run-to-run variance can't confound it — table metrics drift ~6pts between two
+  live OCR runs, confirming the need for fixed-output comparison):
+
+  | dataset | n | raw | Tier A | + reorder |
+  |---|---|---|---|---|
+  | synthetic_tables | 15 | 0.1650 | 0.1650 | 0.1644 |
+  | synthetic_documents | 15 | 0.4498 | **0.4353** | 0.4353 |
+  | real | 3 | 0.5030 | 0.5030 | 0.5031 |
+  | ALL | 33 | 0.3252 | **0.3186** | 0.3183 |
+
+- **Outcome.** **Tier A ships on by default** — a real, safe win (synthetic_documents
+  CER −3.2% relative, neutral elsewhere, never hurts). **Tier B reorder is below the
+  noise floor** (helps tables 0.0006, ties docs, +0.0001 on real → fails the
+  pre-agreed "reduces-or-ties on both" gate) because Surya already emits canonical
+  Khmer; it is kept **behind a default-off `reorder=` flag**, validated-neutral and
+  reserved for legacy/scanned docs with mis-ordered Khmer. Honest thesis takeaway:
+  a general LLM did not help; deterministic Unicode normalization does, modestly.
+
 ---
 
 ## 3. Results Snapshot

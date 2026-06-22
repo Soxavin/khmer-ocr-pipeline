@@ -105,7 +105,7 @@ def test_qwen_used_false_when_no_errors():
     # Khmer text with Khmer numerals — no foreign scripts, no text_blocks (fallback path)
     clean = "ចំណូល " + _KHMER_NUM_3 + " " + _KHMER_NUM_4 + " " + _KHMER_NUM_5
     with _mock_qwen():
-        r = pp.postprocess(_make_surya_result(ocr_text=clean))
+        r = pp.postprocess(_make_surya_result(ocr_text=clean), skip_qwen=False)
     assert r.pages[0].qwen_used is False
 
 
@@ -117,7 +117,7 @@ def test_qwen_used_true_when_errors():
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(_make_surya_result(
             ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
-        ))
+        ), skip_qwen=False)
     assert r.pages[0].qwen_used is True
 
 
@@ -131,7 +131,7 @@ def test_qwen_failure_falls_back_gracefully():
             warnings.simplefilter("always")
             r = pp.postprocess(_make_surya_result(
                 ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
-            ))
+            ), skip_qwen=False)
         assert len(w) == 1
         assert "Qwen batch correction failed" in str(w[0].message)
     # corrected_text equals rule-applied block text (Qwen failed, returned input unchanged)
@@ -153,7 +153,7 @@ def test_qwen_not_called_when_no_errors():
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
          patch("khmer_pipeline.postprocess.generate") as mock_gen:
         mock_get.return_value = (MagicMock(), MagicMock())
-        pp.postprocess(_make_surya_result(ocr_text=clean))
+        pp.postprocess(_make_surya_result(ocr_text=clean), skip_qwen=False)
     mock_gen.assert_not_called()
 
 
@@ -183,7 +183,7 @@ def test_multi_page_each_page_corrected_independently():
     with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
          patch("khmer_pipeline.postprocess.generate", return_value='["fixed"]') as mock_gen:
         mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(multi)
+        r = pp.postprocess(multi, skip_qwen=False)
 
     assert len(r.pages) == 2
     assert r.pages[0].qwen_used is False
@@ -202,6 +202,7 @@ def test_anomaly_threshold_can_be_lowered_to_trigger_qwen():
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(
             _make_surya_result(text_blocks=[{"text": text, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
+            skip_qwen=False,
             anomaly_threshold=score - 0.001,  # lower than this text's score
         )
     assert r.pages[0].qwen_used is True
@@ -214,6 +215,7 @@ def test_anomaly_threshold_can_be_raised_to_suppress_qwen():
         mock_get.return_value = (MagicMock(), MagicMock())
         r = pp.postprocess(
             _make_surya_result(text_blocks=[{"text": _SINHALA_KA * 10, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
+            skip_qwen=False,
             anomaly_threshold=1.1,  # above the maximum possible score of 1.0
         )
     assert r.pages[0].qwen_used is False

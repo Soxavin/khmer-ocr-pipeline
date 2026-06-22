@@ -86,7 +86,9 @@ if __name__ == "__main__":
     parser.add_argument("--no-normalise", action="store_false", dest="normalise")
     parser.add_argument("--no-deskew", action="store_false", dest="deskew")
     parser.add_argument("--no-bg-normalise", action="store_false", dest="normalise_table_backgrounds")
-    parser.add_argument("--no-qwen", action="store_true", dest="skip_qwen")
+    parser.add_argument("--qwen", action="store_true", dest="enable_qwen",
+                        help="Opt in to the slow Qwen LLM correction pass "
+                             "(off by default; the deterministic normalizer always runs).")
     parser.add_argument("--anomaly-threshold", type=float, default=ANOMALY_THRESHOLD, dest="anomaly_threshold")
     parser.add_argument("--convert-numerals", action="store_true", dest="convert_numerals")
     parser.add_argument("--repair-tables", action="store_true", dest="repair_tables")
@@ -99,7 +101,7 @@ if __name__ == "__main__":
         normalise=args.normalise,
         deskew=args.deskew,
         normalise_table_backgrounds=args.normalise_table_backgrounds,
-        skip_qwen=args.skip_qwen,
+        skip_qwen=not args.enable_qwen,
         anomaly_threshold=args.anomaly_threshold,
         convert_numerals=args.convert_numerals,
         repair_tables=args.repair_tables,

@@ -2,7 +2,6 @@ from __future__ import annotations
 import difflib
 import json
 import warnings
-import unicodedata
 
 try:
     from mlx_lm import generate
@@ -12,6 +11,7 @@ except ImportError:
 from .models import SuryaResult, SuryaPageResult, PostprocessResult, CorrectedPageResult
 from .model_config import ANOMALY_THRESHOLD, STAGE4_MODEL_PATH
 from .memory import clear_device_cache
+from .khmer_normalize import normalize_khmer
 
 # ---------------------------------------------------------------------------
 # Rule table — deliberately empty. Add targeted pairs only after review.
@@ -47,7 +47,9 @@ def qwen_loaded() -> bool:
 # Correction layers
 # ---------------------------------------------------------------------------
 def _apply_rules(text: str) -> str:
-    text = unicodedata.normalize("NFC", text)
+    # deterministic Khmer Unicode normalization (NFC, format-char strip,
+    # canonical reorder, dup collapse, whitespace) then targeted exact-pair fixes
+    text = normalize_khmer(text)
     for wrong, correct in RULE_BASED_CORRECTIONS.items():
         text = text.replace(wrong, correct)
     return text
@@ -144,7 +146,7 @@ def _build_diff(raw: str, corrected: str) -> str:
 # ---------------------------------------------------------------------------
 def _correct_page(
     page: SuryaPageResult,
-    skip_qwen: bool = False,
+    skip_qwen: bool = True,  # Qwen is opt-in; deterministic normalizer always runs
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> CorrectedPageResult:
     raw = page.ocr_text  # always copied unchanged into raw_ocr_text
@@ -191,7 +193,7 @@ def _correct_page(
 
 def postprocess(
     result: SuryaResult,
-    skip_qwen: bool = False,
+    skip_qwen: bool = True,  # Qwen is opt-in; deterministic normalizer always runs
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> PostprocessResult:
     pages = []
