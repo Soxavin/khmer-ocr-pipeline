@@ -13,6 +13,7 @@ from khmer_pipeline.evaluate_structure import (
     pred_table_grid,
     evaluate_table,
     evaluate_text,
+    evaluate_document,
 )
 
 # --- _norm ---
@@ -376,3 +377,62 @@ def test_evaluate_text_no_leak():
     pred_tables = [{"cells": [cell]}]
     result = evaluate_text("body text", pred_tables, gt)
     assert result["paragraph_leak"] == 0
+
+# --- evaluate_document ---
+
+def test_evaluate_document_identical():
+    # (a) gt paragraphs == ocr_text → document_cer == 0.0
+    gt = {
+        "paragraphs": ["hello world"],
+        "tables": [],
+        "footer": "",
+    }
+    result = evaluate_document("hello world", [], gt)
+    assert result["document_cer"] == pytest.approx(0.0)
+
+def test_evaluate_document_placement_agnostic():
+    # (b) GT content is in paragraphs; pred side has same content as table cells
+    # with ocr_text="" — document_cer should be near 0
+    gt = {
+        "paragraphs": ["hello world"],
+        "tables": [],
+        "footer": "",
+    }
+    cell = {"row_id": 0, "col_id": 0, "text_lines": [{"text": "hello world"}]}
+    pred_tables = [{"cells": [cell]}]
+    result = evaluate_document("", pred_tables, gt)
+    assert result["document_cer"] == pytest.approx(0.0)
+
+def test_evaluate_document_wrong_prediction():
+    # (c) completely wrong prediction → high CER (≈ 1.0)
+    gt = {
+        "paragraphs": ["hello world"],
+        "tables": [],
+        "footer": "",
+    }
+    result = evaluate_document("zzzzzzzzzzz", [], gt)
+    assert result["document_cer"] > 0.5
+
+def test_evaluate_document_empty_tables_and_missing_keys():
+    # (d) tables: [] / missing keys → no error
+    gt = {"paragraphs": ["some text"], "tables": []}
+    result = evaluate_document("some text", [], gt)
+    assert "document_cer" in result
+    assert result["document_cer"] == pytest.approx(0.0)
+
+def test_evaluate_document_isolated_schema():
+    # isolated table GT (has "data", no "paragraphs"/"tables") → no error
+    gt = {"data": [["ក", "ខ"], ["1", "2"]]}
+    result = evaluate_document("", [], gt)
+    assert "document_cer" in result
+
+def test_evaluate_document_pools_gt_table_cells():
+    # GT has content in both paragraphs and table cells; all pooled for comparison
+    gt = {
+        "paragraphs": ["intro text"],
+        "tables": [{"data": [["cell one", "cell two"]]}],
+        "footer": "foot",
+    }
+    # pred pools same text in ocr_text
+    result = evaluate_document("intro text cell one cell two foot", [], gt)
+    assert result["document_cer"] == pytest.approx(0.0)

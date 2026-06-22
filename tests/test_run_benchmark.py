@@ -208,6 +208,7 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     monkeypatch.setattr("khmer_pipeline.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr_engine)
     monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_table", lambda pred, gt_grid: canned_table_metrics)
     monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_text", lambda text, pred, gt: canned_text_metrics)
+    monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_document", lambda text, pred, gt: {"document_cer": 0.123})
     monkeypatch.setattr("khmer_pipeline.run_benchmark.clear_device_cache", lambda: None)
 
     run_dir = tmp_path / "run"
@@ -228,10 +229,14 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
 
     # Engine must be the first column
     assert field_names[0] == "Engine"
+    # Document_CER must appear immediately after Text_CER
+    text_cer_idx = field_names.index("Text_CER")
+    assert field_names[text_cer_idx + 1] == "Document_CER"
     # one data row for the one image
     assert len(data_rows) == 1
     assert data_rows[0]["Engine"] == "run_fake"
     assert data_rows[0]["Dataset"] == "synthetic_data"
+    assert data_rows[0]["Document_CER"] == "0.123"
 
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["image_count"] == 1

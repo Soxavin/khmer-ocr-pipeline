@@ -188,6 +188,34 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     }
 
 
+def evaluate_document(ocr_text: str, pred_tables: list[dict], gt: dict) -> dict:
+    # Placement-agnostic: pool ALL text on each side, then CER. Robust to whether
+    # content was classified as table vs paragraph by either side.
+    gt_parts: list[str] = []
+    gt_parts.extend(gt.get("paragraphs", []))
+    for tbl in gt.get("tables", []) or []:
+        for row in tbl.get("data", []):
+            gt_parts.extend(row)
+    grid = gt.get("data")
+    if grid:
+        for row in grid:
+            gt_parts.extend(row)
+    footer = gt.get("footer", "")
+    if footer:
+        gt_parts.append(footer)
+
+    pred_parts: list[str] = [ocr_text]
+    for tbl in pred_tables:
+        for cell in tbl.get("cells", []):
+            cell_text = " ".join(t["text"] for t in (cell.get("text_lines") or []) if t.get("text")).strip()
+            if cell_text:
+                pred_parts.append(cell_text)
+
+    gt_pooled = _norm(" ".join(p for p in gt_parts if p))
+    pred_pooled = _norm(" ".join(p for p in pred_parts if p))
+    return {"document_cer": cer(gt_pooled, pred_pooled)}
+
+
 def evaluate_text(ocr_text: str, pred_tables: list[dict], gt: dict) -> dict:
     # isolated tables have no paragraphs — return None for all text metrics
     if "tables" not in gt:

@@ -64,12 +64,12 @@ def summarize(rows: list[dict]) -> str:
 
     header = (
         f"{'Group':<28} {'CellAcc':>8} {'ContentRec':>10} {'TableCER':>9}"
-        f" {'TextCER':>8} {'TabRatio':>9} {'ParaRec':>8} {'ParaLeak':>9}"
+        f" {'TextCER':>8} {'DocCER':>8} {'TabRatio':>9} {'ParaRec':>8} {'ParaLeak':>9}"
     )
 
     # per-Engine summary for model-vs-model comparison
     lines.append(f"\n=== Per-Engine Summary ({len(rows)} images) ===")
-    eng_header = f"{'Engine':<28} {'CellAcc':>8} {'TableCER':>9} {'TextCER':>8}"
+    eng_header = f"{'Engine':<28} {'CellAcc':>8} {'TableCER':>9} {'TextCER':>8} {'DocCER':>8}"
     lines.append(eng_header)
     for name, items in sorted(by_engine.items()):
         lines.append(
@@ -77,6 +77,7 @@ def summarize(rows: list[dict]) -> str:
             f" {avg(items, 'Cell_Accuracy'):>8.3f}"
             f" {avg(items, 'Table_CER'):>9.3f}"
             f" {avg(items, 'Text_CER'):>8.3f}"
+            f" {avg(items, 'Document_CER'):>8.3f}"
         )
 
     def add_group_table(groups: dict[str, list], label: str) -> None:
@@ -89,6 +90,7 @@ def summarize(rows: list[dict]) -> str:
                 f" {avg(items, 'Cell_Content_Recall'):>10.3f}"
                 f" {avg(items, 'Table_CER'):>9.3f}"
                 f" {avg(items, 'Text_CER'):>8.3f}"
+                f" {avg(items, 'Document_CER'):>8.3f}"
                 f" {ratio(items, 'Tables_Found', 'Tables_Expected'):>9.3f}"
                 f" {avg(items, 'Paragraph_Recall'):>8.3f}"
                 f" {total(items, 'Paragraph_Leak'):>9}"

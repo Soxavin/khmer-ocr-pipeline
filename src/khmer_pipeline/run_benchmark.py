@@ -11,7 +11,7 @@ from pathlib import Path
 from .ingest import ingest
 from .models import PreprocessResult
 from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
-from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text
+from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document
 from .memory import clear_device_cache
 from .analyze_benchmark import summarize
 
@@ -26,7 +26,7 @@ _CSV_FIELDS = [
     "Tables_Expected", "Tables_Found",
     "GT_Rows", "GT_Cols", "Pred_Rows", "Pred_Cols",
     "Cell_Accuracy", "Cell_Content_Recall", "Table_CER",
-    "Text_CER", "Paragraph_Recall", "Paragraph_Leak",
+    "Text_CER", "Document_CER", "Paragraph_Recall", "Paragraph_Leak",
     "Error",
 ]
 
@@ -166,6 +166,7 @@ def run_benchmark(
         "cell_content_recall": [],
         "table_cer": [],
         "text_cer": [],
+        "document_cer": [],
     }
 
     all_rows: list[dict] = []
@@ -223,6 +224,7 @@ def run_benchmark(
 
                     table_metrics = evaluate_table(pred_tables, gt_table_grid(gt))
                     text_metrics = evaluate_text(ocr_text, pred_tables, gt)
+                    doc_metrics = evaluate_document(ocr_text, pred_tables, gt)
 
                     row = {
                         "Engine": engine,
@@ -241,6 +243,7 @@ def run_benchmark(
                         "Cell_Content_Recall": _fmt(table_metrics["cell_content_recall"]),
                         "Table_CER": _fmt(table_metrics["table_cer"]),
                         "Text_CER": _fmt(text_metrics["text_cer"]),
+                        "Document_CER": _fmt(doc_metrics["document_cer"]),
                         "Paragraph_Recall": _fmt(text_metrics["paragraph_recall"]),
                         "Paragraph_Leak": _fmt(text_metrics["paragraph_leak"]),
                         "Error": "",
@@ -254,6 +257,7 @@ def run_benchmark(
                         ("Cell_Content_Recall", "cell_content_recall"),
                         ("Table_CER", "table_cer"),
                         ("Text_CER", "text_cer"),
+                        ("Document_CER", "document_cer"),
                     ]:
                         if row[csv_key]:
                             metric_vals[acc_key].append(float(row[csv_key]))
@@ -271,7 +275,7 @@ def run_benchmark(
                         "Tables_Found": "",
                         "GT_Rows": "", "GT_Cols": "", "Pred_Rows": "", "Pred_Cols": "",
                         "Cell_Accuracy": "", "Cell_Content_Recall": "", "Table_CER": "",
-                        "Text_CER": "", "Paragraph_Recall": "", "Paragraph_Leak": "",
+                        "Text_CER": "", "Document_CER": "", "Paragraph_Recall": "", "Paragraph_Leak": "",
                         "Error": str(exc),
                     }
 
@@ -296,6 +300,7 @@ def run_benchmark(
         "avg_cell_content_recall": _avg_metric("cell_content_recall"),
         "avg_table_cer": _avg_metric("table_cer"),
         "avg_text_cer": _avg_metric("text_cer"),
+        "avg_document_cer": _avg_metric("document_cer"),
     }
 
     dataset_counts = [
