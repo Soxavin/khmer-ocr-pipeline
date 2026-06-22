@@ -165,6 +165,23 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - **Outcome.** Average `Cell_Accuracy` rose **0.266 → 0.643**, and the per-font
   ranking by accuracy now agrees with the independent content/CER metrics.
 
+### 2.9 Tesseract baseline engine
+
+- **Problem.** A thesis needs a recognised, off-the-shelf comparison point for the
+  Surya-based pipeline. Tesseract (`khm` traineddata) is the standard Khmer OCR
+  baseline.
+- **Decision.** Add `run_tesseract` (`tesseract_engine.py`) behind the existing
+  engine registry, switchable via the `OCR_ENGINE` env var (`surya` default,
+  unknown → `run_surya`). It re-packs Tesseract's parallel-list `image_to_data`
+  output into the **same 7-key `text_blocks` shape Surya emits**, so the eval
+  harness scores it unchanged. `pytesseract` is lazily imported (clear brew-hint
+  `ImportError`) and pinned `>=0.3,<0.4`.
+- **Caveats (fair to report).** Tesseract yields **no table structure**
+  (`tables=[]`), so the Surya-vs-Tesseract comparison is **text-only** — table
+  metrics are not applicable to it. It also tends to **insert spaces between Khmer
+  clusters**, which inflates its CER; this is a real property of the engine, not a
+  measurement artifact, and is reported as-is.
+
 ---
 
 ## 3. Results Snapshot

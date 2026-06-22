@@ -1,11 +1,13 @@
 from __future__ import annotations
+import os
 from .protocols import OCREngine, CorrectionEngine
-
-# Import current implementations
 from .surya import run_surya
+from .tesseract_engine import run_tesseract
 from .postprocess import postprocess
 
-# Register the active engines.
-# To swap a model in the future, simply change the assigned function here.
-ACTIVE_OCR_ENGINE: OCREngine = run_surya
+_OCR_ENGINES: dict[str, OCREngine] = {"surya": run_surya, "tesseract": run_tesseract}
+ACTIVE_OCR_ENGINE: OCREngine = _OCR_ENGINES.get(
+    os.environ.get("OCR_ENGINE", "surya"), run_surya
+)
 ACTIVE_CORRECTION_ENGINE: CorrectionEngine = postprocess
+
