@@ -147,7 +147,44 @@ uv run python -m khmer_pipeline.analyze_benchmark \
 
 ---
 
-## 7. Real Documents
+## 7. Figures (visualize_benchmark)
+
+Generate publication-quality charts (matplotlib) from one or more run dirs. Used for
+the thesis report. `matplotlib` lives in the **dev** extra (`uv sync` resolves it).
+
+```bash
+# One run
+uv run python -m khmer_pipeline.visualize_benchmark eval/runs/<run>/ --out eval/figures
+
+# Two runs (enables the comparison charts)
+uv run python -m khmer_pipeline.visualize_benchmark \
+    eval/runs/<surya_run>/ eval/runs/<tesseract_run>/ --out eval/figures
+```
+
+PNGs (150 DPI) are written to `eval/figures/` (**gitignored** — regenerate as needed).
+A chart that has no data for its inputs is **skipped with a printed reason**, never crashes.
+
+| File | Chart | Renders when |
+|---|---|---|
+| `cer_by_dataset.png` | Grouped bars — mean `Document_CER`, `Text_CER`, `Table_CER` per Dataset | always |
+| `accuracy_by_font.png` | Grouped bars — mean `Cell_Accuracy`, `Cell_Content_Recall` per Font | always |
+| `table_fragmentation.png` | Paired bars per Dataset — `Tables_Expected` vs `Tables_Found` (the fragmentation signal: real docs show found ≫ expected) | always |
+| `engine_comparison.png` | Paired bars per Dataset — `Document_CER` split by **Engine** (e.g. surya vs tesseract) | only if the passed runs contain ≥2 distinct `Engine` values |
+| `correction_ab.png` | Paired bars per Dataset — `Document_CER` split by **Corrected** (raw vs corrected) | only if both `Corrected=True` and `Corrected=False` rows are present |
+
+**Notes / caveats**
+- **Labels are Latin-only by design.** Only `Dataset`, `Font`, and `Engine` are used as
+  axis/legend labels; the Khmer `Template` column is never charted (matplotlib's default
+  font renders Khmer as tofu boxes).
+- **Combined multi-run charts mix engines.** When you pass two different-engine runs,
+  the three always-on charts aggregate across *both* — read them per-engine with care, or
+  run the generator on each run dir separately. Only `engine_comparison.png` separates by
+  engine. (Empty/`""` metric cells — e.g. `Text_CER` for table-only data — are coerced to
+  `None` and skipped, not treated as zero.)
+
+---
+
+## 8. Real Documents
 
 Real MEF PDFs are stored under `eval/datasets/real/` following the same `*_ground_truth.json` schema used by synthetic datasets, so `run_benchmark` / `evaluate_structure` / `analyze_benchmark` work unchanged.
 
@@ -214,7 +251,7 @@ uv run python -m khmer_pipeline.run_benchmark --data-dir eval/datasets/real
 
 ---
 
-## 8. Conventions
+## 9. Conventions
 
 - **Never edit `results.csv` in place.** If a run is wrong, create a new one.
 - **New model = new run folder.** Register it via `engine_registry.py` and run normally.
