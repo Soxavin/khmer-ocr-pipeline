@@ -17,6 +17,7 @@ dependencies = [
     "playwright>=1.44,<2.0",
     "pytesseract>=0.3,<0.4",
     "pandas>=2.0,<4.0",
+    "rapid-table>=3.0,<4.0",
 ]
 
 [project.optional-dependencies]
