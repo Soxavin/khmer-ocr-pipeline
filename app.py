@@ -22,8 +22,10 @@ from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
 from khmer_pipeline.backend_status import llama_server_running
 
-# Provisional until the memory stress test sets a measured value (docs/OPERATIONS.md).
-_MEMORY_WARN_PAGES = 20
+# Effective-page threshold (pages x DPI/200) above which a memory warning shows.
+# Set from a stress test: 10 pages @ 300 DPI (effective 15) drove the 24 GB machine
+# into heavy swapping. 12 warns with margin before that. See docs/OPERATIONS.md.
+_MEMORY_WARN_PAGES = 12
 
 
 @st.cache_resource(show_spinner="Loading Surya OCR models — first run takes ~30s...")

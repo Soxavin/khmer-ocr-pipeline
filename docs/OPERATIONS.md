@@ -38,22 +38,33 @@ PyTorch (Surya, via llama-server) and MLX (Qwen, opt-in) share the 24 GB unified
 memory. `clear_device_cache()` is called after each stage to release caches.
 
 - The Streamlit app shows a soft warning when a job exceeds `_MEMORY_WARN_PAGES`
-  (in `app.py`), scaled by DPI relative to the 200-DPI baseline.
-- **Measured practical limit:** _TODO — set after the stress test on a large scanned
-  PDF (see below)._ Until then `_MEMORY_WARN_PAGES` is a conservative provisional
-  value. If a large job stalls or the machine starts swapping, split it into page
-  ranges (sidebar → "Page range") and process in batches.
+  (in `app.py`), as **effective pages = page_count × (DPI / 200)**. Current value: **12**.
+- **Measured result (2026-06-23):** a **10-page born-digital PDF at 300 DPI**
+  (`CambodiaBudgetExecutioninApr-2024.pdf`, effective ≈ 15) **completed without
+  crashing**, but drove the machine into **heavy swapping** (~29 GB swap in use) and
+  took **~72 min wall time — roughly 5× a healthy run**, i.e. it was thrashing. So
+  ~10 pages at 300 DPI is at/over the comfortable ceiling on this 24 GB machine; at
+  the default **200 DPI** the per-page raster is ~2.25× smaller and far lighter.
+  `_MEMORY_WARN_PAGES = 12` warns with margin before the observed effective-15 thrash
+  point (→ warns at ≥8 pages @ 300 DPI, ≥13 @ 200 DPI).
+- **Caveats on the measurement (be honest):** memory is **per-page bounded**, not
+  cumulative — Surya processes pages sequentially (`SURYA_INFERENCE_PARALLEL=1`) and
+  `clear_device_cache()` runs after each page — so the real driver is **DPI/page
+  resolution**, not page *count* alone. The exact peak RSS was not captured cleanly
+  (sampler bug + the resident `llama-server` and dev environment also consume memory;
+  macOS swap is cumulative). The conclusion rests on the unambiguous thrash signals
+  (swap + 5× runtime), not a precise peak number. **Mitigation:** for large/high-DPI
+  jobs, process in page ranges (sidebar → "Page range").
 
-### Running the stress test
-Drop a large multi-page **scanned** PDF into `sample_data/` (gitignored), then:
+### Re-running the stress test (for a cleaner peak)
+Because memory is per-page bounded, a **short** run (2–3 pages) captures the same peak
+far faster. Drop a PDF into `sample_data/` (gitignored), then sample peak RSS of the
+python + `llama-server` PIDs (`ps -o rss=`) plus `sysctl -n vm.swapusage` while:
 ```bash
 source setup-metal-macos.sh
-# sample llama-server + python RSS while a CLI run processes increasing page counts
-uv run python -m khmer_pipeline.pipeline sample_data/<big_scan>.pdf /tmp/out --dpi 300
+uv run python -m khmer_pipeline.pipeline sample_data/<doc>.pdf /tmp/out --dpi 300
 ```
-Watch peak memory (`ps -o rss= -p <pid>` for the python + llama-server PIDs, plus
-`memory_pressure`). Record the largest page count at the target DPI that completes
-without heavy swapping, then set `_MEMORY_WARN_PAGES` and replace the TODO above.
+Update `_MEMORY_WARN_PAGES` and the measured result above if the numbers shift.
 
 ## Reproducible synthetic data (offline fonts)
 
