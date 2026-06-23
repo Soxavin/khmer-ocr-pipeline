@@ -270,6 +270,34 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   crops that preserve whole rows without overwhelming the VLM), or escalate to Hybrid B
   (SLANet structure + Surya cell recognition). Runs: `*_surya_stitchOFF` / `*_surya_stitchON`.
 
+### 2.13 Row-band stitch variant — best stitcher, still not decisive
+
+- **Idea.** Instead of one giant master box (§2.12), merge fragments into **full-width
+  row-band strips** (`merge_table_rowbands`: cluster by Y-band, X ignored) — short crops
+  that keep whole rows intact at a VLM-readable scale. Real page 2: 8 regions → **2 strips**.
+- **A/B on the fragmented page (real p2), all three variants:**
+
+  | variant | Tables_Found | Cell_Acc | Content_Recall | Document_CER |
+  |---|---|---|---|---|
+  | OFF (fragmented) | 8 | 0.024 | **0.758** | 0.670 |
+  | master (one box, §2.12) | 1 | 0.016 | 0.156 | 0.893 |
+  | **row-band (2 strips)** | 2 | **0.036** | 0.348 | 0.788 |
+
+- **Finding.** Row-band **beats master on every metric** (confirms "smaller crops help the
+  VLM") and **lifts the structural metric** Cell_Accuracy 0.024→0.036 (+50% rel) — but still
+  **loses Content_Recall** (0.758→0.348): the VLM reads wide strips less completely than
+  narrow column-fragments. So there is a real **crop-size ↔ VLM-recognition tradeoff**, and
+  **no geometric stitch variant is decisive**. The root limit is **VLM table recognition on
+  wide dense Khmer tables**, not just layout fragmentation.
+- **Why post-OCR cell reassembly won't rescue it cheaply:** the VLM-HTML cells carry **no
+  per-cell bbox** (`"bbox": []`), so we can't geometrically re-place fragmented cells into a
+  global grid without a structure model that emits cell coordinates.
+- **Decision.** Keep stitching **default OFF** (both modes retained behind
+  `KHMER_STITCH_TABLES` / `KHMER_STITCH_MODE`). Row-band is the documented best-effort
+  geometric fix. **Escalate to Hybrid B** — a structure model (e.g. SLANet) for the cell grid
+  **with coordinates** + Surya recognition on small cell/region crops (small crops = high
+  recall, like fragments, *plus* correct structure). Runs: `rb_*_OFF` / `rb_*_ROWBAND`.
+
 ---
 
 ## 3. Results Snapshot
