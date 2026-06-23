@@ -270,8 +270,11 @@ def test_multiple_tables_built_from_html():
     page_ocr.blocks = [table_block1, table_block2]
     rec_pred = MagicMock(return_value=[page_ocr])
 
+    # Disable table stitching: this test exercises HTML→table building, not the
+    # layout-region merge (these two stacked regions would otherwise be merged).
     with patch("khmer_pipeline.surya._get_predictors",
-               return_value=(layout_pred, rec_pred)):
+               return_value=(layout_pred, rec_pred)), \
+         patch("khmer_pipeline.surya._stitch_enabled", return_value=False):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
     assert len(r.pages[0].tables) == 2
