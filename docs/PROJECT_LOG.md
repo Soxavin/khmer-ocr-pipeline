@@ -298,6 +298,26 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   **with coordinates** + Surya recognition on small cell/region crops (small crops = high
   recall, like fragments, *plus* correct structure). Runs: `rb_*_OFF` / `rb_*_ROWBAND`.
 
+### 2.14 Hybrid B structure prototype — SLANet go/no-go = **GO**
+
+- **Goal.** Before any integration, verify a structure model produces a *unified* grid with
+  *cell coordinates* on the dense Khmer table (the thing Surya's layout fragments and whose
+  VLM-HTML cells lack bboxes).
+- **Setup.** `rapid_table` 3.0.2 (SLANETPLUS, **7.4 MB ONNX**, onnxruntime CPU — no Paddle),
+  installed **ephemerally** (`uv pip install`, not in pyproject). Ran on real page-2 table
+  region with `use_ocr=False` (structure only).
+- **Result (strong GO).** One coherent grid — **no fragmentation** — **27 rows × 9 cols vs
+  GT 28×9** (off by one), **188 cells each with quad coordinates** (`cell_bboxes`) + logical
+  spans (`logic_points`, incl. merged-header spans like `[0,4,3,3]`), cells tiling the full
+  region; ~0.07 s inference. Visual overlay confirmed cells map onto the real №/name/unit/
+  price/% columns.
+- **Why this matters.** It supplies exactly what no stitch variant could: correct structure
+  **with per-cell coordinates**. Hybrid B can crop each cell box → OCR with **Surya** (small
+  crops = high recall, like the fragments) → place text by `logic_points` → emit our standard
+  `cells[]` table dict. Decouples structure (SLANet) from Khmer recognition (Surya).
+- **Next.** Build Hybrid B: `uv add` rapid_table (pinned) + new engine wrapper +
+  per-cell Surya OCR; A/B vs Surya baseline on the eval harness.
+
 ---
 
 ## 3. Results Snapshot
