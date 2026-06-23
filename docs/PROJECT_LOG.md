@@ -305,6 +305,53 @@ tables is the highest-value engineering target for real-world use. (4) The
 born-digital PDF's own embedded text layer is garbled (broken ToUnicode CMap), so OCR
 on rendered pixels is genuinely necessary — text extraction is not a shortcut.
 
+### Surya vs Tesseract baseline (text-only, 2026-06-23)
+
+Recognised-baseline comparison. Both engines run on the **same images, raw render, no
+preprocessing**. Runs: `eval/runs/20260622_154407_run_surya` (raw) vs
+`eval/runs/20260623_100406_run_tesseract` (Tesseract 5.5.2, `khm` traineddata).
+
+**Per-engine aggregate (33 images each):**
+
+| Engine | Cell_Acc | Table_CER | Text_CER | Document_CER |
+|---|---|---|---|---|
+| `run_surya` | **0.589** | **0.180** | **0.335** | **0.325** |
+| `run_tesseract` | 0.000 | 0.970 | 0.367 | 0.443 |
+
+**Per-dataset Document_CER (lower = better):**
+
+| Dataset | Surya | Tesseract |
+|---|---|---|
+| synthetic_tables | **0.165** | 0.656 |
+| synthetic_documents | 0.450 | **0.161** |
+| real | **0.503** | 0.792 |
+
+**Scope / caveats (this is a *text-only* comparison — read with care):**
+1. **Tesseract produces no table structure** (`tables=[]` → `Cell_Accuracy = 0.000`
+   on every dataset). For the financial-table use case this is disqualifying on its
+   own, independent of CER — it is a flat text reader, not a layout/structure engine.
+2. **Tesseract inserts spaces between Khmer clusters and garbles dense numeric
+   columns.** On the real doc its prediction reads the title and product names
+   reasonably but turns the price columns into spaced gibberish
+   (e.g. `@យ 2១ 2១ 2១ …`), inflating its CER — a real property of the engine,
+   reported as-is.
+3. **The one place Tesseract "wins" (synthetic_documents, 0.161 vs 0.450) is a
+   metric artifact, not superiority.** `Document_CER` pools all text into one
+   order-sensitive string; a linear top-to-bottom reader (Tesseract) aligns with the
+   GT pooling order, whereas Surya's *structured* output (paragraphs in `ocr_text` +
+   cells in `tables`) pools in a different order even when the content is correct.
+   The same order-sensitivity inflates Surya's **real** `Text_CER` (0.946 vs
+   Tesseract 0.731) because fragmentation reorders paragraph text. The structural
+   metric `Cell_Accuracy`, not pooled CER, is what reflects real-world usefulness.
+
+**Conclusion.** Surya is the correct engine for structured Khmer financial documents
+(it is the only one that yields cell-level table structure, and it wins on the
+pooled metric overall: Document_CER 0.325 vs 0.443). Tesseract is a legitimate,
+recognised *flat-text* baseline but is not structure-aware; the text-CER comparison
+is genuinely mixed and confounded by reading-order effects and its Khmer
+cluster-spacing, which we report honestly rather than cherry-picking. Figure:
+`engine_comparison.png` (regenerate via `visualize_benchmark <surya_run> <tesseract_run>`).
+
 ---
 
 ## 4. Lessons / Principles
