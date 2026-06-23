@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
 from .model_config import CONFIDENCE_LOW
-from .table_stitch import merge_table_regions
+from .table_stitch import merge_table_regions, merge_table_rowbands
 
 _BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)
 
@@ -23,6 +23,11 @@ _STITCH_TABLES = False
 def _stitch_enabled() -> bool:
     env = os.environ.get("KHMER_STITCH_TABLES")
     return env != "0" if env is not None else _STITCH_TABLES
+
+
+def _stitch_mode() -> str:
+    # "rowband" = full-width row strips (default); "master" = one box (regressed, see 2.12)
+    return os.environ.get("KHMER_STITCH_MODE", "rowband")
 
 
 def _log(msg: str) -> None:
@@ -207,7 +212,9 @@ def _process_page(
             table_lboxes = [b for b in layout_result.bboxes if b.label == "Table"]
             if len(table_lboxes) > 1:
                 others = [b for b in layout_result.bboxes if b.label != "Table"]
-                merged = merge_table_regions([tuple(float(v) for v in b.bbox) for b in table_lboxes])
+                _boxes = [tuple(float(v) for v in b.bbox) for b in table_lboxes]
+                merged = (merge_table_regions(_boxes) if _stitch_mode() == "master"
+                          else merge_table_rowbands(_boxes))
                 if len(merged) < len(table_lboxes):
                     template = table_lboxes[0]
                     base_pos = min((getattr(b, "position", 0) or 0) for b in table_lboxes)

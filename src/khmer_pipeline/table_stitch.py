@@ -12,6 +12,9 @@ from __future__ import annotations
 # that axis; keep these well below the spacing between genuinely separate tables.
 _TABLE_MERGE_PAD_X = 60
 _TABLE_MERGE_PAD_Y = 80
+# Row-band variant: bridge fragments sharing a Y-band into a full-width strip. Pad
+# is intentionally small (< typical inter-band gaps) so distinct bands stay separate.
+_ROWBAND_PAD_Y = 25
 
 _Box = tuple[float, float, float, float]
 
@@ -53,6 +56,39 @@ def merge_table_regions(
     for i in range(n):
         for j in range(i + 1, n):
             if _intersects(inflated[i], inflated[j]):
+                parent[find(i)] = find(j)
+
+    comps: dict[int, _Box] = {}
+    for i in range(n):
+        r = find(i)
+        comps[r] = _union(comps[r], boxes[i]) if r in comps else boxes[i]
+
+    merged = list(comps.values())
+    merged.sort(key=lambda b: (b[1], b[0]))
+    return merged
+
+
+def merge_table_rowbands(boxes: list[_Box], pad_y: float = _ROWBAND_PAD_Y) -> list[_Box]:
+    # Cluster fragments by Y-band only (X ignored), union each band into a
+    # full-width row strip. Keeps whole rows intact at a scale the VLM can read,
+    # without collapsing the whole table into one oversized crop.
+    n = len(boxes)
+    if n <= 1:
+        return list(boxes)
+
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        ai0, ai1 = boxes[i][1] - pad_y, boxes[i][3] + pad_y
+        for j in range(i + 1, n):
+            bj0, bj1 = boxes[j][1], boxes[j][3]
+            if not (ai1 < bj0 or bj1 < ai0):  # Y-intervals overlap (i inflated)
                 parent[find(i)] = find(j)
 
     comps: dict[int, _Box] = {}
