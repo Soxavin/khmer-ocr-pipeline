@@ -318,6 +318,34 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - **Next.** Build Hybrid B: `uv add` rapid_table (pinned) + new engine wrapper +
   per-cell Surya OCR; A/B vs Surya baseline on the eval harness.
 
+### 2.15 Hybrid B (SLANet + per-cell Surya) — built, but per-cell recognition fails
+
+- **Built** `slanet_structure.py` (SLANet wrapper) + `hybrid_engine.py` (`run_hybrid`,
+  `OCR_ENGINE=hybrid`): reuse Surya for page text + table *detection*, take the master box of
+  the fragmented Table regions, run SLANet for the grid + cell coords, then OCR **each cell**
+  via Surya block-mode recognition (one `LayoutBox` per cell). 6 offline tests; shape verified.
+- **A/B on real (raw render):** structure is fixed but recognition collapses.
+
+  | page | Surya Acc/Recall/DocCER | Hybrid Acc/Recall/DocCER |
+  |---|---|---|
+  | p1 | 0.134 / 0.529 / 0.618 | 0.125 / **0.110** / 0.712 |
+  | p2 (fragmented) | 0.024 / **0.758** / 0.670 | 0.028 (Found 8→**1**) / **0.037** / 0.754 |
+  | p3 (no table) | – / – / 0.220 | – / – / **1.894** |
+
+- **Finding (negative, but clear).** SLANet's structure works (p2 `Tables_Found` 8→1, grid
+  ~27×9) and `Cell_Accuracy` is ~flat, but **`Content_Recall` collapses** (p2 0.758→0.037)
+  and it's **~258 s/page (~4.3 min)**. Two causes: (1) Surya's recognizer is a **VLM built for
+  text lines/blocks**, and on **tiny single-cell crops it hallucinates** (emits foreign scripts —
+  Arabic/Burmese/Sinhala — on small/ambiguous inputs); (2) SLANet sometimes **over-merges** cells
+  (a cell spanning 5 rows swallows a whole column, e.g. `"360 350 350"`). Net: **worse than the
+  Surya baseline and far slower** → decision gate failed.
+- **Decision.** `hybrid` stays **registered but not default** (opt-in `OCR_ENGINE=hybrid`) as a
+  documented experiment. Root insight stands (from 2.13): **the limit is recognition on small,
+  isolated Khmer table cells**, not structure. SLANet *solved* structure; pairing it with
+  per-cell VLM OCR doesn't work. Candidate next refinement: **row-strip recognition** — OCR each
+  full-width row as one text line (what the VLM is good at; ~27 calls not 188) and split into
+  columns by SLANet's column x-boundaries. Runs: `hy_*_surya` / `hy_*_hybrid`.
+
 ---
 
 ## 3. Results Snapshot
