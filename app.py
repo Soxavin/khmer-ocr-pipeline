@@ -22,10 +22,11 @@ from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
 from khmer_pipeline.backend_status import llama_server_running
 
-# Effective-page threshold (pages x DPI/200) above which a memory warning shows.
-# Set from a stress test: 10 pages @ 300 DPI (effective 15) drove the 24 GB machine
-# into heavy swapping. 12 warns with margin before that. See docs/OPERATIONS.md.
-_MEMORY_WARN_PAGES = 12
+# Effective-page threshold (pages x DPI/200) above which a soft "large job" warning
+# shows. Stress test (10 pages @ 300 DPI, effective 15) showed NO memory distress
+# (~7 min, ~2 GB peak RSS, +384 MB swap) — memory is per-page bounded. This is a
+# heads-up for very large jobs, not a measured ceiling. See docs/OPERATIONS.md.
+_MEMORY_WARN_PAGES = 25
 
 
 @st.cache_resource(show_spinner="Loading Surya OCR models — first run takes ~30s...")
@@ -241,8 +242,8 @@ else:
         _est_pages = doc_page_count
     if _est_pages * (dpi / 200.0) > _MEMORY_WARN_PAGES:
         st.warning(
-            f"Large job (~{_est_pages} page(s) at {dpi} DPI) — near the ~{_MEMORY_WARN_PAGES}-page "
-            "memory limit on a 24 GB Mac. If it stalls, process in smaller page ranges."
+            f"Large job (~{_est_pages} page(s) at {dpi} DPI) — this may take a while. "
+            "If needed, process in smaller page ranges (pages run sequentially)."
         )
 
     if page_selection == "Single page":

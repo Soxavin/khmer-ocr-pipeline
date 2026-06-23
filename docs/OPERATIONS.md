@@ -37,34 +37,37 @@ Use the stop script when you're done, or if a previous run was orphaned.
 PyTorch (Surya, via llama-server) and MLX (Qwen, opt-in) share the 24 GB unified
 memory. `clear_device_cache()` is called after each stage to release caches.
 
-- The Streamlit app shows a soft warning when a job exceeds `_MEMORY_WARN_PAGES`
-  (in `app.py`), as **effective pages = page_count × (DPI / 200)**. Current value: **12**.
+- The Streamlit app shows a soft "large job" warning when a job exceeds
+  `_MEMORY_WARN_PAGES` (in `app.py`), as **effective pages = page_count × (DPI / 200)**.
+  Current value: **25**. This is a "this will take a while" heads-up, **not** a measured
+  memory ceiling.
 - **Measured result (2026-06-23):** a **10-page born-digital PDF at 300 DPI**
-  (`CambodiaBudgetExecutioninApr-2024.pdf`, effective ≈ 15) **completed without
-  crashing**, but drove the machine into **heavy swapping** (~29 GB swap in use) and
-  took **~72 min wall time — roughly 5× a healthy run**, i.e. it was thrashing. So
-  ~10 pages at 300 DPI is at/over the comfortable ceiling on this 24 GB machine; at
-  the default **200 DPI** the per-page raster is ~2.25× smaller and far lighter.
-  `_MEMORY_WARN_PAGES = 12` warns with margin before the observed effective-15 thrash
-  point (→ warns at ≥8 pages @ 300 DPI, ≥13 @ 200 DPI).
-- **Caveats on the measurement (be honest):** memory is **per-page bounded**, not
-  cumulative — Surya processes pages sequentially (`SURYA_INFERENCE_PARALLEL=1`) and
-  `clear_device_cache()` runs after each page — so the real driver is **DPI/page
-  resolution**, not page *count* alone. The exact peak RSS was not captured cleanly
-  (sampler bug + the resident `llama-server` and dev environment also consume memory;
-  macOS swap is cumulative). The conclusion rests on the unambiguous thrash signals
-  (swap + 5× runtime), not a precise peak number. **Mitigation:** for large/high-DPI
-  jobs, process in page ranges (sidebar → "Page range").
+  (`CambodiaBudgetExecutioninApr-2024.pdf`, effective ≈ 15) completed in **~7 min** with
+  **peak combined RSS ≈ 2.1 GB** (python + `llama-server`) and only **+384 MB swap** added
+  during the run — i.e. **no memory distress**; the machine was nowhere near the 24 GB
+  ceiling. Memory is **per-page bounded** (Surya processes pages sequentially,
+  `SURYA_INFERENCE_PARALLEL=1`, with `clear_device_cache()` after each page), so the real
+  cost driver is **DPI/page resolution**, not page *count*.
+  - *Correction:* an earlier run of this same job reported ~72 min / heavy swap — that was
+    an artifact of the **laptop sleeping mid-run** (closed lid over lunch) plus a cumulative
+    swap baseline, not thrashing. The clean re-run above (with `caffeinate`, lid open) is the
+    valid measurement.
+  - *Caveat:* process RSS undercounts the VLM weights resident in Metal/GPU-wired memory
+    (loaded once, kept alive), but the negligible swap delta confirms no pressure. We did not
+    push to the actual page ceiling — it's simply well above any realistic MEF document.
+- **Mitigation for very large/high-DPI jobs:** process in page ranges (sidebar →
+  "Page range"); pages run sequentially so memory stays bounded regardless of count.
 
-### Re-running the stress test (for a cleaner peak)
-Because memory is per-page bounded, a **short** run (2–3 pages) captures the same peak
-far faster. Drop a PDF into `sample_data/` (gitignored), then sample peak RSS of the
-python + `llama-server` PIDs (`ps -o rss=`) plus `sysctl -n vm.swapusage` while:
+### Re-running the stress test
+Memory is per-page bounded, so a **short** run (2–3 pages) captures the same peak quickly.
+Use `caffeinate` and keep the lid open. Drop a PDF into `sample_data/` (gitignored) and
+sample peak RSS of the python + `llama-server` PIDs (`ps -o rss=`) plus
+`sysctl -n vm.swapusage` (before/after delta) while:
 ```bash
 source setup-metal-macos.sh
-uv run python -m khmer_pipeline.pipeline sample_data/<doc>.pdf /tmp/out --dpi 300
+caffeinate -dis uv run python -m khmer_pipeline.pipeline sample_data/<doc>.pdf /tmp/out --dpi 300
 ```
-Update `_MEMORY_WARN_PAGES` and the measured result above if the numbers shift.
+Update `_MEMORY_WARN_PAGES` and the measured result above only if the numbers shift materially.
 
 ## Reproducible synthetic data (offline fonts)
 
