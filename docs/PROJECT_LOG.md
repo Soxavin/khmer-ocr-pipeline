@@ -239,6 +239,37 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   can't reach Metal and MLX doesn't run on Linux, so a container would drop to CPU.
   Reconsider only for a Linux/CUDA multi-user server pivot. (See `docs/OPERATIONS.md`.)
 
+### 2.12 Table de-fragmentation — geometric stitcher (Path A): a useful negative result
+
+- **Problem.** On dense real pages Surya's *layout* model shatters one table into many
+  regions (real MEF page 2 → a 2 row-band × 4 col-group grid of **8 Table boxes**);
+  recognition then OCRs each fragment separately and serializes content column-wise,
+  destroying row↔value links.
+- **Approach (Path A).** New `table_stitch.merge_table_regions` (transitive 2-D adjacency
+  clustering: connected components via inflated-intersection, union each) merges fragments
+  into master boxes **before** `rec_pred`, hooked into `surya._process_page` behind
+  `_STITCH_TABLES` / `KHMER_STITCH_TABLES`. Verified it merges page 2's 8 regions → 1.
+- **A/B result (raw render, 33 imgs, stitch OFF vs ON).** Isolated to page 2 (the only
+  fragmented page; p1/p3 and all synthetics were byte-identical no-ops, confirming the
+  delta is the stitcher, not engine drift):
+
+  | page 2 | Tables_Found | Cell_Acc | Content_Recall | Document_CER |
+  |---|---|---|---|---|
+  | stitch OFF | 8 | 0.024 | **0.758** | 0.670 |
+  | stitch ON | 1 | 0.016 | **0.156** | 0.893 |
+
+- **Finding (the value).** Stitching **fixes detection** (8→1) but the VLM then **degrades
+  badly on the large dense merged crop** — Content_Recall collapses 0.76→0.16. Fragmented,
+  the VLM reads each narrow column-strip and recovers ~76% of cell text (just mis-structured);
+  given the whole dense table at once it recovers ~16% (almost certainly internal downscaling
+  losing small Khmer glyphs/digits). **The bottleneck is not only detection — it is VLM
+  recognition on large dense crops.**
+- **Decision.** Gate failed (no Cell_Accuracy gain; Recall/CER regressed) → `_STITCH_TABLES`
+  shipped **default OFF**; code + flag retained. This negative result **decomposes the problem**
+  and motivates the next experiment: merge fragments into **full-width row-band strips** (short
+  crops that preserve whole rows without overwhelming the VLM), or escalate to Hybrid B
+  (SLANet structure + Surya cell recognition). Runs: `*_surya_stitchOFF` / `*_surya_stitchON`.
+
 ---
 
 ## 3. Results Snapshot

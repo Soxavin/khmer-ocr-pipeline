@@ -13,8 +13,11 @@ from .table_stitch import merge_table_regions
 _BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)
 
 # Merge fragmented Table layout regions before recognition (see table_stitch.py).
-# On by default; set KHMER_STITCH_TABLES=0 to disable (used for benchmark A/B).
-_STITCH_TABLES = True
+# DEFAULT OFF: the benchmark showed merging all fragments into one master box fixes
+# detection (page 2: 8 regions → 1) but the VLM then degrades badly on the large
+# dense crop (Content_Recall 0.76 → 0.16) → net regression. Kept behind the flag for
+# experiments (e.g. a future row-band variant). Set KHMER_STITCH_TABLES=1 to enable.
+_STITCH_TABLES = False
 
 
 def _stitch_enabled() -> bool:
