@@ -305,3 +305,22 @@ def test_summarize_zero_tables_expected_no_crash():
     ]
     result = summarize(rows)  # must not raise ZeroDivisionError
     assert "Per-Dataset" in result
+
+
+def test_write_manifest_preprocessing_field(tmp_path):
+    counts = [("real", Path("eval/datasets/real"), 3)]
+    aggs = {"avg_cell_accuracy": 0.0}
+    on = tmp_path / "on"; on.mkdir()
+    off = tmp_path / "off"; off.mkdir()
+    _write_manifest(on, "run_surya", False, counts, aggs, with_preprocess=True)
+    _write_manifest(off, "run_surya", False, counts, aggs, with_preprocess=False)
+    assert json.loads((on / "manifest.json").read_text())["preprocessing"] == "full PreprocessConfig"
+    assert json.loads((off / "manifest.json").read_text())["preprocessing"] == "none (raw render)"
+
+
+def test_argparse_preprocess_flag():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preprocess", action="store_true", default=False, dest="with_preprocess")
+    assert parser.parse_args([]).with_preprocess is False
+    assert parser.parse_args(["--preprocess"]).with_preprocess is True

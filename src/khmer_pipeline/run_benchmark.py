@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .ingest import ingest
 from .models import PreprocessResult
+from .preprocess import preprocess, PreprocessConfig
 from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document, pool_gt_text, pool_pred_text
 from .memory import clear_device_cache
@@ -108,6 +109,7 @@ def _write_manifest(
     with_correction: bool,
     dataset_counts: list[tuple[str, Path, int]],
     aggregates: dict,
+    with_preprocess: bool = False,
 ) -> None:
     try:
         sha, dirty = _git_commit()
@@ -118,7 +120,7 @@ def _write_manifest(
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "engine": engine,
             "correction": with_correction,
-            "preprocessing": "none (raw render)",
+            "preprocessing": "full PreprocessConfig" if with_preprocess else "none (raw render)",
             "git_commit": sha,
             "git_dirty": dirty,
             "versions": versions,
@@ -143,6 +145,7 @@ def run_benchmark(
     with_correction: bool = False,
     resume: bool = False,
     use_qwen: bool = False,
+    with_preprocess: bool = False,
 ) -> None:
     engine = _engine_name()
     if run_dir is None:
@@ -213,7 +216,8 @@ def run_benchmark(
                 try:
                     img_bytes = img_path.read_bytes()
                     ingest_result = ingest(img_bytes, img_path.name, dpi=200)
-                    pre = _raw_preprocess_result(ingest_result)
+                    pre = (preprocess(ingest_result, PreprocessConfig())
+                           if with_preprocess else _raw_preprocess_result(ingest_result))
                     ocr_result = ACTIVE_OCR_ENGINE(pre)
 
                     if with_correction:
@@ -323,7 +327,7 @@ def run_benchmark(
         (name, path, count) for name, (path, count) in ds_counts.items()
     ]
 
-    _write_manifest(run_dir, engine, with_correction, dataset_counts, aggregates)
+    _write_manifest(run_dir, engine, with_correction, dataset_counts, aggregates, with_preprocess)
 
     # write summary.txt from analyze_benchmark.summarize
     summary_text = summarize(all_rows)
@@ -352,6 +356,9 @@ if __name__ == "__main__":
     parser.add_argument("--qwen", action="store_true", default=False, dest="use_qwen",
                         help="With --with-correction, also run the slow Qwen LLM pass "
                              "(default: deterministic normalizer only).")
+    parser.add_argument("--preprocess", action="store_true", default=False, dest="with_preprocess",
+                        help="Apply the full preprocessing stack (deskew/denoise/contrast/etc.) "
+                             "instead of the raw render (default: raw, to isolate OCR quality).")
     args = parser.parse_args()
 
     run_benchmark(
@@ -360,4 +367,5 @@ if __name__ == "__main__":
         with_correction=args.with_correction,
         resume=args.resume,
         use_qwen=args.use_qwen,
+        with_preprocess=args.with_preprocess,
     )
