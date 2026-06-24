@@ -346,6 +346,31 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   full-width row as one text line (what the VLM is good at; ~27 calls not 188) and split into
   columns by SLANet's column x-boundaries. Runs: `hy_*_surya` / `hy_*_hybrid`.
 
+### 2.16 Preprocessing A/B on degraded input — modest, consistent, non-harmful
+
+- **Setup.** The OpenCV preprocessing stack (deskew/stamp/sharpen/contrast/table-bg) had never
+  been tested on degraded input (`REPORT.md §6`). No real scan exists, so a **proxy**: synthetically
+  degrade the GT'd born-digital 09.06.26 render (`generate_degraded.py`: rotation 2.5° > deskew
+  threshold, blur, seeded noise, contrast cut) and A/B with the new `run_benchmark --preprocess`
+  flag against the **existing** ground truth.
+- **Result (Document_CER, lower = better):**
+
+  | page | clean (ceiling) | degraded, preprocess OFF | degraded, preprocess ON |
+  |---|---|---|---|
+  | p1 | 0.618 | 0.714 | **0.691** |
+  | p2 | 0.670 | 0.685 | **0.653** |
+  | p3 | 0.220 | 0.847 | **0.833** |
+  | **avg** | **0.503** | **0.749** | **0.726** |
+
+- **Finding.** Degradation clearly hurts OCR (0.503 → 0.749). Preprocessing recovers a **small but
+  consistent** slice — **ON beats OFF on all three pages** (avg −3% relative) — but does **not**
+  restore toward the clean ceiling. So the stack is a **modest, directionally-robust, non-harmful**
+  improvement on scan-like input (worth keeping on for scans), not a silver bullet. Consistency
+  across all pages mitigates the OCR non-determinism concern.
+- **Caveats.** Synthetic degradation **≠ real scan artifacts** — this is a controlled proxy, not
+  field evidence. `Text_CER` (~0.95) is fragmentation-dominated and uninformative here; `Document_CER`
+  is the signal. **Real-scan A/B remains future work.** Runs: `prep_*_clean` / `_degOFF` / `_degON`.
+
 ---
 
 ## 3. Results Snapshot

@@ -147,6 +147,21 @@ normalizer** instead reduces synthetic-document CER by ~3.2% relative (0.4498→
 and is instant. Qwen was demoted to opt-in; the normalizer is the default. Honest takeaway: *a
 general LLM did not help; deterministic Unicode normalization does, modestly.*
 
+### 4.6 Preprocessing on degraded input (synthetic proxy)
+The OpenCV preprocessing stack (deskew, denoise/sharpen, contrast, table-background) was built for
+scans but never tested on degraded input. As a controlled proxy (no real scan available), we
+synthetically degraded the GT'd born-digital document (2.5° rotation, blur, seeded noise, contrast
+reduction) and A/B'd preprocessing OFF vs ON against the existing ground truth:
+
+| | clean (ceiling) | degraded, OFF | degraded, ON |
+|---|---|---|---|
+| avg `Document_CER` | 0.503 | 0.749 | **0.726** |
+
+Degradation clearly hurts OCR; **preprocessing recovers a small but consistent slice (ON beats OFF
+on all three pages, −3% relative)** but does not restore toward the clean ceiling. Conclusion: the
+stack is a **modest, non-harmful** improvement worth enabling for scans — not a silver bullet.
+**Caveat: synthetic degradation ≠ real scan artifacts**; a real-scan A/B remains future work.
+
 ---
 
 ## 5. Discussion
@@ -170,8 +185,9 @@ correctness), and the practical recommendation today is: **use Surya for clean/s
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
-- **Untested preprocessing on scans** — the OpenCV stack has not been validated on a real *scanned*
-  (vs born-digital) document.
+- **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
+  *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
+  validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
 
 ---
 
