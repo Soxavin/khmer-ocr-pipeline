@@ -31,8 +31,9 @@ mildly misspelled word. The success metric is therefore *structural*, not just c
    normalization).
 2. A free, deterministic evaluation harness with provenance-tracked runs.
 3. A recognised-baseline comparison (Surya vs Tesseract) and a synthetic-vs-real gap analysis.
-4. A rigorous investigation of the table-fragmentation bottleneck (two geometric methods + one
-   hybrid structure-model method), isolating the true limiting factor.
+4. A rigorous investigation of the table-fragmentation bottleneck (two geometric methods + two
+   hybrid structure-model methods) that isolates the true limiting factor **and resolves it**: a
+   row-strip hybrid lifts dense-table `Cell_Accuracy` ~16× (0.024→0.393).
 
 ---
 
@@ -124,21 +125,24 @@ serialising content column-wise and destroying row↔value associations. Because
 order-sensitive, this *reordering* drives the apparent error — not bad OCR. **Table-structure
 fragmentation is the bottleneck.** See `docs/figures/table_fragmentation.png`.
 
-### 4.4 The fragmentation investigation (three interventions)
+### 4.4 The fragmentation investigation (four interventions)
 We attacked fragmentation systematically; all are documented with A/B numbers (PROJECT_LOG
-§2.12–2.15) and kept in the codebase behind flags.
+§2.12–2.17) and kept in the codebase behind flags.
 
 | Intervention | Idea | Result on real page 2 |
 |---|---|---|
 | **Geometric stitch — master** (§2.12) | Merge all fragments into one box before OCR | Detection fixed (8→1) but VLM **chokes on the giant crop**: Content_Recall 0.76→**0.16** |
 | **Geometric stitch — row-band** (§2.13) | Merge into full-width row strips | Best geometric variant: Cell_Acc 0.024→0.036 (+50% rel) but Recall→0.35 — still a tradeoff |
-| **Hybrid (SLANet + Surya)** (§2.15) | Structure model for the grid + per-cell Surya OCR | Structure solved (SLANet grid 27×9, 188 cells w/ coords) but per-cell VLM **hallucinates on tiny cells**, Recall→**0.04**, ~4.3 min/page |
+| **Hybrid — per-cell** (§2.15) | SLANet grid + per-cell Surya OCR | Structure solved (SLANet grid 27×9, 188 cells w/ coords) but per-cell VLM **hallucinates on tiny cells**, Recall→**0.04**, ~4.3 min/page |
+| **Hybrid — row-strip** (§2.17) | SLANet grid + read each row as one full-width `label="Table"` strip; Surya emits the `<td>` columns itself | **The win:** detection fixed (8→1) **and** Cell_Acc 0.024→**0.393** (~16×), Table_CER 0.657→**0.424**; trade is Recall→0.53 (blank strips), ~3.3 min/page |
 
 **The decisive finding:** structure is solvable — a small (7.4 MB) SLANet model recovers a clean
-27×9 grid in 0.07 s. The wall is **recognition of small, isolated Khmer cells**: Surya's VLM is
-built for text *lines/blocks*; given a tiny cell it hallucinates (emitting foreign scripts), and
-given a wide dense table it drops content. No crop size makes the VLM both fast and accurate on
-this layout.
+27×9 grid in 0.07 s. Per-cell recognition is the wrong granularity: Surya's VLM is built for text
+*lines/blocks*, so a tiny isolated cell makes it hallucinate (foreign scripts). The **row-strip**
+hybrid resolves this by feeding the VLM a natural full-width line and letting it split the columns
+itself — the first method to recover correct row↔value structure *and* readable cells on the dense
+real table, where every earlier intervention failed. The residual cost is recall: ~40% of strips
+return blank (lost, not corrupted), so accuracy is recovered but completeness is not yet.
 
 ### 4.5 Post-processing — LLM correction vs deterministic normalization
 A general LLM (Qwen2.5-7B) was tested for OCR correction and found **useless and slow** (it is not
@@ -168,13 +172,17 @@ stack is a **modest, non-harmful** improvement worth enabling for scans — not 
 The headline scientific result is a clean **decomposition of the table-extraction problem**:
 - **Detection / structure: solved.** SLANet yields the correct grid with cell coordinates,
   cheaply and quickly.
-- **Recognition of isolated cells: the open limit.** The VLM recogniser cannot read tiny Khmer
-  cells reliably. This is a *recognition-model* limitation, established by three independent
-  failed interventions converging on the same wall.
+- **Recognition granularity matters more than the recogniser.** Per-cell crops break the VLM
+  (hallucination); a full-width **row strip** — the VLM's natural input — lets it both read the
+  line and split the columns itself. This is what finally lifted dense-table `Cell_Accuracy`
+  0.024→0.393 (§4.4, §2.17), turning the "open limit" into a *recall* problem (blank strips)
+  rather than a *correctness* one.
 
 For financial tables specifically, the metric that matters is `Cell_Accuracy` (row↔value
 correctness), and the practical recommendation today is: **use Surya for clean/single-table pages
-(where it is strong), and treat dense multi-column tables as the known hard case.**
+and pages without tables (where it is strong and has no phantom-table cost), and the row-strip
+hybrid (`OCR_ENGINE=hybrid`, `KHMER_HYBRID_MODE=rowband`) for dense fragmented tables**, accepting
+its current recall trade.
 
 ---
 
@@ -185,6 +193,9 @@ correctness), and the practical recommendation today is: **use Surya for clean/s
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
+- **Row-strip recall** — the row-strip hybrid recovers accuracy on dense tables but ~40% of strips
+  return blank (Recall 0.76→0.53), and it adds spurious output on pages with **no** real table
+  (phantom detection), so it is not yet a safe blanket replacement for Surya.
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
@@ -192,9 +203,9 @@ correctness), and the practical recommendation today is: **use Surya for clean/s
 ---
 
 ## 7. Future Work
-1. **Row-strip recognition** — OCR each full-width row as a single text line (the VLM's strength;
-   ~27 calls vs 188) and split into columns by SLANet's column x-boundaries. The most promising
-   cheap refinement of the hybrid approach.
+1. **Recover row-strip recall** — ~40% of strips return blank; retry blank strips with extra
+   vertical context (or a second pass), and **suppress hybrid processing on no-table pages** to
+   remove the phantom-table cost. This would make the row-strip hybrid (§4.4, §2.17) a safe default.
 2. **A Khmer-capable line/cell recogniser** decoupled from the VLM.
 3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
    preprocessing stack.
@@ -205,10 +216,13 @@ correctness), and the practical recommendation today is: **use Surya for clean/s
 ## 8. Conclusion
 We delivered a reliable, fully-local Khmer OCR pipeline with a rigorous, free evaluation harness,
 and used it to pinpoint exactly where the difficulty lies. Khmer *character* recognition is already
-strong; *table structure* fragments on dense documents, and — crucially — we proved that the
-structure half is solvable (SLANet) while the remaining bottleneck is **recognition of small
-isolated cells**. This precisely scopes the path to the "ultimate Khmer table extractor" and is a
-defensible, evidence-backed thesis result.
+strong; *table structure* fragments on dense documents, and we proved the structure half is solvable
+(SLANet). We then showed the recognition half is solvable too **at the right granularity**: reading
+each row as a full-width strip and letting the VLM emit its own columns lifts dense-table
+`Cell_Accuracy` ~16× (0.024→0.393) — the first intervention to fix both detection and row↔value
+correctness. What remains is an engineering problem (strip *recall* and no-table-page handling),
+not an open research wall. This precisely scopes the path to the "ultimate Khmer table extractor"
+and is a defensible, evidence-backed thesis result.
 
 ---
 

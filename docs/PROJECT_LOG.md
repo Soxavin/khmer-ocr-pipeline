@@ -371,6 +371,44 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   field evidence. `Text_CER` (~0.95) is fragmentation-dominated and uninformative here; `Document_CER`
   is the signal. **Real-scan A/B remains future work.** Runs: `prep_*_clean` / `_degOFF` / `_degON`.
 
+### 2.17 Row-strip recognition — the fragmentation arc's first win
+
+- **Idea (the open lead from 2.15).** Keep SLANet for structure, but recognise each row as **one
+  full-width strip** instead of per-cell — a strip is a natural line, which is what Surya's VLM is
+  built for, and it's ~27 calls/page not 188. New `KHMER_HYBRID_MODE` (`hybrid_engine.py`):
+  `"rowband"` (now default) vs `"cell"` (2.15, kept for comparison).
+- **Phase-0 probe** (`scripts/probe_rowstrip_recognition.py`). Key finding: a strip sent with
+  `label="Table"` makes Surya emit a one-row `<table><tr><td>…` we can parse with the existing
+  pure-Surya `_parse_html_table` — **Surya does the column splitting itself** (9 `<td>` = SLANet's
+  9 cols), no x-boundary math needed. Clean data rows read correct Khmer; the "Burmese
+  hallucination" first seen was an artifact of probing the messy multi-line **header** band. ~40% of
+  isolated strips come back **blank** (recall loss, not corruption).
+- **Strip geometry** (`_row_bands`): x is **always** the full crop width (a short/missing cell must
+  not narrow the strip and rob the VLM of column context); y gets `_ROW_STRIP_Y_PAD_PX`=8 padding
+  (keep ascenders/descenders + grid lines the VLM uses to emit `<td>`s).
+- **A/B on real (raw render), the fragmented p2 is the point:**
+
+  | page | Surya Acc/Recall/TblCER | **rowband** Acc/Recall/TblCER | cell Acc/Recall/TblCER |
+  |---|---|---|---|
+  | p1 (clean table) | 0.134 / 0.529 / 0.274 | 0.231 / 0.390 / 0.455 | 0.120 / 0.105 / 0.931 |
+  | p2 (fragmented) | 0.024 (Found **8**/1) / 0.758 / 0.657 | **0.393** (Found **1**/1) / 0.525 / **0.424** | 0.024 / 0.025 / 1.339 |
+  | p3 (no table) | DocCER 0.220 | DocCER 0.526 | DocCER 1.974 |
+
+- **Finding (positive, qualified GO).** On the fragmented table, **rowband is the first method in
+  the whole arc to fix detection (8→1) AND recover row↔value accuracy** — `Cell_Accuracy`
+  0.024→**0.393** (~16× over both Surya and cell) and `Table_CER` 0.657→**0.424** — by giving the
+  VLM a natural full-width line and letting it column-split. It **strictly dominates cell mode** on
+  every metric (cell's recall stays collapsed at 0.025, confirming 2.15) and is faster (~3.3 min/page
+  vs cell's ~4.3). The trade is **recall** (0.758→0.525, the blank strips) and it still **hurts
+  pages without a real table** (p3 phantom-table region inflates DocCER 0.220→0.526).
+- **Decision.** Default `KHMER_HYBRID_MODE=rowband`; `cell` kept opt-in for comparison. `hybrid`
+  stays opt-in vs Surya for **production** (the recall trade + phantom-table behaviour on non-table
+  pages aren't fixed yet) — but for **table-heavy** MEF docs rowband is the recommended engine and
+  **closes the fragmentation arc**: structure is solvable (SLANet) *and* recognition of dense tables
+  is now usable (rowband), where geometric stitching (2.12–2.13) and per-cell (2.15) both failed.
+  Next leads if pursued: recover blank rows (retry blanks with extra context) and suppress
+  hybrid processing on no-table pages. Runs: `*_ab_surya` / `_ab_hybrid_rowband` / `_ab_hybrid_cell`.
+
 ---
 
 ## 3. Results Snapshot

@@ -53,8 +53,10 @@ def test_build_table_empty_cell_has_no_text_lines():
 # --- run_hybrid wiring (Surya + SLANet mocked) ---
 
 def _run_hybrid_mocked(base: SuryaResult, cells, texts):
+    # these tests exercise the cell-mode wiring specifically
     with patch.object(he, "run_surya", return_value=base), \
          patch.object(he, "_get_predictors", return_value=(None, object())), \
+         patch.object(he, "_hybrid_mode", return_value="cell"), \
          patch.object(he, "predict_cells", return_value=cells), \
          patch.object(he, "_ocr_cells", return_value=texts):
         return he.run_hybrid(_preprocess())
@@ -84,3 +86,60 @@ def test_run_hybrid_slanet_empty_keeps_original_page():
     base = _base_with_table()
     r = _run_hybrid_mocked(base, [], [])
     assert r.pages[0] is base.pages[0]  # no cells → original page kept
+
+
+# --- rowband mode ---
+
+def test_hybrid_mode_defaults_to_rowband(monkeypatch):
+    monkeypatch.delenv("KHMER_HYBRID_MODE", raising=False)
+    assert he._hybrid_mode() == "rowband"
+
+
+def test_row_bands_full_width_and_padding():
+    # a row whose cells do NOT span the full width must still produce a full-width strip
+    cells = [
+        {"row_id": 0, "col_id": 1, "row_span": 1, "col_span": 1, "bbox": [40, 4, 90, 24]},
+        {"row_id": 1, "col_id": 0, "row_span": 1, "col_span": 1, "bbox": [0, 60, 50, 95]},
+    ]
+    bands = he._row_bands(cells, crop_w=200, crop_h=100)
+    assert [b["row_id"] for b in bands] == [0, 1]
+    assert all(b["bbox"][0] == 0 and b["bbox"][2] == 200 for b in bands)  # full-width x
+    assert bands[0]["bbox"][1] == 0 and bands[0]["bbox"][3] == 32          # y0 clamped to 0, 24+8
+    assert bands[1]["bbox"][1] == 52 and bands[1]["bbox"][3] == 100        # 60-8, y1 clamped to crop_h
+
+
+def _fake_rec(htmls):
+    def rec(imgs, layout_results, full_page):
+        return [SimpleNamespace(blocks=[SimpleNamespace(html=h) for h in htmls])]
+    return rec
+
+
+def test_ocr_rowbands_offsets_rows_and_parses_columns():
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]}, {"row_id": 1, "bbox": [0, 30, 200, 60]}]
+    htmls = ["<table><tr><td>A</td><td>B</td></tr></table>",
+             "<table><tr><td>C</td><td>D</td></tr></table>"]
+    grid = he._ocr_rowbands(_fake_rec(htmls), crop, bands)
+    assert grid == {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}
+
+
+def test_ocr_rowbands_blank_band_still_reserves_a_row():
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]},
+             {"row_id": 1, "bbox": [0, 30, 200, 60]},
+             {"row_id": 2, "bbox": [0, 60, 200, 90]}]
+    htmls = ["<table><tr><td>A</td></tr></table>", "", "<table><tr><td>C</td></tr></table>"]
+    grid = he._ocr_rowbands(_fake_rec(htmls), crop, bands)
+    assert grid == {(0, 0): "A", (2, 0): "C"}
+
+
+def test_run_hybrid_rowband_builds_table_from_grid(monkeypatch):
+    monkeypatch.setenv("KHMER_HYBRID_MODE", "rowband")
+    grid = {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}
+    with patch.object(he, "run_surya", return_value=_base_with_table()), \
+         patch.object(he, "_get_predictors", return_value=(None, object())), \
+         patch.object(he, "predict_cells", return_value=_FAKE_CELLS), \
+         patch.object(he, "_ocr_rowbands", return_value=grid):
+        r = he.run_hybrid(_preprocess())
+    assert len(r.pages[0].tables) == 1
+    assert pred_table_grid(r.pages[0].tables[0]) == [["A", "B"], ["C", "D"]]
