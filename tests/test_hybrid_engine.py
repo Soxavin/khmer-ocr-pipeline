@@ -108,10 +108,19 @@ def test_row_bands_full_width_and_padding():
     assert bands[1]["bbox"][1] == 52 and bands[1]["bbox"][3] == 100        # 60-8, y1 clamped to crop_h
 
 
-def _fake_rec(htmls):
+def _fake_rec_seq(*calls):
+    # each call returns one block per html in the next list (in order)
+    seq = list(calls)
+
     def rec(imgs, layout_results, full_page):
+        htmls = seq.pop(0)
         return [SimpleNamespace(blocks=[SimpleNamespace(html=h) for h in htmls])]
     return rec
+
+
+def test_best_row_keeps_row_with_most_nonempty_cells():
+    g = {(0, 0): "x", (0, 1): "", (1, 0): "A", (1, 1): "B"}  # row 1 is fuller
+    assert he._best_row(g) == {(0, 0): "A", (0, 1): "B"}
 
 
 def test_ocr_rowbands_offsets_rows_and_parses_columns():
@@ -119,17 +128,29 @@ def test_ocr_rowbands_offsets_rows_and_parses_columns():
     bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]}, {"row_id": 1, "bbox": [0, 30, 200, 60]}]
     htmls = ["<table><tr><td>A</td><td>B</td></tr></table>",
              "<table><tr><td>C</td><td>D</td></tr></table>"]
-    grid = he._ocr_rowbands(_fake_rec(htmls), crop, bands)
+    grid = he._ocr_rowbands(_fake_rec_seq(htmls), crop, bands)  # no blanks → single pass
     assert grid == {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}
 
 
-def test_ocr_rowbands_blank_band_still_reserves_a_row():
+def test_ocr_rowbands_retries_blank_band_and_fills_it():
     crop = np.zeros((100, 200, 3), dtype=np.uint8)
     bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]},
              {"row_id": 1, "bbox": [0, 30, 200, 60]},
              {"row_id": 2, "bbox": [0, 60, 200, 90]}]
-    htmls = ["<table><tr><td>A</td></tr></table>", "", "<table><tr><td>C</td></tr></table>"]
-    grid = he._ocr_rowbands(_fake_rec(htmls), crop, bands)
+    pass1 = ["<table><tr><td>A</td></tr></table>", "", "<table><tr><td>C</td></tr></table>"]
+    retry = ["<table><tr><td>B</td></tr></table>"]  # one box for the single blank band
+    grid = he._ocr_rowbands(_fake_rec_seq(pass1, retry), crop, bands)
+    assert grid == {(0, 0): "A", (1, 0): "B", (2, 0): "C"}
+
+
+def test_ocr_rowbands_still_blank_after_retry_reserves_a_row():
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]},
+             {"row_id": 1, "bbox": [0, 30, 200, 60]},
+             {"row_id": 2, "bbox": [0, 60, 200, 90]}]
+    pass1 = ["<table><tr><td>A</td></tr></table>", "", "<table><tr><td>C</td></tr></table>"]
+    retry = [""]  # retry also blank → band 1 stays empty but keeps its row slot
+    grid = he._ocr_rowbands(_fake_rec_seq(pass1, retry), crop, bands)
     assert grid == {(0, 0): "A", (2, 0): "C"}
 
 

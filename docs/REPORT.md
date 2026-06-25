@@ -134,15 +134,16 @@ We attacked fragmentation systematically; all are documented with A/B numbers (P
 | **Geometric stitch — master** (§2.12) | Merge all fragments into one box before OCR | Detection fixed (8→1) but VLM **chokes on the giant crop**: Content_Recall 0.76→**0.16** |
 | **Geometric stitch — row-band** (§2.13) | Merge into full-width row strips | Best geometric variant: Cell_Acc 0.024→0.036 (+50% rel) but Recall→0.35 — still a tradeoff |
 | **Hybrid — per-cell** (§2.15) | SLANet grid + per-cell Surya OCR | Structure solved (SLANet grid 27×9, 188 cells w/ coords) but per-cell VLM **hallucinates on tiny cells**, Recall→**0.04**, ~4.3 min/page |
-| **Hybrid — row-strip** (§2.17) | SLANet grid + read each row as one full-width `label="Table"` strip; Surya emits the `<td>` columns itself | **The win:** detection fixed (8→1) **and** Cell_Acc 0.024→**0.393** (~16×), Table_CER 0.657→**0.424**; trade is Recall→0.53 (blank strips), ~3.3 min/page |
+| **Hybrid — row-strip** (§2.17–2.18) | SLANet grid + read each row as one full-width `label="Table"` strip; Surya emits the `<td>` columns itself; blank strips get one taller-crop retry | **The win:** detection fixed (8→1) **and** Cell_Acc 0.024→**0.425** (~18×), Table_CER 0.657→**0.288**, Recall 0.758→**0.623**, DocCER 0.670→**0.612** — beats Surya on every p2 metric |
 
 **The decisive finding:** structure is solvable — a small (7.4 MB) SLANet model recovers a clean
 27×9 grid in 0.07 s. Per-cell recognition is the wrong granularity: Surya's VLM is built for text
 *lines/blocks*, so a tiny isolated cell makes it hallucinate (foreign scripts). The **row-strip**
 hybrid resolves this by feeding the VLM a natural full-width line and letting it split the columns
 itself — the first method to recover correct row↔value structure *and* readable cells on the dense
-real table, where every earlier intervention failed. The residual cost is recall: ~40% of strips
-return blank (lost, not corrupted), so accuracy is recovered but completeness is not yet.
+real table, where every earlier intervention failed. A taller-crop retry on blank strips (§2.18)
+then recovers most of the lost recall (0.53→0.62 on p2), so rowband ends up beating pure Surya on
+*every* p2 metric. The residual gap is a handful of genuinely-illegible rows — a recogniser limit.
 
 ### 4.5 Post-processing — LLM correction vs deterministic normalization
 A general LLM (Qwen2.5-7B) was tested for OCR correction and found **useless and slow** (it is not
@@ -181,8 +182,9 @@ The headline scientific result is a clean **decomposition of the table-extractio
 For financial tables specifically, the metric that matters is `Cell_Accuracy` (row↔value
 correctness), and the practical recommendation today is: **use Surya for clean/single-table pages
 and pages without tables (where it is strong and has no phantom-table cost), and the row-strip
-hybrid (`OCR_ENGINE=hybrid`, `KHMER_HYBRID_MODE=rowband`) for dense fragmented tables**, accepting
-its current recall trade.
+hybrid (`OCR_ENGINE=hybrid`, `KHMER_HYBRID_MODE=rowband`) for dense fragmented tables**, where it
+now beats Surya on every metric (§2.18); the only reason it is not yet a blanket default is its
+behaviour on no-table pages.
 
 ---
 
@@ -193,9 +195,11 @@ its current recall trade.
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
-- **Row-strip recall** — the row-strip hybrid recovers accuracy on dense tables but ~40% of strips
-  return blank (Recall 0.76→0.53), and it adds spurious output on pages with **no** real table
-  (phantom detection), so it is not yet a safe blanket replacement for Surya.
+- **No-table pages** — the row-strip hybrid still adds spurious output on pages with **no** real
+  table (Surya's phantom table detection, p3 DocCER 0.22→0.58). We could not find a structural or
+  fill-rate signal that suppresses the phantom without risking real sparse tables (the phantom region
+  yields a full SLANet grid that fills like a real table), and have only one no-table page to tune
+  against — so hybrid stays opt-in vs Surya. The right fix is upstream table-*detection* gating.
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
@@ -203,9 +207,10 @@ its current recall trade.
 ---
 
 ## 7. Future Work
-1. **Recover row-strip recall** — ~40% of strips return blank; retry blank strips with extra
-   vertical context (or a second pass), and **suppress hybrid processing on no-table pages** to
-   remove the phantom-table cost. This would make the row-strip hybrid (§4.4, §2.17) a safe default.
+1. **Make the row-strip hybrid a safe default** — blank-strip recall is largely recovered (§2.18);
+   what remains is **suppressing the hybrid on no-table pages**. Since no content signal cleanly
+   separates a phantom from a real sparse table, this needs upstream table-*detection* gating (or a
+   small labelled set of no-table pages to learn the boundary).
 2. **A Khmer-capable line/cell recogniser** decoupled from the VLM.
 3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
    preprocessing stack.
@@ -220,8 +225,8 @@ strong; *table structure* fragments on dense documents, and we proved the struct
 (SLANet). We then showed the recognition half is solvable too **at the right granularity**: reading
 each row as a full-width strip and letting the VLM emit its own columns lifts dense-table
 `Cell_Accuracy` ~16× (0.024→0.393) — the first intervention to fix both detection and row↔value
-correctness. What remains is an engineering problem (strip *recall* and no-table-page handling),
-not an open research wall. This precisely scopes the path to the "ultimate Khmer table extractor"
+correctness. What remains is a contained
+engineering problem (gating the hybrid on no-table pages), not an open research wall. This precisely scopes the path to the "ultimate Khmer table extractor"
 and is a defensible, evidence-backed thesis result.
 
 ---

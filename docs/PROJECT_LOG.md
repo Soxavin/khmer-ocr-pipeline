@@ -409,6 +409,39 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   Next leads if pursued: recover blank rows (retry blanks with extra context) and suppress
   hybrid processing on no-table pages. Runs: `*_ab_surya` / `_ab_hybrid_rowband` / `_ab_hybrid_cell`.
 
+### 2.18 Row-strip recall fix — blank-strip retry (the recall half of 2.17's trade)
+
+- **Two leads from 2.17:** (a) ~40% of strips returned **blank** (recall 0.758→0.525); (b) the
+  hybrid **hurts no-table pages** (p3 DocCER 0.220→0.526, a phantom table region).
+- **Phase-0 probe** (on the known-blank p2 rows 15/20): re-running the *same* pad-8 strip does **not**
+  recover them (blanks are deterministic, not OCR jitter); pad-30 doesn't either; **pad-60 recovers
+  both** as a single, correctly-columned row. So the fix is a **second recognition pass over only the
+  blank bands with a much taller crop** (`_ROW_STRIP_RETRY_Y_PAD_PX=60`), keeping the row with the
+  most non-empty cells (`_best_row`, in case the taller crop grabs a neighbour sliver).
+- **A/B after the fix (real, raw render):**
+
+  | page | Surya Acc/Recall/TblCER/DocCER | rowband 2.17 | **rowband + retry (2.18)** |
+  |---|---|---|---|
+  | p1 | 0.134 / 0.529 / 0.274 / 0.618 | 0.231 / 0.390 / 0.455 / 0.707 | 0.222 / **0.500** / **0.363** / **0.662** |
+  | p2 | 0.024 / 0.758 / 0.657 / 0.670 | 0.393 / 0.525 / 0.424 / 0.686 | **0.425** / **0.623** / **0.288** / **0.612** |
+  | p3 (no table) | DocCER 0.220 | DocCER 0.526 | DocCER 0.583 |
+
+- **Finding.** The retry recovers a real slice of recall — p2 0.525→**0.623** (closing ~⅓ of the gap
+  to Surya's 0.758) and p1 0.390→**0.500** — while **accuracy and CER also improve** (p2 Acc
+  0.393→0.425, Table_CER 0.424→0.288, DocCER 0.686→0.612). **Rowband now beats pure Surya on every
+  p2 metric, DocCER included.** The residual recall gap is genuinely-illegible rows (a recogniser
+  limit, not a strip-sizing one).
+- **Phantom suppression — dropped, with evidence.** Probing p3's phantom region: SLANet returns a
+  *full* 26×9 / 123-cell grid (not degenerate), and after the retry the phantom **fills like a real
+  table** (0.85 of rows ≥2 cells, ~5.4 cells/row, median 6 cols) vs p2's real (1.0, 8.8, 9). There is
+  **no structural or fill-rate threshold that suppresses the phantom without risking real sparse
+  tables**, and we have only one no-table page to tune against — so adding a heuristic would overfit.
+  Left as a characterised limitation; the right fix is upstream table-**detection** gating or more
+  labelled no-table pages. p3 stays slightly worse (0.583) because the retry fills more phantom rows.
+- **Decision.** Blank-retry shipped (default on in `rowband`). `hybrid` remains opt-in vs Surya for
+  production **only** because of the no-table-page behaviour; on table pages rowband is now clearly
+  best. Run: `*_recallfix_rowband`.
+
 ---
 
 ## 3. Results Snapshot

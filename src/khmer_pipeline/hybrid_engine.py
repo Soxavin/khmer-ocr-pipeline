@@ -23,6 +23,10 @@ from .memory import clear_device_cache
 # Paragraph/header text + table DETECTION are reused from run_surya unchanged.
 
 _ROW_STRIP_Y_PAD_PX = 8
+# ~40% of thin strips come back blank; a much taller crop gives the VLM the vertical
+# context it needs and recovers them (probe: pad 60 fixes the known-blank rows, pad 30
+# does not), at the cost of a second recognition pass over only the blank rows.
+_ROW_STRIP_RETRY_Y_PAD_PX = 60
 
 
 def _hybrid_mode() -> str:
@@ -65,28 +69,61 @@ def _row_bands(cells: list[dict], crop_w: int, crop_h: int) -> list[dict]:
     return bands
 
 
-def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict]) -> dict[tuple[int, int], str]:
-    # Recognise each full-width row strip as a one-row "Table"; Surya emits the row's
-    # <td> columns. Bands are concatenated into one grid, local row indices offset so
-    # each band occupies its own global row (blank bands still reserve a row slot).
+def _rec_grids(rec_pred, crop_rgb: np.ndarray, bboxes: list) -> list[dict[tuple[int, int], str]]:
+    # One batched recognition over the given full-width strips (label="Table"); blocks
+    # come back in box order. Returns each strip's parsed {(row,col): text} grid.
     from surya.layout.schema import LayoutResult, LayoutBox
 
     h, w = crop_rgb.shape[:2]
     boxes = []
-    for i, b in enumerate(bands):
-        x0, y0, x1, y1 = b["bbox"]
+    for i, (x0, y0, x1, y1) in enumerate(bboxes):
         poly = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
         boxes.append(LayoutBox(polygon=poly, label="Table", raw_label="Table",
                                position=i, count=0, confidence=1.0))
     layout = LayoutResult(bboxes=boxes, image_bbox=[0.0, 0.0, float(w), float(h)], error=False)
     page_ocr = rec_pred([Image.fromarray(crop_rgb)], layout_results=[layout], full_page=False)[0]
+    return [_parse_html_table(b.html or "") for b in page_ocr.blocks]
+
+
+def _grid_nonempty(g: dict[tuple[int, int], str]) -> int:
+    return sum(1 for v in g.values() if v.strip())
+
+
+def _best_row(g: dict[tuple[int, int], str]) -> dict[tuple[int, int], str]:
+    # A taller retry strip may include a sliver of a neighbour row; keep the single row
+    # with the most non-empty cells (the target data row) and renumber it to row 0.
+    by_r: dict[int, list[tuple[int, str]]] = {}
+    for (r, c), text in g.items():
+        by_r.setdefault(r, []).append((c, text))
+    best = max(by_r, key=lambda r: sum(1 for _, t in by_r[r] if t.strip()))
+    return {(0, c): t for c, t in by_r[best]}
+
+
+def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict]) -> dict[tuple[int, int], str]:
+    # Recognise each full-width row strip as a one-row "Table"; Surya emits the row's
+    # <td> columns. Blank strips get one retry with a much taller crop (more vertical
+    # context). Bands are concatenated into one grid, local row indices offset so each
+    # band occupies its own global row (a still-blank band reserves its row slot).
+    h = crop_rgb.shape[0]
+    locals_ = _rec_grids(rec_pred, crop_rgb, [b["bbox"] for b in bands])
+
+    blanks = [i for i, g in enumerate(locals_) if _grid_nonempty(g) == 0]
+    if blanks:
+        extra = _ROW_STRIP_RETRY_Y_PAD_PX - _ROW_STRIP_Y_PAD_PX
+        retry_bboxes = []
+        for i in blanks:
+            x0, y0, x1, y1 = bands[i]["bbox"]
+            retry_bboxes.append([x0, max(0, y0 - extra), x1, min(h, y1 + extra)])
+        retried = _rec_grids(rec_pred, crop_rgb, retry_bboxes)
+        for j, i in enumerate(blanks):
+            if _grid_nonempty(retried[j]) > 0:
+                locals_[i] = _best_row(retried[j])
 
     grid: dict[tuple[int, int], str] = {}
     row_offset = 0
-    for block in page_ocr.blocks:
-        local = _parse_html_table(block.html or "")
-        local_rows = (max(r for r, _ in local) + 1) if local else 0
-        for (r, c), text in local.items():
+    for g in locals_:
+        local_rows = (max(r for r, _ in g) + 1) if g else 0
+        for (r, c), text in g.items():
             grid[(row_offset + r, c)] = text
         row_offset += max(local_rows, 1)
     return grid
