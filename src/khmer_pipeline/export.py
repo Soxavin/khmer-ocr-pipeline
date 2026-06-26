@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from .models import PostprocessResult, ExportResult
+from .table_merge_pages import merge_document_tables
 
 _KHMER_TO_ARABIC: dict[str, str] = {
     "០": "0", "១": "1", "២": "2", "៣": "3", "៤": "4",
@@ -58,7 +59,8 @@ def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
     return repaired_table, True
 
 
-def export(result: PostprocessResult, convert_numerals: bool = False, repair_tables: bool = False) -> ExportResult:
+def export(result: PostprocessResult, convert_numerals: bool = False, repair_tables: bool = False,
+           stitch_pages: bool = False) -> ExportResult:
     # Repair tables in place before building the JSON, so was_repaired and
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
@@ -74,16 +76,52 @@ def export(result: PostprocessResult, convert_numerals: bool = False, repair_tab
                 page.tables[t_idx], _ = _validate_and_repair_table(table)
 
     document_json = _build_document_json(result)
-    tables_csv: list[tuple[str, str]] = []
-    for page in result.pages:
-        for t_idx, table in enumerate(page.tables):
-            table_id = _make_table_id(result.source_name, page.page_index, t_idx)
-            tables_csv.append((table_id, _table_to_csv(table, convert_numerals)))
+
+    if stitch_pages:
+        # Join continuation tables across pages into one logical table per section;
+        # the merged tables become the CSV output an analyst gets.
+        merged = merge_document_tables(result.pages)
+        document_json["document_tables"] = _build_merged_tables_json(result.source_name, merged)
+        tables_csv = [(_make_doc_table_id(result.source_name, i), _table_to_csv(t, convert_numerals))
+                      for i, t in enumerate(merged)]
+    else:
+        tables_csv = []
+        for page in result.pages:
+            for t_idx, table in enumerate(page.tables):
+                table_id = _make_table_id(result.source_name, page.page_index, t_idx)
+                tables_csv.append((table_id, _table_to_csv(table, convert_numerals)))
+
     return ExportResult(
         source_name=result.source_name,
         document_json=document_json,
         tables_csv=tables_csv,
     )
+
+
+def _make_doc_table_id(source_name: str, n: int) -> str:
+    return f"{Path(source_name).stem}_table{n + 1}"
+
+
+def _build_merged_tables_json(source_name: str, merged: list[dict]) -> list[dict]:
+    out = []
+    for i, table in enumerate(merged):
+        out.append({
+            "table_id": _make_doc_table_id(source_name, i),
+            "source_pages": table.get("source_pages", []),
+            "rows": table["rows"],
+            "cols": table["cols"],
+            "cells": [
+                {
+                    "row": c.get("row_id", 0),
+                    "col": c.get("col_id") or 0,
+                    "text": " ".join(
+                        t["text"] for t in (c.get("text_lines") or []) if t.get("text")
+                    ).strip(),
+                }
+                for c in table.get("cells", [])
+            ],
+        })
+    return out
 
 
 def _make_table_id(source_name: str, page_index: int, table_index: int) -> str:

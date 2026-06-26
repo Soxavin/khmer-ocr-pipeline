@@ -49,6 +49,33 @@ def test_document_json_pages_have_required_keys():
         assert key in doc["pages"][0]
 
 
+def _grid_table(grid):
+    cells = [{"row_id": r, "col_id": c, "text_lines": ([{"text": t}] if t else []), "bbox": []}
+             for r, row in enumerate(grid) for c, t in enumerate(row)]
+    n = max((len(r) for r in grid), default=0)
+    return {"rows": [{"row_id": i} for i in range(len(grid))],
+            "cols": [{"col_id": j} for j in range(n)], "cells": cells}
+
+
+def test_stitch_pages_merges_continuation_into_one_csv():
+    H = ["a", "b"]
+    pages = [_make_page(0, tables=[_grid_table([H, ["1", "x"]])]),
+             _make_page(1, tables=[_grid_table([H, ["2", "y"]])])]
+    res = export(_make_result(pages=pages), stitch_pages=True)
+    assert len(res.tables_csv) == 1
+    assert res.tables_csv[0][0] == "ardb_sample_table1"
+    assert res.document_json["document_tables"][0]["source_pages"] == [0, 1]
+
+
+def test_no_stitch_keeps_per_page_tables():
+    H = ["a", "b"]
+    pages = [_make_page(0, tables=[_grid_table([H, ["1", "x"]])]),
+             _make_page(1, tables=[_grid_table([H, ["2", "y"]])])]
+    res = export(_make_result(pages=pages), stitch_pages=False)
+    assert len(res.tables_csv) == 2
+    assert "document_tables" not in res.document_json
+
+
 def test_table_id_naming_convention():
     result = export(_make_result(source_name="ardb_sample.pdf", pages=[_make_page(0, tables=[_TABLE])]))
     assert result.tables_csv[0][0] == "ardb_sample_page1_table1"

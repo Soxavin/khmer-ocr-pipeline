@@ -441,6 +441,38 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - **Decision.** Blank-retry shipped (default on in `rowband`). `hybrid` remains opt-in vs Surya for
   production **only** because of the no-table-page behaviour; on table pages rowband is now clearly
   best. Run: `*_recallfix_rowband`.
+- **Correction (added §2.19).** The "no-table page" / "phantom" framing above was **wrong**: p3 is a
+  *real* continuation table whose content the GT had mislabelled as `paragraphs` (`tables: []`), so
+  `evaluate_table` had no grid to score and the page looked table-less. The p3 DocCER gap was rowband
+  re-formatting a *real* table, not inventing a phantom. GT fixed in §2.19; the no-table-page concern
+  is therefore overstated (we still lack a true no-table page in the set).
+
+### 2.19 Multi-page table stitching — one report → one table
+
+- **Why.** The real ARDB price reports are **one continuous 9-col table split across page images**
+  (with embedded section-divider rows); the per-page engines emitted a table per page, forcing the
+  analyst to re-stitch in Excel. Added `table_merge_pages.py` (`merge_document_tables`): join
+  consecutive tables that share a column count (±1), drop the repeated header at each page break, and
+  start a new logical table when columns change. Wired as `stitch_pages` into Stage-5 `export.py`
+  (default **on** in `app.py`/`pipeline.py`; per-table CSV + a `document_tables` block in the JSON).
+- **GT integrity.** `scripts/draft_document_gt.py` restructures the existing per-page GT (incl. p3's
+  mislabelled paragraphs) into a document-level grid (`*_document_gt.json`) for human verification —
+  fixing the §2.18 issue. Eval: `scripts/eval_document.py` (whole doc → stitch → sanity checks +
+  `evaluate_table` vs the document GT).
+- **Result (09.06.26, 3 pages, `eval_document.py`):**
+
+  | engine | per-page tables → logical tables | stitched shape | dup headers |
+  |---|---|---|---|
+  | **hybrid rowband** | 3 → **1** (source_pages [0,1,2]) | 101×10, one table | 0 |
+  | surya | 10 → 3 (p2's 8 fragments stay 4-col) | split, not joined | 0 |
+
+- **Finding.** Stitching delivers the intended outcome **with the hybrid rowband engine** (consistent
+  9-col pages → all 3 pages collapse into one table, headers de-duplicated). With **Surya** it can't
+  join across pages because per-page fragmentation yields inconsistent column counts — a clean
+  argument that stitching and the structure-aware engine go together. Scored cell metrics vs the
+  document GT are **deferred until the drafted GT is human-verified** (the draft flags 14 sparse
+  grain rows); the stitch *structure* checks (logical-table count, header dedup, row totals) pass
+  GT-free. Modules: `table_merge_pages.py`, `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
 
 ---
 

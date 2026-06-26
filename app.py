@@ -186,6 +186,13 @@ with st.sidebar:
              "Repaired tables are flagged with 'was_repaired' in the JSON and a "
              "warning in the UI. Off by default — review the raw grid first.",
     )
+    stitch_pages = st.checkbox(
+        "Stitch tables across pages",
+        value=True,
+        help="Join a table that continues across pages into one table, so a multi-page "
+             "report exports as one CSV per table instead of one per page. A column-count "
+             "change starts a new table. On by default — turn off to keep per-page tables.",
+    )
 
 uploaded = st.file_uploader(
     "Upload a PDF or image file",
@@ -208,7 +215,7 @@ else:
     else:
         page_sel_part = "all"
     
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -275,7 +282,8 @@ else:
             f"- **Qwen correction:** {'On' if enable_qwen else 'Off'}\n"
             f"- **Anomaly threshold:** {anomaly_threshold:.2f}\n"
             f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}\n"
-            f"- **Table auto-repair:** {'On' if repair_tables else 'Off'}"
+            f"- **Table auto-repair:** {'On' if repair_tables else 'Off'}\n"
+            f"- **Stitch tables across pages:** {'On' if stitch_pages else 'Off'}"
         )
 
     run_triggered = st.session_state.get("run_triggered", False)
@@ -394,7 +402,7 @@ else:
             st.write("Exporting structured output...")
             _t0 = time.perf_counter()
             try:
-                export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
+                export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables, stitch_pages=stitch_pages)
                 st.session_state["export_result"] = export_result
                 clear_device_cache()  # NEW: Final memory cleanup
             except Exception as e:

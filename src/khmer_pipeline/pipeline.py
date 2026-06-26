@@ -31,6 +31,7 @@ def run(
     anomaly_threshold: float = ANOMALY_THRESHOLD,
     convert_numerals: bool = False,
     repair_tables: bool = False,
+    stitch_pages: bool = True,
 ) -> None:
     source_path = Path(source_path)
     output_dir = Path(output_dir)
@@ -58,7 +59,8 @@ def run(
     print(f"  Post-processing complete")
     clear_device_cache()
 
-    export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables)
+    export_result = export(postprocess_result, convert_numerals=convert_numerals,
+                           repair_tables=repair_tables, stitch_pages=stitch_pages)
 
     json_path = output_dir / f"{source_path.stem}_extracted.json"
     json_path.write_text(
@@ -92,6 +94,9 @@ if __name__ == "__main__":
     parser.add_argument("--anomaly-threshold", type=float, default=ANOMALY_THRESHOLD, dest="anomaly_threshold")
     parser.add_argument("--convert-numerals", action="store_true", dest="convert_numerals")
     parser.add_argument("--repair-tables", action="store_true", dest="repair_tables")
+    parser.add_argument("--no-stitch", action="store_false", dest="stitch_pages",
+                        help="Keep per-page tables instead of stitching continuation "
+                             "tables across pages into one (default: stitch).")
     args = parser.parse_args()
     run(
         args.input, args.output,
@@ -105,4 +110,5 @@ if __name__ == "__main__":
         anomaly_threshold=args.anomaly_threshold,
         convert_numerals=args.convert_numerals,
         repair_tables=args.repair_tables,
+        stitch_pages=args.stitch_pages,
     )

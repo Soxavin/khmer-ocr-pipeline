@@ -1,0 +1,91 @@
+"""Document-level evaluation of multi-page table stitching.
+
+Runs a whole real doc (all page images) through the active OCR engine, stitches
+the per-page tables into document tables, then reports:
+  - stitch sanity checks (logical-table count, source pages, row totals, no
+    duplicated header rows), which need no ground truth, and
+  - scored metrics (Cell_Accuracy / Recall / Table_CER) of the stitched table vs
+    the verified document GT (<stem>_document_gt.json), reusing evaluate_table.
+
+    OCR_ENGINE=surya  uv run python scripts/eval_document.py [stem]
+    OCR_ENGINE=hybrid KHMER_HYBRID_MODE=rowband uv run python scripts/eval_document.py [stem]
+
+NOTE: scored numbers are only meaningful once you have verified the drafted GT
+(see scripts/draft_document_gt.py). Until then treat them as provisional.
+"""
+from __future__ import annotations
+import glob
+import json
+import sys
+from pathlib import Path
+
+from khmer_pipeline.ingest import ingest
+from khmer_pipeline.models import PreprocessResult
+from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE
+from khmer_pipeline.table_merge_pages import merge_document_tables, _rows, _row_sig
+from khmer_pipeline.evaluate_structure import evaluate_table, pred_table_grid
+
+_REAL_DIR = Path("eval/datasets/real")
+_DEFAULT_STEM = "តារាងតម្លៃទំនិញតាមទីផ្សារមួយចំនួននៅរាជធានីភ្នំពេញ-ប្រចាំថ្ងៃ-09.06.26"
+
+
+def _load_pages(stem: str) -> PreprocessResult:
+    pngs = sorted(glob.glob(str(_REAL_DIR / f"{stem}_p*.png")))
+    images = []
+    for p in pngs:
+        images.extend(ingest(Path(p).read_bytes(), Path(p).name, dpi=200).page_images)
+    return PreprocessResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
+
+
+def _duplicate_header_rows(table: dict) -> int:
+    rows = _rows(table)
+    if not rows:
+        return 0
+    header = _row_sig(rows[0])
+    return sum(1 for r in rows[1:] if _row_sig(r) == header)
+
+
+def main() -> int:
+    stem = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_STEM
+    engine = getattr(ACTIVE_OCR_ENGINE, "__name__", "ocr")
+    pre = _load_pages(stem)
+    if not pre.page_images:
+        print(f"No page PNGs for stem: {stem}")
+        return 1
+    print(f"engine={engine}  pages={pre.page_count}")
+
+    result = ACTIVE_OCR_ENGINE(pre)
+    per_page_tables = sum(len(p.tables) for p in result.pages)
+    per_page_rows = sum(len(pred_table_grid(t)) for p in result.pages for t in p.tables)
+
+    merged = merge_document_tables(result.pages)
+    merged_rows = sum(len(pred_table_grid(t)) for t in merged)
+    dups = sum(_duplicate_header_rows(t) for t in merged)
+
+    print("\n--- stitch sanity checks ---")
+    print(f"  per-page tables: {per_page_tables}  ->  logical tables after stitch: {len(merged)}")
+    for i, t in enumerate(merged):
+        g = pred_table_grid(t)
+        cols = max((len(r) for r in g), default=0)
+        print(f"    table{i+1}: {len(g)} rows x {cols} cols, source_pages={t.get('source_pages')}")
+    print(f"  rows: per-page total {per_page_rows} -> stitched {merged_rows} "
+          f"(diff {per_page_rows - merged_rows} = deduped headers/empties)")
+    print(f"  duplicated header rows remaining inside stitched tables: {dups}")
+
+    gt_path = _REAL_DIR / f"{stem}_document_gt.json"
+    if not gt_path.exists():
+        print(f"\n(no {gt_path.name} yet — run draft_document_gt.py + verify for scored metrics)")
+        return 0
+    gt = json.loads(gt_path.read_text(encoding="utf-8"))
+    needs_review = gt.get("needs_review_rows", [])
+    gt_grid = gt["tables"][0]["data"]
+    m = evaluate_table(merged, gt_grid)
+    print("\n--- scored vs document GT" + (" (PROVISIONAL — GT has unverified rows)" if needs_review else "") + " ---")
+    print(f"  GT {m['gt_rows']}x{m['gt_cols']}  pred {m['pred_rows']}x{m['pred_cols']}")
+    print(f"  Cell_Accuracy={m['cell_accuracy']:.3f}  Cell_Content_Recall={m['cell_content_recall']:.3f}  "
+          f"Table_CER={m['table_cer']:.3f}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

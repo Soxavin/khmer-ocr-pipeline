@@ -34,6 +34,8 @@ mildly misspelled word. The success metric is therefore *structural*, not just c
 4. A rigorous investigation of the table-fragmentation bottleneck (two geometric methods + two
    hybrid structure-model methods) that isolates the true limiting factor **and resolves it**: a
    row-strip hybrid lifts dense-table `Cell_Accuracy` ~16× (0.024→0.393).
+5. **Document-level table stitching** that turns a multi-page report into one structured table per
+   logical section (one CSV each) — the analyst-facing output the project targets.
 
 ---
 
@@ -167,6 +169,17 @@ on all three pages, −3% relative)** but does not restore toward the clean ceil
 stack is a **modest, non-harmful** improvement worth enabling for scans — not a silver bullet.
 **Caveat: synthetic degradation ≠ real scan artifacts**; a real-scan A/B remains future work.
 
+### 4.7 Multi-page table stitching (document-level output)
+Real reports are one continuous table split across page images. A document-level stitching step
+(`merge_document_tables`) joins consecutive per-page tables that share a column structure, dropping the
+header repeated at each page break, and emits **one CSV per logical table** (Stage-5 export, on by
+default). End-to-end on the 3-page 09.06.26 report: with the **hybrid rowband** engine the 3 per-page
+tables collapse into **one** table (source pages [0,1,2], headers de-duplicated); with **Surya** they
+do not join, because per-page fragmentation produces inconsistent column counts — i.e. stitching pays
+off precisely when paired with the structure-aware engine. Ground truth for scored cell-level metrics
+is auto-drafted from the existing per-page GT (`draft_document_gt.py`) and awaits human verification;
+the structure checks (logical-table count, header dedup, row totals) pass without GT.
+
 ---
 
 ## 5. Discussion
@@ -195,11 +208,11 @@ behaviour on no-table pages.
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
-- **No-table pages** — the row-strip hybrid still adds spurious output on pages with **no** real
-  table (Surya's phantom table detection, p3 DocCER 0.22→0.58). We could not find a structural or
-  fill-rate signal that suppresses the phantom without risking real sparse tables (the phantom region
-  yields a full SLANet grid that fills like a real table), and have only one no-table page to tune
-  against — so hybrid stays opt-in vs Surya. The right fix is upstream table-*detection* gating.
+- **No true no-table page in the set yet** — what earlier looked like a "phantom table" on p3 was a
+  *labelling* gap: p3 is a real continuation table whose content the GT had stored as `paragraphs`,
+  so the table evaluator had nothing to score (fixed in §2.19 / `draft_document_gt.py`). The hybrid's
+  weaker text-page behaviour therefore remains *plausible but untested* — we still lack a genuine
+  no-table page, so `hybrid` stays opt-in vs Surya pending one.
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
@@ -207,13 +220,11 @@ behaviour on no-table pages.
 ---
 
 ## 7. Future Work
-1. **Make the row-strip hybrid a safe default** — blank-strip recall is largely recovered (§2.18);
-   what remains is **suppressing the hybrid on no-table pages**. Since no content signal cleanly
-   separates a phantom from a real sparse table, this needs upstream table-*detection* gating (or a
-   small labelled set of no-table pages to learn the boundary).
+1. **Verify the drafted document GT** (auto-drafted in §2.19; ~14 sparse rows flagged) to unlock
+   **scored** document-level stitching metrics (Cell_Accuracy / Recall / Table_CER vs the merged GT).
 2. **A Khmer-capable line/cell recogniser** decoupled from the VLM.
-3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
-   preprocessing stack.
+3. **More real labelled data**, including a genuine no-table page and scanned documents, to harden the
+   evaluation, settle the hybrid-on-text-pages question, and test the preprocessing stack.
 4. **Column-fragmentation reconstruction** at the layout level.
 
 ---
