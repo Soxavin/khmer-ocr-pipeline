@@ -177,15 +177,15 @@ default). End-to-end on the 3-page 09.06.26 report: with the **hybrid rowband** 
 tables collapse into **one** table (source pages [0,1,2], headers de-duplicated); with **Surya** they
 do not join, because per-page fragmentation produces inconsistent column counts — i.e. stitching pays
 off precisely when paired with the structure-aware engine. Scored against the verified document GT
-(75×9), at the *whole-document* level Surya is competitive-to-better (Cell_Acc 0.170 / Recall 0.722
-vs hybrid 0.139 / 0.576; Table_CER 0.337 vs 0.348): the hybrid's per-page win (§4.4) was specific to
-the dense fragmented page, while the document GT is dominated by cleaner pages where Surya is strong.
-The rowband output was cleaned to exactly 9 columns by clamping to SLANet's column count (it had
-inherited a spurious trailing-empty column from the VLM's row HTML) — an output-cleanliness fix that
-proved metric-neutral, since the row-aligned scorer already treated the empty column as empty. The
-dominant remaining gap is **row over-production** (hybrid emits ~101 rows vs the 75-row GT), the real
-next lever. Net: **hybrid is the engine for dense tables and the only one that enables clean
-stitching; Surya stays strong on mixed content.**
+(75×9), two output-quality fixes were applied to the stitched table: clamping to SLANet's column count
+(removing a spurious trailing-empty column — metric-neutral but cleaner output) and dropping
+fully-empty rows from SLANet over-segmentation (rows 101→85). After both, hybrid reaches
+`Cell_Acc 0.181 / Recall 0.590 / Table_CER 0.331`, **edging Surya's document-level accuracy (0.170)**
+while remaining the only stitching-capable engine (Surya still leads recall at 0.722 by over-producing
+content). The residual gap (85 vs 75 rows) is near-duplicate row splits + occasional recognition
+hallucinations — OCR-quality noise left unaddressed, consistent with the intended use: a
+**review-ready draft** the analyst corrects, not a perfect extraction. Net: **hybrid is the engine for
+dense tables and the only one that enables clean stitching; Surya stays strong on mixed content.**
 
 ---
 

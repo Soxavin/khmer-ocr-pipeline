@@ -483,11 +483,20 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   OCR run-to-run noise**. So it's an **output-cleanliness win** (no junk column in the analyst CSV),
   *not* a scored-accuracy win: the row-aligned scorer was already treating the empty column as
   empty-vs-empty.
-- **The real remaining lever: row over-production** — hybrid emits **101 rows vs 75 GT** (~26 extra,
-  blank/over-segmented rows from SLANet row segmentation + rowband). That, not columns, dominates the
-  document-level cell-accuracy. GT-free stitch structure checks (logical-table count, header dedup,
-  row totals) all pass. Modules: `table_merge_pages.py`, `scripts/draft_document_gt.py`,
-  `scripts/eval_document.py`.
+- **Row over-production — diagnosed + the safe slice fixed.** Dumping the 101-row merge showed the
+  ~26 extra rows are: **~15 fully-blank rows** (SLANet over-segments into empty bands — the p1
+  meat/poultry page is worst, 37 rows / 12 blank), **~8 near-duplicate rows** (SLANet splits one
+  visual row into two bands, OCR'd twice with minor diffs), and **~6 hallucinated rows** (rowband
+  recognition failing on divider/header/merged regions). Fixed the clean, safe slice: **drop
+  fully-empty rows** in `_combine` (also better analyst output — no blank CSV rows). Result: rows
+  **101→85**, `Cell_Accuracy 0.145→0.181`, `Recall 0.561→0.590`, `Table_CER 0.350→0.331` — a real
+  lift (hybrid now even edges Surya's doc-level Acc 0.170 while being the only stitching-capable
+  engine). The residual gap (85 vs 75) is near-dup splits + hallucinations — **OCR-quality noise, not
+  chased further** (fuzzy de-dup would risk dropping real rows; over-tuning one doc isn't worth it
+  per the project's breadth-over-depth focus). Honest takeaway: rowband stitching yields a **usable,
+  review-ready draft** (the project's stated workflow — analysts review/correct), not a perfect
+  extraction. GT-free stitch structure checks all pass. Modules: `table_merge_pages.py`,
+  `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
 
 ---
 

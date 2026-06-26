@@ -76,5 +76,11 @@ def test_empty_and_cellless_tables_ignored():
     assert merged[0]["source_pages"] == [2]
 
 
+def test_blank_rows_dropped_in_merge():
+    pages = [_page(0, [_H, ["1", "aa", "10"], ["", "", ""], ["2", "bb", "20"], ["", "", ""]])]
+    grid = pred_table_grid(merge_document_tables(pages)[0])
+    assert grid == [_H, ["1", "aa", "10"], ["2", "bb", "20"]]
+
+
 def test_no_tables_returns_empty():
     assert merge_document_tables([_page(0), _page(1)]) == []

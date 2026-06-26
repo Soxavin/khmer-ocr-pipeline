@@ -52,6 +52,8 @@ def _combine(group: list[tuple[int, dict]]) -> dict:
                 header_sig = _row_sig(row_cells)
             elif ri == 0 and header_sig is not None and _row_sig(row_cells) == header_sig:
                 continue  # drop the repeated header at a page break
+            if all(not _cell_text(c).strip() for c in row_cells):
+                continue  # drop fully-empty rows (SLANet over-segmentation noise)
             for c in row_cells:
                 nc = dict(c)
                 nc["row_id"] = out_row
