@@ -176,9 +176,13 @@ header repeated at each page break, and emits **one CSV per logical table** (Sta
 default). End-to-end on the 3-page 09.06.26 report: with the **hybrid rowband** engine the 3 per-page
 tables collapse into **one** table (source pages [0,1,2], headers de-duplicated); with **Surya** they
 do not join, because per-page fragmentation produces inconsistent column counts — i.e. stitching pays
-off precisely when paired with the structure-aware engine. Ground truth for scored cell-level metrics
-is auto-drafted from the existing per-page GT (`draft_document_gt.py`) and awaits human verification;
-the structure checks (logical-table count, header dedup, row totals) pass without GT.
+off precisely when paired with the structure-aware engine. Scored against the verified document GT
+(75×9), at the *whole-document* level Surya is competitive-to-better (Cell_Acc 0.170 / Recall 0.722
+vs hybrid 0.139 / 0.576; Table_CER 0.337 vs 0.348): the hybrid's per-page win (§4.4) was specific to
+the dense fragmented page, while the document GT is dominated by cleaner pages where Surya is strong.
+Both engines currently emit a spurious 10th column vs the 9-col GT, which depresses the row-aligned
+cell-accuracy — the clearest next quality lead. Net: **hybrid is the engine for dense tables and the
+only one that enables clean stitching; Surya stays strong on mixed content.**
 
 ---
 

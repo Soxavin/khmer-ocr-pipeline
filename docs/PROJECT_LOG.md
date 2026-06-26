@@ -459,20 +459,28 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   mislabelled paragraphs) into a document-level grid (`*_document_gt.json`) for human verification —
   fixing the §2.18 issue. Eval: `scripts/eval_document.py` (whole doc → stitch → sanity checks +
   `evaluate_table` vs the document GT).
-- **Result (09.06.26, 3 pages, `eval_document.py`):**
+- **Result (09.06.26, 3 pages, `eval_document.py`), GT verified (75×9):**
 
-  | engine | per-page tables → logical tables | stitched shape | dup headers |
-  |---|---|---|---|
-  | **hybrid rowband** | 3 → **1** (source_pages [0,1,2]) | 101×10, one table | 0 |
-  | surya | 10 → 3 (p2's 8 fragments stay 4-col) | split, not joined | 0 |
+  | engine | per-page → logical tables | pred shape | Cell_Acc | Recall | Table_CER | dup hdrs |
+  |---|---|---|---|---|---|---|
+  | **hybrid rowband** | 3 → **1** (pages [0,1,2]) | 101×10 | 0.139 | 0.576 | **0.337** | 0 |
+  | surya | 10 → 3 (p2's 8 frags stay 4-col) | 146×10 | **0.170** | **0.722** | 0.348 | 0 |
 
-- **Finding.** Stitching delivers the intended outcome **with the hybrid rowband engine** (consistent
-  9-col pages → all 3 pages collapse into one table, headers de-duplicated). With **Surya** it can't
-  join across pages because per-page fragmentation yields inconsistent column counts — a clean
-  argument that stitching and the structure-aware engine go together. Scored cell metrics vs the
-  document GT are **deferred until the drafted GT is human-verified** (the draft flags 14 sparse
-  grain rows); the stitch *structure* checks (logical-table count, header dedup, row totals) pass
-  GT-free. Modules: `table_merge_pages.py`, `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
+- **Finding (two parts).** (1) **Stitching works with the hybrid rowband engine** — consistent 9-col
+  pages → all 3 collapse into one table, headers de-duplicated; **Surya can't join** (per-page
+  fragmentation → inconsistent column counts), so stitching and the structure-aware engine go
+  together. (2) **At the *whole-document* level hybrid does not beat Surya** — which does *not*
+  contradict §2.18: that win was specific to the dense fragmented **p2**, whereas the doc GT is
+  dominated by the cleaner p1/p3 where Surya is already strong, so the average swings back. Honest
+  read: **hybrid is the engine for dense tables and the only one that enables clean stitching; Surya
+  stays strong on mixed/clean content.**
+- **Caveat (confounds the scored cells).** Both engines emit **10 columns vs the GT's 9** (a spurious
+  extra column on ≥1 page) which shifts the row-alignment and depresses `Cell_Accuracy` for both
+  (order-independent `Recall` is less affected); both also **over-produce rows** (146/101 vs 75).
+  So treat the absolute cell-accuracy as a floor, not a clean signal. **Next quality lead: find/kill
+  the spurious 10th column** — likely lifts both engines. GT-free stitch structure checks
+  (logical-table count, header dedup, row totals) all pass. Modules: `table_merge_pages.py`,
+  `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
 
 ---
 
