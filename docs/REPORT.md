@@ -215,11 +215,12 @@ behaviour on no-table pages.
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
-- **No true no-table page in the set yet** — what earlier looked like a "phantom table" on p3 was a
-  *labelling* gap: p3 is a real continuation table whose content the GT had stored as `paragraphs`,
-  so the table evaluator had nothing to score (fixed in §2.19 / `draft_document_gt.py`). The hybrid's
-  weaker text-page behaviour therefore remains *plausible but untested* — we still lack a genuine
-  no-table page, so `hybrid` stays opt-in vs Surya pending one.
+- **Hybrid stays opt-in for speed, not safety.** The "phantom table on text pages" worry is
+  **resolved** (§2.20): on a genuine text page (CambodiaBudget p2) hybrid is byte-identical to Surya
+  (`Tables_Found=0`, `Document_CER=0.312` both) — it only rebuilds tables Surya actually detects. So
+  hybrid is safe on text pages; it remains opt-in vs Surya because it is **~3× slower** and Surya is
+  competitive except on dense fragmented tables. (The earlier p3 "regression" was purely a GT
+  mislabel, §2.19.)
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
@@ -227,12 +228,14 @@ behaviour on no-table pages.
 ---
 
 ## 7. Future Work
-1. **Verify the drafted document GT** (auto-drafted in §2.19; ~14 sparse rows flagged) to unlock
-   **scored** document-level stitching metrics (Cell_Accuracy / Recall / Table_CER vs the merged GT).
-2. **A Khmer-capable line/cell recogniser** decoupled from the VLM.
-3. **More real labelled data**, including a genuine no-table page and scanned documents, to harden the
-   evaluation, settle the hybrid-on-text-pages question, and test the preprocessing stack.
-4. **Column-fragmentation reconstruction** at the layout level.
+1. **Recogniser exploration** — an off-the-shelf A/B (Surya vs Tesseract-khm vs a heavier open model)
+   to map where Surya fails, then a **Khmer fine-tuning** experiment (fine-tune a recogniser on real
+   and/or synthetic Khmer word data) to try to beat it; and, separately, evaluating more of the
+   **PaddlePaddle** stack (we already use SLANet).
+2. **More real labelled data**, including scanned documents, to harden the evaluation and test the
+   preprocessing stack on real (not synthetic) degradation.
+3. **Column-fragmentation reconstruction** at the layout level, and recovering the residual stitched
+   row over-production (near-duplicate splits / recognition hallucinations on harder pages).
 
 ---
 

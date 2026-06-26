@@ -498,6 +498,22 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   extraction. GT-free stitch structure checks all pass. Modules: `table_merge_pages.py`,
   `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
 
+### 2.20 Hybrid on a genuine no-table page — safe (resolves the §2.18 worry)
+
+- **Why.** §2.18/§6 feared the hybrid fabricates a table on text-only pages, but that was tested on a
+  *mislabelled* page (p3 is really a table, §2.19). Re-tested on a **genuine text page** —
+  `CambodiaBudgetExecutioninApr-2024.pdf` p2 (1,527-char born-digital text layer as GT),
+  `scripts/eval_notable_page.py`.
+- **Result.** Both engines **identical**: `Tables_Found=0` (no phantom), `table_cells=0`,
+  `Document_CER=0.312`. Hybrid reuses Surya for text + table *detection* and only rebuilds tables
+  **when Surya detects them**; with zero detected, hybrid's output *is* Surya's
+  (`run_hybrid`: `if not boxes: pages.append(page)`).
+- **Finding.** **Hybrid is safe on real text pages** — no phantom, no garbling. The earlier p3
+  "regression" was entirely the GT mislabel, not the engine. Residual phantom risk reduces to Surya's
+  *detection* false-positive rate (zero here). So the reason `hybrid` stays opt-in vs Surya is no
+  longer safety — it's **speed** (~3.3 min/page vs ~74 s) and Surya being competitive except on dense
+  fragmented tables. Module: `scripts/eval_notable_page.py`.
+
 ---
 
 ## 3. Results Snapshot
