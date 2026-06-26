@@ -143,6 +143,15 @@ def test_ocr_rowbands_retries_blank_band_and_fills_it():
     assert grid == {(0, 0): "A", (1, 0): "B", (2, 0): "C"}
 
 
+def test_ocr_rowbands_clamps_trailing_column_to_n_cols():
+    # Surya sometimes emits a spurious trailing empty <td>; n_cols (SLANet count) drops it.
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]}]
+    htmls = ["<table><tr><td>A</td><td>B</td><td></td></tr></table>"]  # 3 tds, last empty
+    grid = he._ocr_rowbands(_fake_rec_seq(htmls), crop, bands, n_cols=2)
+    assert grid == {(0, 0): "A", (0, 1): "B"}
+
+
 def test_ocr_rowbands_still_blank_after_retry_reserves_a_row():
     crop = np.zeros((100, 200, 3), dtype=np.uint8)
     bands = [{"row_id": 0, "bbox": [0, 0, 200, 30]},

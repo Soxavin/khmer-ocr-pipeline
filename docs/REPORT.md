@@ -180,9 +180,12 @@ off precisely when paired with the structure-aware engine. Scored against the ve
 (75×9), at the *whole-document* level Surya is competitive-to-better (Cell_Acc 0.170 / Recall 0.722
 vs hybrid 0.139 / 0.576; Table_CER 0.337 vs 0.348): the hybrid's per-page win (§4.4) was specific to
 the dense fragmented page, while the document GT is dominated by cleaner pages where Surya is strong.
-Both engines currently emit a spurious 10th column vs the 9-col GT, which depresses the row-aligned
-cell-accuracy — the clearest next quality lead. Net: **hybrid is the engine for dense tables and the
-only one that enables clean stitching; Surya stays strong on mixed content.**
+The rowband output was cleaned to exactly 9 columns by clamping to SLANet's column count (it had
+inherited a spurious trailing-empty column from the VLM's row HTML) — an output-cleanliness fix that
+proved metric-neutral, since the row-aligned scorer already treated the empty column as empty. The
+dominant remaining gap is **row over-production** (hybrid emits ~101 rows vs the 75-row GT), the real
+next lever. Net: **hybrid is the engine for dense tables and the only one that enables clean
+stitching; Surya stays strong on mixed content.**
 
 ---
 

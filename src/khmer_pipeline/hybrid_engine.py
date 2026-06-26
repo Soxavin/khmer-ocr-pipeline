@@ -99,11 +99,14 @@ def _best_row(g: dict[tuple[int, int], str]) -> dict[tuple[int, int], str]:
     return {(0, c): t for c, t in by_r[best]}
 
 
-def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict]) -> dict[tuple[int, int], str]:
+def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict],
+                  n_cols: int = 0) -> dict[tuple[int, int], str]:
     # Recognise each full-width row strip as a one-row "Table"; Surya emits the row's
     # <td> columns. Blank strips get one retry with a much taller crop (more vertical
     # context). Bands are concatenated into one grid, local row indices offset so each
     # band occupies its own global row (a still-blank band reserves its row slot).
+    # n_cols (SLANet's column count) clamps away the spurious trailing empty <td> the
+    # VLM sometimes emits; 0 means no clamp.
     h = crop_rgb.shape[0]
     locals_ = _rec_grids(rec_pred, crop_rgb, [b["bbox"] for b in bands])
 
@@ -124,6 +127,8 @@ def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict]) -> dict[tup
     for g in locals_:
         local_rows = (max(r for r, _ in g) + 1) if g else 0
         for (r, c), text in g.items():
+            if n_cols and c >= n_cols:
+                continue
             grid[(row_offset + r, c)] = text
         row_offset += max(local_rows, 1)
     return grid
@@ -179,7 +184,8 @@ def run_hybrid(
                 continue
             if rowband:
                 ch, cw = crop.shape[:2]
-                grid = _ocr_rowbands(rec_pred, crop, _row_bands(cells, cw, ch))
+                n_cols = max((c["col_id"] for c in cells), default=-1) + 1
+                grid = _ocr_rowbands(rec_pred, crop, _row_bands(cells, cw, ch), n_cols)
                 new_tables.append(_build_table_from_grid(grid, "", [x0, y0, x1, y1]))
             else:
                 texts = _ocr_cells(rec_pred, crop, cells)

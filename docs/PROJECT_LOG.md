@@ -474,13 +474,20 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   dominated by the cleaner p1/p3 where Surya is already strong, so the average swings back. Honest
   read: **hybrid is the engine for dense tables and the only one that enables clean stitching; Surya
   stays strong on mixed/clean content.**
-- **Caveat (confounds the scored cells).** Both engines emit **10 columns vs the GT's 9** (a spurious
-  extra column on ≥1 page) which shifts the row-alignment and depresses `Cell_Accuracy` for both
-  (order-independent `Recall` is less affected); both also **over-produce rows** (146/101 vs 75).
-  So treat the absolute cell-accuracy as a floor, not a clean signal. **Next quality lead: find/kill
-  the spurious 10th column** — likely lifts both engines. GT-free stitch structure checks
-  (logical-table count, header dedup, row totals) all pass. Modules: `table_merge_pages.py`,
-  `scripts/draft_document_gt.py`, `scripts/eval_document.py`.
+- **Spurious 10th column — found + fixed (rowband), but metric-neutral.** Diagnostic: Surya's
+  row-strip HTML sometimes emits an extra **trailing empty `<td>`**, so rowband tables on p2/p3 became
+  10-col (col 9 empty in every row); p1 was clean. Fix: clamp the rowband grid to **SLANet's column
+  count** in `_ocr_rowbands(..., n_cols)` — principled, not a content heuristic (content-based
+  trimming would wrongly collapse a sparsely-OCR'd page). After the fix the stitched table is **9×**
+  (matches GT): `Cell_Acc 0.139→0.145, Recall 0.576→0.561, Table_CER 0.337→0.350` — i.e. **within
+  OCR run-to-run noise**. So it's an **output-cleanliness win** (no junk column in the analyst CSV),
+  *not* a scored-accuracy win: the row-aligned scorer was already treating the empty column as
+  empty-vs-empty.
+- **The real remaining lever: row over-production** — hybrid emits **101 rows vs 75 GT** (~26 extra,
+  blank/over-segmented rows from SLANet row segmentation + rowband). That, not columns, dominates the
+  document-level cell-accuracy. GT-free stitch structure checks (logical-table count, header dedup,
+  row totals) all pass. Modules: `table_merge_pages.py`, `scripts/draft_document_gt.py`,
+  `scripts/eval_document.py`.
 
 ---
 
