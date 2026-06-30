@@ -1,8 +1,8 @@
 # Khmer Document Extraction Pipeline
 
-A **local-first OCR pipeline** that turns Khmer-language financial documents (PDFs / scans, e.g. GDDE
-and ARDB market-price and budget reports) into **analyst-reviewable structured data** — JSON, CSV, and
-Excel.
+A **local-first OCR pipeline** that turns Khmer-language financial documents (PDFs / scans — e.g.
+market-price bulletins and government budget reports) into **analyst-reviewable structured data** —
+JSON, CSV, and Excel.
 
 It pairs an automated extraction pipeline with a Streamlit review tool so a data analyst can correct the
 machine's output before exporting. Everything runs **on-device** (no cloud APIs) so sensitive financial

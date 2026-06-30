@@ -18,9 +18,9 @@ recognition of small, isolated Khmer table cells**, not layout detection, which 
 ---
 
 ## 1. Introduction
-**Problem.** GDDE publishes daily market-price bulletins as dense Khmer tables (≈28 rows × 9
-columns). The goal: extract them into accurate digital text and spreadsheet data, locally and
-reproducibly, for downstream analysis.
+**Problem.** GDDE works with Khmer-language financial documents — e.g. daily market-price bulletins
+published as dense Khmer tables (≈28 rows × 9 columns). The goal: extract them into accurate digital
+text and spreadsheet data, locally and reproducibly, for downstream analysis.
 
 **Why it is hard.** Khmer is a complex script (stacked subscripts, no inter-word spaces); the
 documents are dense financial tables; and a value placed in the wrong cell is worse than a
