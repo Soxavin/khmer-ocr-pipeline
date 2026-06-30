@@ -18,6 +18,7 @@ dependencies = [
     "pytesseract>=0.3,<0.4",
     "pandas>=2.0,<4.0",
     "rapid-table>=3.0,<4.0",
+    "openpyxl>=3.1,<4.0",
 ]
 
 [project.optional-dependencies]

@@ -257,3 +257,118 @@ def test_table_not_repaired_by_default():
     assert result.document_json["pages"][0]["tables"][0]["was_repaired"] is False
     # Unrepaired table still has 3 cells (no padding added)
     assert len(result.document_json["pages"][0]["tables"][0]["cells"]) == 3
+
+
+def test_grid_to_csv_starts_with_bom():
+    from khmer_pipeline.export import grid_to_csv
+    csv_string = grid_to_csv([["a", "b"]])
+    assert csv_string.startswith("﻿")
+
+
+def test_grid_to_csv_converts_khmer_numerals_when_flag_set():
+    from khmer_pipeline.export import grid_to_csv
+    csv_string = grid_to_csv([["០១២"]], convert_numerals=True)
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert rows[0][0] == "012"
+
+
+def test_grid_to_csv_writes_rectangular_rows_in_order():
+    from khmer_pipeline.export import grid_to_csv
+    csv_string = grid_to_csv([["a", "b"], ["c", "d"]])
+    rows = list(csv.reader(io.StringIO(csv_string.lstrip("﻿"))))
+    assert rows == [["a", "b"], ["c", "d"]]
+
+
+def test_grid_to_csv_empty_grid_is_just_bom():
+    from khmer_pipeline.export import grid_to_csv
+    assert grid_to_csv([]) == "﻿"
+
+
+def test_tables_to_xlsx_creates_sheet_per_table():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("table_one", [["a", "b"], ["1", "2"]]),
+              ("table_two", [["x", "y"], ["3", "4"]])]
+    xlsx_bytes = tables_to_xlsx(tables)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert wb.sheetnames == ["table_one", "table_two"]
+    ws1 = wb["table_one"]
+    assert ws1["A1"].value == "a"
+    assert [[c.value for c in row] for row in ws1.iter_rows()] == [["a", "b"], ["1", "2"]]
+    ws2 = wb["table_two"]
+    assert [[c.value for c in row] for row in ws2.iter_rows()] == [["x", "y"], ["3", "4"]]
+
+
+def test_tables_to_xlsx_converts_khmer_numerals_when_flag_set():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("t1", [["០១២", "b"]])]
+    xlsx_bytes = tables_to_xlsx(tables, convert_numerals=True)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert wb["t1"]["A1"].value == "012"
+
+
+def test_tables_to_xlsx_preserves_khmer_numerals_when_flag_not_set():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("t1", [["០១២", "b"]])]
+    xlsx_bytes = tables_to_xlsx(tables, convert_numerals=False)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert wb["t1"]["A1"].value == "០១២"
+
+
+def test_tables_to_xlsx_sanitizes_and_truncates_long_illegal_sheet_name():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    table_id = "a" * 40 + "[x]:b"
+    tables = [(table_id, [["h"], ["1"]])]
+    xlsx_bytes = tables_to_xlsx(tables)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert len(wb.sheetnames) == 1
+    name = wb.sheetnames[0]
+    assert len(name) <= 31
+    for ch in "[]:*?/\\":
+        assert ch not in name
+
+
+def test_tables_to_xlsx_dedupes_sheet_names_that_sanitize_to_same_value():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("a[1]", [["h"], ["1"]]), ("a[2]", [["h"], ["2"]])]
+    xlsx_bytes = tables_to_xlsx(tables)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert len(wb.sheetnames) == 2
+    assert len(set(wb.sheetnames)) == 2
+
+
+def test_tables_to_xlsx_skips_empty_or_blank_tables():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("empty", []), ("blank", [["", ""], ["", ""]]), ("real", [["h"], ["1"]])]
+    xlsx_bytes = tables_to_xlsx(tables)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert wb.sheetnames == ["real"]
+
+
+def test_tables_to_xlsx_empty_input_creates_single_empty_sheet():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    xlsx_bytes = tables_to_xlsx([])
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert len(wb.sheetnames) == 1
+
+
+def test_tables_to_xlsx_all_blank_tables_creates_single_empty_sheet():
+    import openpyxl
+    from khmer_pipeline.export import tables_to_xlsx
+    tables = [("empty", []), ("blank", [["", ""]])]
+    xlsx_bytes = tables_to_xlsx(tables)
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    assert len(wb.sheetnames) == 1
+
+
+def test_tables_to_xlsx_returns_nonempty_bytes():
+    from khmer_pipeline.export import tables_to_xlsx
+    xlsx_bytes = tables_to_xlsx([("t1", [["a"]])])
+    assert isinstance(xlsx_bytes, bytes)
+    assert len(xlsx_bytes) > 0

@@ -4,8 +4,12 @@ import io
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+import openpyxl
 from .models import PostprocessResult, ExportResult
 from .table_merge_pages import merge_document_tables
+
+_XLSX_SHEET_NAME_ILLEGAL = set("[]:*?/\\")
+_XLSX_SHEET_NAME_MAX_LEN = 31
 
 _KHMER_TO_ARABIC: dict[str, str] = {
     "០": "0", "១": "1", "២": "2", "៣": "3", "៤": "4",
@@ -128,13 +132,60 @@ def _make_table_id(source_name: str, page_index: int, table_index: int) -> str:
     return f"{Path(source_name).stem}_page{page_index + 1}_table{table_index + 1}"
 
 
-def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
-    cells = table.get("cells", [])
+def grid_to_csv(grid: list[list[str]], convert_numerals: bool = False) -> str:
     buf = io.StringIO()
     buf.write("﻿")  # UTF-8 BOM — required for Excel to open Khmer text correctly
     writer = csv.writer(buf)
-    if not cells:
+    if not grid:
         return buf.getvalue()
+    if convert_numerals:
+        grid = [[_convert_khmer_numerals(cell) for cell in row] for row in grid]
+    writer.writerows(grid)
+    return buf.getvalue()
+
+
+def _sanitize_sheet_name(table_id: str, used: set[str]) -> str:
+    name = "".join(ch for ch in table_id if ch not in _XLSX_SHEET_NAME_ILLEGAL)
+    name = name[:_XLSX_SHEET_NAME_MAX_LEN] or "Sheet"
+    if name not in used:
+        return name
+    # De-dupe by appending _2, _3, ... while staying within the length limit.
+    n = 2
+    while True:
+        suffix = f"_{n}"
+        candidate = name[:_XLSX_SHEET_NAME_MAX_LEN - len(suffix)] + suffix
+        if candidate not in used:
+            return candidate
+        n += 1
+
+
+def tables_to_xlsx(tables: list[tuple[str, list[list[str]]]], convert_numerals: bool = False) -> bytes:
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)  # default sheet; only keep sheets for non-blank tables
+    used_names: set[str] = set()
+    for table_id, grid in tables:
+        if not grid or not any(any(cell for cell in row) for row in grid):
+            continue
+        if convert_numerals:
+            grid = [[_convert_khmer_numerals(cell) for cell in row] for row in grid]
+        sheet_name = _sanitize_sheet_name(table_id, used_names)
+        used_names.add(sheet_name)
+        ws = wb.create_sheet(sheet_name)
+        for row in grid:
+            ws.append(row)
+
+    if not wb.sheetnames:
+        wb.create_sheet("Sheet1")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
+    cells = table.get("cells", [])
+    if not cells:
+        return grid_to_csv([])
     max_row = max(c.get("row_id", 0) for c in cells) + 1
     max_col = max((c.get("col_id") or 0) for c in cells) + 1
     grid = [[""] * max_col for _ in range(max_row)]
@@ -144,12 +195,9 @@ def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
         text = " ".join(
             t["text"] for t in (c.get("text_lines") or []) if t.get("text")
         ).strip()
-        if convert_numerals:
-            text = _convert_khmer_numerals(text)
         if 0 <= r < max_row and 0 <= col < max_col:
             grid[r][col] = text
-    writer.writerows(grid)
-    return buf.getvalue()
+    return grid_to_csv(grid, convert_numerals)
 
 
 def _build_document_json(result: PostprocessResult) -> dict:

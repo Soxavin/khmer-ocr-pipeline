@@ -17,7 +17,7 @@ from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
 from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
-from khmer_pipeline.export import export
+from khmer_pipeline.export import export, grid_to_csv, tables_to_xlsx
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
 from khmer_pipeline.backend_status import llama_server_running
@@ -26,7 +26,7 @@ from khmer_pipeline.backend_status import llama_server_running
 # shows. Stress test (10 pages @ 300 DPI, effective 15) showed NO memory distress
 # (~7 min, ~2 GB peak RSS, +384 MB swap) — memory is per-page bounded. This is a
 # heads-up for very large jobs, not a measured ceiling. See docs/OPERATIONS.md.
-_MEMORY_WARN_PAGES = 25
+_MEMORY_WARN_PAGES = 15
 
 
 @st.cache_resource(show_spinner="Loading Surya OCR models — first run takes ~30s...")
@@ -48,23 +48,19 @@ def _safe_html(html: str) -> str:
 
 def _clear_edit_state() -> None:
     for key in list(st.session_state.keys()):
-        if key.startswith("edited_text_") or key.startswith("edit_"):
+        if (
+            key.startswith("edited_text_")
+            or key.startswith("edit_")
+            or key.startswith("edited_table_")
+            or key.startswith("editor_")
+        ):
             del st.session_state[key]
 
 
-def _unique_headers(headers: list[str]) -> list[str]:
-    # pandas/pyarrow reject blank or duplicate column names; make them unique.
-    seen: dict[str, int] = {}
-    out: list[str] = []
-    for idx, h in enumerate(headers):
-        label = h.strip() if (h and h.strip()) else f"col{idx + 1}"
-        if label in seen:
-            seen[label] += 1
-            label = f"{label} ({seen[label]})"
-        else:
-            seen[label] = 1
-        out.append(label)
-    return out
+def _reset_table(tid: str) -> None:
+    st.session_state.pop(f"edited_table_{tid}", None)
+    st.session_state.pop(f"editor_{tid}", None)
+
 
 _LABEL_COLORS = {
     "Text": "#4A90D9",
@@ -110,100 +106,112 @@ def _draw_layout_confidence(img_array: np.ndarray, blocks: list[dict]) -> np.nda
 st.set_page_config(page_title="Khmer Document Extraction", layout="wide")
 _preload_surya()
 st.title("Khmer Document Extraction Pipeline")
-st.caption("Stage 1 — Ingest  |  Stage 2 — Preprocess  |  Stage 3 — Surya OCR  |  Stage 4 — Post-process  |  Stage 5 — Export")
+st.caption("Upload a financial document → review the extracted tables → download Excel/CSV.")
 
 with st.sidebar:
-    if llama_server_running():
-        st.caption("🟢 OCR backend running")
-    else:
-        st.caption("⚪ OCR backend not detected — run `source setup-metal-macos.sh`")
-
-    st.header("Document settings")
-    dpi = st.select_slider("Scan quality (DPI)", options=[150, 200, 300], value=200)
-    st.caption("200 for digital PDFs, 300 for scanned documents.")
-
-    page_selection = st.radio("Pages to process", ["All pages", "Single page", "Page range"])
-    if page_selection == "Single page":
-        page_num = st.number_input("Page number", min_value=1, value=1, step=1)
-    elif page_selection == "Page range":
-        page_start = st.number_input("From page", min_value=1, value=1, step=1)
-        page_end = st.number_input("To page", min_value=1, value=5, step=1)
-        if page_end < page_start:
-            st.warning("'To page' is less than 'From page' — only the first page will be processed.")
-
-    st.header("Preprocessing")
-    remove_stamps = st.checkbox("Remove colored stamps", value=True)
-    sharpen = st.checkbox("Sharpen text", value=True)
-    normalise = st.checkbox("Enhance contrast", value=True)
-    deskew = st.checkbox("Deskew (straighten rotated scans)", value=True)
-    normalise_table_backgrounds = st.checkbox(
-        "Normalise colored table backgrounds",
-        value=True,
-        help="Flattens shaded or colored table cell backgrounds (e.g. header "
-             "row fills) toward white before OCR. Improves table-grid detection "
-             "on documents with colored cell shading.",
+    uploaded = st.file_uploader(
+        "Upload a PDF or image file",
+        type=["pdf", "png", "jpg", "jpeg", "tiff", "tif"],
     )
 
-    st.header("Extraction")
-    extraction_mode = st.radio(
-        "Extraction mode",
-        ["Full extraction (text + tables)", "Tables only"],
-    )
-    tables_only = extraction_mode == "Tables only"
-
-    st.header("Post-processing")
-    enable_qwen = st.checkbox(
-        "Enable Qwen correction (experimental, slow)",
-        value=False,
-        help="One-time ~4GB model download, then a slow per-run load on a 24GB "
-             "Mac. Off by default — the deterministic Khmer normalizer always "
-             "runs and is usually sufficient.",
-    )
-    anomaly_threshold = st.slider(
-        "Anomaly threshold for Qwen correction",
-        min_value=0.0,
-        max_value=1.0,
-        value=ANOMALY_THRESHOLD,
-        step=0.01,
-        help="Proportion of non-Khmer/non-Latin script characters in a text "
-             "block that triggers Qwen correction. Lower = more aggressive "
-             "(more blocks sent to Qwen). Only applies when Qwen correction is enabled.",
-    )
-
-    st.header("Export")
-    convert_numerals = st.checkbox(
-        "Convert Khmer numerals to Arabic in CSV",
-        value=False,
-        help="Converts ០១២... to 012... in exported CSV files. "
-             "Useful for loading into Excel or databases. "
-             "Does not affect the JSON export.",
-    )
-    repair_tables = st.checkbox(
-        "Auto-repair inconsistent table grids",
-        value=False,
-        help="If a detected table has rows with different numbers of cells, "
-             "pad short rows with empty cells so the CSV/JSON grid is rectangular. "
-             "Repaired tables are flagged with 'was_repaired' in the JSON and a "
-             "warning in the UI. Off by default — review the raw grid first.",
-    )
+    st.divider()
     stitch_pages = st.checkbox(
-        "Stitch tables across pages",
+        "Stitch multi-page tables",
         value=True,
         help="Join a table that continues across pages into one table, so a multi-page "
              "report exports as one CSV per table instead of one per page. A column-count "
              "change starts a new table. On by default — turn off to keep per-page tables.",
     )
+    convert_numerals = st.checkbox(
+        "Convert Khmer numerals",
+        value=False,
+        help="Converts ០១២... to 012... in exported CSV/Excel files. "
+             "Useful for loading into Excel or databases. "
+             "Does not affect the JSON export.",
+    )
 
-uploaded = st.file_uploader(
-    "Upload a PDF or image file",
-    type=["pdf", "png", "jpg", "jpeg", "tiff", "tif"],
-)
+    with st.expander("⚙️ Advanced Engine Settings", expanded=False):
+        st.header("Document settings")
+        dpi = st.select_slider("Scan quality (DPI)", options=[150, 200, 300], value=200)
+        st.caption("200 for digital PDFs, 300 for scanned documents.")
+
+        page_selection = st.radio("Pages to process", ["All pages", "Single page", "Page range"])
+        if page_selection == "Single page":
+            page_num = st.number_input("Page number", min_value=1, value=1, step=1)
+        elif page_selection == "Page range":
+            page_start = st.number_input("From page", min_value=1, value=1, step=1)
+            page_end = st.number_input("To page", min_value=1, value=5, step=1)
+            if page_end < page_start:
+                st.warning("'To page' is less than 'From page' — only the first page will be processed.")
+
+        st.header("Preprocessing")
+        remove_stamps = st.checkbox("Remove colored stamps", value=True)
+        sharpen = st.checkbox("Sharpen text", value=True)
+        normalise = st.checkbox("Enhance contrast", value=True)
+        deskew = st.checkbox("Deskew (straighten rotated scans)", value=True)
+        normalise_table_backgrounds = st.checkbox(
+            "Normalise colored table backgrounds",
+            value=True,
+            help="Flattens shaded or colored table cell backgrounds (e.g. header "
+                 "row fills) toward white before OCR. Improves table-grid detection "
+                 "on documents with colored cell shading.",
+        )
+
+        st.header("Extraction")
+        extraction_mode = st.radio(
+            "Extraction mode",
+            ["Full extraction (text + tables)", "Tables only"],
+        )
+        tables_only = extraction_mode == "Tables only"
+
+        st.header("Post-processing")
+        enable_qwen = st.checkbox(
+            "Enable Qwen correction (experimental, slow)",
+            value=False,
+            help="One-time ~4GB model download, then a slow per-run load on a 24GB "
+                 "Mac. Off by default — the deterministic Khmer normalizer always "
+                 "runs and is usually sufficient.",
+        )
+        anomaly_threshold = st.slider(
+            "Anomaly threshold for Qwen correction",
+            min_value=0.0,
+            max_value=1.0,
+            value=ANOMALY_THRESHOLD,
+            step=0.01,
+            help="Proportion of non-Khmer/non-Latin script characters in a text "
+                 "block that triggers Qwen correction. Lower = more aggressive "
+                 "(more blocks sent to Qwen). Only applies when Qwen correction is enabled.",
+        )
+
+        st.header("Export")
+        repair_tables = st.checkbox(
+            "Auto-repair inconsistent table grids",
+            value=False,
+            help="If a detected table has rows with different numbers of cells, "
+                 "pad short rows with empty cells so the CSV/JSON grid is rectangular. "
+                 "Repaired tables are flagged with 'was_repaired' in the JSON and a "
+                 "warning in the UI. Off by default — review the raw grid first.",
+        )
+
+        st.header("Layout overlay")
+        show_layout = st.checkbox("Show layout overlay", value=True)
+        overlay_mode = st.radio(
+            "Layout overlay mode",
+            ["Region type", "Confidence"],
+            horizontal=True,
+        ) if show_layout else None
+
+    st.divider()
+    if llama_server_running():
+        st.caption("🟢 OCR backend ready")
+    else:
+        st.caption("⚪ OCR backend idle — starts automatically on the first extraction")
 
 if uploaded is None:
     st.markdown("### Upload a document to get started")
     st.markdown(
         "Supported formats: PDF, PNG, JPG, TIFF  \n"
-        "Upload a file using the uploader above, configure your options in the sidebar, "
+        "Upload a file using the uploader in the sidebar, configure your options there, "
         "then click **Run Extraction**."
     )
     st.button("▶ Run Extraction", type="primary", disabled=True)
@@ -249,7 +257,7 @@ else:
         _est_pages = doc_page_count
     if _est_pages * (dpi / 200.0) > _MEMORY_WARN_PAGES:
         st.warning(
-            f"Large job (~{_est_pages} page(s) at {dpi} DPI) — this may take a while. "
+            "Large document detected — processing may take several minutes. "
             "If needed, process in smaller page ranges (pages run sequentially)."
         )
 
@@ -300,7 +308,7 @@ else:
     if run_clicked and last_key != settings_key:
         stage_times: dict[str, float] = {}
         with st.status("Running pipeline...", expanded=True) as status:
-            st.write("Converting pages to images...")
+            st.write("Reading the document…")
             _t0 = time.perf_counter()
             try:
                 uploaded.seek(0)
@@ -343,7 +351,7 @@ else:
             st.session_state["filtered_ingest"] = filtered_ingest
             clear_device_cache()  # NEW: Free memory after ingest
 
-            st.write("Cleaning pages...")
+            st.write("Cleaning the pages…")
             _t0 = time.perf_counter()
             try:
                 config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
@@ -357,6 +365,7 @@ else:
                 st.stop()
             stage_times["Stage 2 — Preprocess"] = time.perf_counter() - _t0
 
+            st.write("Finding text & tables…")
             _t0 = time.perf_counter()
             try:
                 ocr_progress = st.progress(0, text="Starting OCR...")
@@ -380,7 +389,7 @@ else:
                 st.stop()
             stage_times["Stage 3 — OCR"] = time.perf_counter() - _t0
 
-            st.write("Running post-processing...")
+            st.write("Tidying the text…")
             if enable_qwen and not qwen_loaded():
                 st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
             _t0 = time.perf_counter()
@@ -399,7 +408,7 @@ else:
                 st.stop()
             stage_times["Stage 4 — Post-process"] = time.perf_counter() - _t0
 
-            st.write("Exporting structured output...")
+            st.write("Preparing your files…")
             _t0 = time.perf_counter()
             try:
                 export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables, stitch_pages=stitch_pages)
@@ -431,10 +440,6 @@ else:
     export_result = st.session_state["export_result"]
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
-    if "stage_times" in st.session_state:
-        cols = st.columns(len(st.session_state["stage_times"]))
-        for col, (name, secs) in zip(cols, st.session_state["stage_times"].items()):
-            col.metric(name, f"{secs:.1f}s")
 
     # Results overview — document-level summary for at-a-glance review / demo
     total_tables = sum(len(p.tables) for p in surya_result.pages)
@@ -443,7 +448,12 @@ else:
     ov1.metric("Pages", filtered_ingest.page_count)
     ov2.metric("Tables detected", total_tables)
     ov3.metric("Warnings", n_warnings)
-    if n_warnings:
+    if total_tables == 0:
+        st.error(
+            "No tables detected. Try Advanced → enable Preprocessing, raise Scan "
+            "quality (DPI), or confirm the document contains tables."
+        )
+    elif n_warnings:
         st.warning(f"Extraction complete with {n_warnings} warning(s) — review the panel below.")
     else:
         st.success("Extraction complete — review the pages below.")
@@ -453,13 +463,6 @@ else:
         with st.expander(f"⚠️ Pipeline warnings ({n_warnings})", expanded=False):
             for w in surya_result.warnings:
                 st.markdown(f"- {w}")
-
-    show_layout = st.checkbox("Show layout overlay", value=True)
-    overlay_mode = st.radio(
-        "Layout overlay mode",
-        ["Region type", "Confidence"],
-        horizontal=True,
-    ) if show_layout else None
 
     # ==========================================
     # PAGINATED UI STARTS HERE
@@ -520,38 +523,99 @@ else:
     qcols[2].metric("Low-confidence", low_conf)
     qcols[3].metric("Qwen", "Yes" if post_page.qwen_used else "No")
     if n_page_tables > 1:
-        st.caption("⚠ Multiple table regions detected — a single table may have been fragmented; verify the grids in the Tables tab.")
+        st.caption("⚠ Multiple table regions detected — a single table may have been fragmented; verify the grids below.")
     if low_conf:
-        st.caption("⚠ Some blocks have low OCR confidence — switch the overlay to 'Confidence' to locate them.")
+        st.caption("⚠ Some blocks have low OCR confidence — switch the overlay to 'Confidence' (Advanced settings) to locate them.")
 
-    tab_images, tab_text, tab_tables, tab_corrected, tab_edit = st.tabs(
-        ["🖼 Images", "📝 Text", "📊 Tables", "✓ Corrected", "✏️ Edit"]
-    )
+    # Build (table_id, grid) pairs for the FINAL export tables (document-level,
+    # built once — not per-page). Raw cell text, not numeral-converted: when
+    # stitch_pages is on, document_json["document_tables"] holds the stitched
+    # tables; otherwise each page's "tables" block holds the per-page tables.
+    _export_table_blocks = export_result.document_json.get("document_tables")
+    if _export_table_blocks is None:
+        _export_table_blocks = [
+            table
+            for page_data in export_result.document_json.get("pages", [])
+            for table in page_data.get("tables", [])
+        ]
+    _export_tables = []
+    for _block in _export_table_blocks:
+        _cells = _block.get("cells", [])
+        _max_row = max((c.get("row", 0) for c in _cells), default=0) + (1 if _cells else 0)
+        _max_col = max((c.get("col", 0) for c in _cells), default=0) + (1 if _cells else 0)
+        _grid = [["" for _ in range(_max_col)] for _ in range(_max_row)]
+        for c in _cells:
+            r, col = c.get("row", 0), c.get("col", 0)
+            if 0 <= r < _max_row and 0 <= col < _max_col:
+                _grid[r][col] = c.get("text", "")
+        _export_tables.append((_block["table_id"], _grid))
 
-    with tab_images:
+    # ==========================================
+    # SIDE-BY-SIDE REVIEW: page image (left) + editable tables (right)
+    # ==========================================
+    left, right = st.columns([0.4, 0.6])
+
+    with left:
         if show_layout:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.image(orig, caption="Original", width="stretch")
-            with col2:
-                st.image(proc, caption="Preprocessed", width="stretch")
-            with col3:
-                if overlay_mode == "Confidence":
-                    overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
-                    overlay_caption = "Confidence (🟢 high 🟡 medium 🔴 low)"
-                else:
-                    table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
-                    overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
-                    overlay_caption = "Layout detection"
-                st.image(overlay_img, caption=overlay_caption, width="stretch")
+            if overlay_mode == "Confidence":
+                overlay_img = _draw_layout_confidence(proc, surya_page.text_blocks)
+                overlay_caption = "Confidence (🟢 high 🟡 medium 🔴 low)"
+            else:
+                table_blocks = [{"label": "Table", "bbox": t["bbox"]} for t in surya_page.tables]
+                overlay_img = _draw_layout(proc, surya_page.text_blocks + table_blocks)
+                overlay_caption = "Layout detection"
+            st.image(overlay_img, caption=overlay_caption, width="stretch")
         else:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(orig, caption="Original", width="stretch")
-            with col2:
-                st.image(proc, caption="Preprocessed", width="stretch")
+            st.image(proc, caption="Preprocessed", width="stretch")
+        with st.expander("Original image"):
+            st.image(orig, caption="Original", width="stretch")
 
-    with tab_text:
+    with right:
+        if _export_tables:
+            st.subheader("✏️ Review & edit tables")
+            for table_id, grid in _export_tables:
+                if not grid:
+                    continue
+                st.markdown(f"**{table_id}**")
+                # All rows stay editable (incl. the real header row); columns get
+                # neutral "Col N" labels — we don't fold the first row into headers.
+                n_cols = max((len(r) for r in grid), default=0)
+                col_labels = [f"Col {c + 1}" for c in range(n_cols)]
+                edited_df = st.data_editor(
+                    pd.DataFrame(grid, columns=col_labels),
+                    num_rows="dynamic",
+                    width="stretch",
+                    key=f"editor_{table_id}",
+                )
+                edited_grid = edited_df.fillna("").astype(str).values.tolist()
+                if edited_grid != grid:
+                    st.session_state[f"edited_table_{table_id}"] = edited_grid
+                else:
+                    st.session_state.pop(f"edited_table_{table_id}", None)
+                st.button(
+                    "↺ Reset table to original",
+                    key=f"reset_{table_id}",
+                    on_click=_reset_table,
+                    args=(table_id,),
+                )
+        else:
+            st.caption("No tables detected on this page.")
+
+    final_tables = [
+        (table_id, st.session_state.get(f"edited_table_{table_id}", original_grid))
+        for table_id, original_grid in _export_tables
+    ]
+
+    # ==========================================
+    # TEXT & PROCESSING DETAILS (secondary)
+    # ==========================================
+    with st.expander("Text & processing details", expanded=False):
+        if "stage_times" in st.session_state:
+            cols = st.columns(len(st.session_state["stage_times"]))
+            for col, (name, secs) in zip(cols, st.session_state["stage_times"].items()):
+                col.metric(name, f"{secs:.1f}s")
+
+        st.markdown("**OCR text**")
         if tables_only:
             st.caption("Text output is hidden in 'Tables only' extraction mode.")
         elif surya_page.ocr_text:
@@ -559,41 +623,7 @@ else:
         else:
             st.caption("No OCR text on this page.")
 
-    with tab_tables:
-        if not surya_page.tables:
-            st.caption("No tables detected on this page.")
-        else:
-            st.write(f"{len(surya_page.tables)} table(s) detected")
-            for j, tbl in enumerate(surya_page.tables):
-                st.write(f"Table {j + 1}: {len(tbl['rows'])} rows × {len(tbl['cols'])} cols")
-                if tbl.get("was_repaired"):
-                    st.warning(f"Table {j+1}: structure was inconsistent and was automatically repaired. Please verify.")
-                cells = tbl["cells"]
-                if cells:
-                    max_row = max(c["row_id"] for c in cells) + 1
-                    max_col = max((c.get("col_id") or 0) for c in cells) + 1
-                    grid = [[""] * max_col for _ in range(max_row)]
-                    for c in cells:
-                        r = c["row_id"]
-                        col = c.get("col_id") or 0
-                        if c.get("text_lines"):
-                            text = " ".join(
-                                t["text"] for t in c["text_lines"] if t.get("text")
-                            ).strip()
-                            if 0 <= r < max_row and 0 <= col < max_col:
-                                grid[r][col] = text
-                    use_header = st.checkbox(
-                        "Use first row as header", value=True, key=f"hdr_{i}_{j}"
-                    )
-                    if use_header and len(grid) > 1:
-                        st.dataframe(
-                            pd.DataFrame(grid[1:], columns=_unique_headers(grid[0])),
-                            width="stretch",
-                        )
-                    else:
-                        st.dataframe(grid, width="stretch")
-
-    with tab_corrected:
+        st.markdown("**Corrected text**")
         if post_page.qwen_used:
             st.markdown("**⚡ Qwen correction applied**")
         else:
@@ -603,7 +633,7 @@ else:
         if post_page.correction_diff:
             st.code(post_page.correction_diff, language="diff")
 
-    with tab_edit:
+        st.markdown("**Edit corrected text**")
         edited = st.text_area(
             "Corrected text (editable)",
             value=st.session_state.get(f"edited_text_{i}", post_page.corrected_text),
@@ -620,7 +650,7 @@ else:
     # ==========================================
     st.divider()
     st.subheader("Downloads")
-    
+
     doc_json = dict(export_result.document_json)
     patched_pages = []
     for idx, page_data in enumerate(doc_json.get("pages", [])):
@@ -630,6 +660,30 @@ else:
             page_data["corrected_text"] = edited_text
         patched_pages.append(page_data)
     doc_json["pages"] = patched_pages
+
+    # Patch the exported table block's cells from the edited grids so the JSON
+    # matches the CSVs — document_tables when stitch is on, else pages[].tables.
+    _final_grids_by_id = {table_id: grid for table_id, grid in final_tables}
+
+    def _patch_table_block(block):
+        grid = _final_grids_by_id.get(block["table_id"])
+        if grid is None:
+            return block
+        patched = dict(block)
+        patched["cells"] = [
+            {"row": r, "col": c, "text": grid[r][c]}
+            for r in range(len(grid))
+            for c in range(len(grid[r]))
+        ]
+        return patched
+
+    if doc_json.get("document_tables") is not None:
+        doc_json["document_tables"] = [_patch_table_block(b) for b in doc_json["document_tables"]]
+    else:
+        doc_json["pages"] = [
+            {**page_data, "tables": [_patch_table_block(t) for t in page_data.get("tables", [])]}
+            for page_data in doc_json["pages"]
+        ]
 
     st.download_button(
         label="⬇ Download document JSON",
@@ -672,8 +726,23 @@ else:
         width="stretch",
     )
 
-    # One-click bundle: JSON + .txt report + every non-empty table CSV
     _stem = Path(uploaded.name).stem
+    _nonempty_tables = [
+        (table_id, grid)
+        for table_id, grid in final_tables
+        if any(cell.strip() for row in grid for cell in row)
+    ]
+
+    if _nonempty_tables:
+        st.download_button(
+            label="⬇ Download as Excel (.xlsx)",
+            data=tables_to_xlsx(final_tables, convert_numerals),
+            file_name=f"{_stem}_extracted.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            width="stretch",
+        )
+
+    # One-click bundle: JSON + .txt report + Excel + every non-empty table CSV
     _zip_buf = io.BytesIO()
     with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
         _zf.writestr(
@@ -681,9 +750,11 @@ else:
             json.dumps(doc_json, ensure_ascii=False, indent=2),
         )
         _zf.writestr(f"{_stem}_extracted.txt", all_text)
-        for table_id, csv_string in export_result.tables_csv:
-            if csv_string.strip().strip("﻿"):
-                _zf.writestr(f"{table_id}.csv", csv_string.encode("utf-8-sig"))
+        if _nonempty_tables:
+            _zf.writestr(f"{_stem}_extracted.xlsx", tables_to_xlsx(final_tables, convert_numerals))
+        for table_id, grid in _nonempty_tables:
+            csv_string = grid_to_csv(grid, convert_numerals)
+            _zf.writestr(f"{table_id}.csv", csv_string.encode("utf-8-sig"))
     st.download_button(
         label="⬇ Download everything (.zip)",
         data=_zip_buf.getvalue(),
@@ -692,19 +763,17 @@ else:
         width="stretch",
     )
 
-    skipped_tables = 0
-    for table_id, csv_string in export_result.tables_csv:
-        if not csv_string.strip().strip("﻿"):
-            skipped_tables += 1
-            continue
-        if st.checkbox(f"Include {table_id} in export", value=True, key=f"export_{table_id}"):
-            st.download_button(
-                label=f"⬇ Download {table_id}.csv",
-                data=csv_string.encode("utf-8-sig"),
-                file_name=f"{table_id}.csv",
-                mime="text/csv",
-                width="stretch"
-            )
+    skipped_tables = len(final_tables) - len(_nonempty_tables)
+    if _nonempty_tables:
+        for table_id, grid in _nonempty_tables:
+            if st.checkbox(f"Include {table_id} in export", value=True, key=f"export_{table_id}"):
+                st.download_button(
+                    label=f"⬇ Download {table_id}.csv",
+                    data=grid_to_csv(grid, convert_numerals).encode("utf-8-sig"),
+                    file_name=f"{table_id}.csv",
+                    mime="text/csv",
+                    width="stretch"
+                )
     if skipped_tables:
         st.caption(
             f"{skipped_tables} table(s) had no extractable content and were excluded from downloads."
