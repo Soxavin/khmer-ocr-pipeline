@@ -1,6 +1,6 @@
 # A Local Khmer OCR Pipeline for Financial Documents — Evaluation Report
 
-*MEF Cambodia internship. Draft assembled from `PROJECT_LOG.md` (decision records),
+*GDDE internship. Draft assembled from `PROJECT_LOG.md` (decision records),
 benchmark manifests, and the `eval/` harness. Figures in `docs/figures/`.*
 
 ---
@@ -18,7 +18,7 @@ recognition of small, isolated Khmer table cells**, not layout detection, which 
 ---
 
 ## 1. Introduction
-**Problem.** MEF publishes daily market-price bulletins as dense Khmer tables (≈28 rows × 9
+**Problem.** GDDE publishes daily market-price bulletins as dense Khmer tables (≈28 rows × 9
 columns). The goal: extract them into accurate digital text and spreadsheet data, locally and
 reproducibly, for downstream analysis.
 
@@ -67,7 +67,7 @@ clearing between them; a stress test (10 pages @ 300 DPI) peaked at ~2 GB RSS �
 - *Synthetic tables / documents* — generated from HTML with 5 vendored OFL Khmer fonts (Noto Sans
   Khmer, Battambang, Hanuman, Moul, Fasthand), rendered offline for reproducibility. Clean inputs
   with exact ground truth.
-- *Real* — actual MEF born-digital PDFs (3 hand-labelled pages). Note: the real PDF's embedded
+- *Real* — actual GDDE born-digital PDFs (3 hand-labelled pages). Note: the real PDF's embedded
   text layer is garbled (broken ToUnicode CMap), so OCR on rendered pixels is genuinely required.
 
 **Metrics (deterministic, no paid judge).** `Cell_Accuracy` (right value in right cell — the key
@@ -112,7 +112,7 @@ order, not superiority. See `docs/figures/engine_comparison.png`. (Surya `run` `
 Tesseract `20260623_100406`.)
 
 ### 4.3 Real-document evaluation — the synthetic-vs-real gap
-On the real MEF document, aggregate metrics look poor (`Cell_Accuracy` 0.05, `Text_CER` 0.95),
+On the real GDDE document, aggregate metrics look poor (`Cell_Accuracy` 0.05, `Text_CER` 0.95),
 but per-page analysis reveals the cause is **structural, not recognition**:
 
 | Page | Tables_Found | Document_CER | Note |
@@ -234,7 +234,7 @@ behaviour on no-table pages.
 
 ## 6. Limitations
 - **One real labelled document** (3 pages) — real-world numbers are indicative, not statistically
-  robust; more labelled MEF documents are the highest-value data investment.
+  robust; more labelled GDDE documents are the highest-value data investment.
 - **OCR non-determinism** — Surya output varies slightly run-to-run; we rely on structural metrics
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /

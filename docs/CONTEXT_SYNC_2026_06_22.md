@@ -1,4 +1,4 @@
-# Context Sync Report — Khmer OCR Pipeline (MEF Cambodia Internship)
+# Context Sync Report — Khmer OCR Pipeline (GDDE Internship)
 *Generated 2026-06-22. Scope: everything since Phase 0 of the Final Internship Sprint.*
 
 ### 1. Executive Summary
@@ -8,11 +8,11 @@ Since Phase 0 kicked off, we completed the **Reality Check (Phase 0)**, the **mu
 **Committed in `8742dc6`.**
 
 - **`inspect_pdf.py`** — Classifies each PDF into `born_digital_unicode` / `likely_legacy_encoded` / `scanned_image_only` / `mixed_or_unknown`, using the Khmer Unicode block ratio (U+1780–U+17FF) with thresholds `_MIN_TEXT_CHARS=100`, `_UNICODE_KHMER_RATIO=0.5`, `_LEGACY_KHMER_RATIO=0.15`; also reports text-layer presence and raster DPI. Emits a report + JSON (`inspect_report.json`, gitignored).
-  - **Run on the real MEF document. Result: NO legacy Limon/ABC encoding was detected.** The doc classified as **born-digital Unicode** — *but with a critical caveat*: its embedded text layer is **garbled due to a broken ToUnicode CMap**. So the "free" text layer is unusable, and **OCR on rendered pixels is genuinely necessary** (text extraction is not a shortcut). This was the key Phase 0 decision-gate outcome: no transcoding sub-task needed, but the text layer can't be trusted as ground truth.
+  - **Run on the real GDDE document. Result: NO legacy Limon/ABC encoding was detected.** The doc classified as **born-digital Unicode** — *but with a critical caveat*: its embedded text layer is **garbled due to a broken ToUnicode CMap**. So the "free" text layer is unusable, and **OCR on rendered pixels is genuinely necessary** (text extraction is not a shortcut). This was the key Phase 0 decision-gate outcome: no transcoding sub-task needed, but the text layer can't be trusted as ground truth.
 
 - **`harvest_ground_truth.py`** — Renders born-digital PDF pages → page PNGs + auto-drafts `*_ground_truth.json` stubs (paragraphs from the text layer, NFC-normalized; tables stubbed for manual fill) into `eval/datasets/real/`. It ran, but because the real doc's text layer is garbled (above), the harvested paragraphs needed **substantial manual correction** rather than being usable as-is.
 
-- **Real Dataset Status** — `eval/datasets/real/` currently holds **one real document**: a **MEF daily market-price report dated 09.06.26**, **3 pages** (`p1`, `p2`, `p3`), each as a PNG + `*_ground_truth.json`. State: **manually labeled** — the user hand-corrected the paragraph text; the 9-column table grids were drafted from the corrected text for p1 (24 rows) and p2 (28 rows), with a couple of meat-row price-placement cells flagged to verify against the PNG. **These real files are gitignored** (sensitive financial inputs). This is the project's only real labeled doc so far.
+- **Real Dataset Status** — `eval/datasets/real/` currently holds **one real document**: a **GDDE daily market-price report dated 09.06.26**, **3 pages** (`p1`, `p2`, `p3`), each as a PNG + `*_ground_truth.json`. State: **manually labeled** — the user hand-corrected the paragraph text; the 9-column table grids were drafted from the corrected text for p1 (24 rows) and p2 (28 rows), with a couple of meat-row price-placement cells flagged to verify against the PNG. **These real files are gitignored** (sensitive financial inputs). This is the project's only real labeled doc so far.
 
 ### 3. Codebase & Architecture Changes
 **New modules**

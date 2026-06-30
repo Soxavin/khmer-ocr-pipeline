@@ -54,7 +54,7 @@ memory. `clear_device_cache()` is called after each stage to release caches.
     valid measurement.
   - *Caveat:* process RSS undercounts the VLM weights resident in Metal/GPU-wired memory
     (loaded once, kept alive), but the negligible swap delta confirms no pressure. We did not
-    push to the actual page ceiling — it's simply well above any realistic MEF document.
+    push to the actual page ceiling — it's simply well above any realistic GDDE document.
 - **Mitigation for very large/high-DPI jobs:** process in page ranges (sidebar →
   "Page range"); pages run sequentially so memory stays bounded regardless of count.
 

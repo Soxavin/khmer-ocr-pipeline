@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # Geometric table de-fragmentation. Surya's layout model can shatter one dense
-# table into many adjacent regions (real MEF page 2 → a 2 row-band x 4 col-group
+# table into many adjacent regions (real GDDE page 2 → a 2 row-band x 4 col-group
 # grid of 8 Table boxes). Recognition then OCRs each region separately and
 # serializes the content column-wise, destroying row<->value associations. We
 # merge fragments that tile a contiguous area back into one master box *before*

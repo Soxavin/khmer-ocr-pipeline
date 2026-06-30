@@ -7,7 +7,7 @@ you can answer "what is X and why?" quickly. For the formal decision history see
 ---
 
 ## 1. The big picture (one paragraph)
-We take **Khmer government financial documents** (e.g. MEF daily market-price tables)
+We take **Khmer government financial documents** (e.g. GDDE daily market-price tables)
 as PDFs/scans and turn them into **accurate digital text and spreadsheet data**, running
 **100% locally** on an Apple-Silicon Mac (no cloud, no API keys). The hard part isn't
 reading Khmer letters — the OCR does that ~90%+ correctly — it's **preserving table
@@ -120,7 +120,7 @@ metrics (no paid AI judge). Tools: `run_benchmark.py` (runs OCR over a dataset),
   folder with results + a `manifest.json` (records *what/when/which code version*) so results
   are reproducible and citable.
 - **Synthetic vs real data** — *synthetic* = computer-generated test tables (clean, known
-  answers); *real* = actual MEF PDFs (messy, the true test). The gap between them is a key
+  answers); *real* = actual GDDE PDFs (messy, the true test). The gap between them is a key
   thesis finding.
 - **A/B test** — run the pipeline two ways (feature on vs off) and compare the metrics.
 - **Deterministic** — same input always gives the same output (important for trustworthy

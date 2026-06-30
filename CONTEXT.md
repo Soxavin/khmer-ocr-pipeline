@@ -1,6 +1,6 @@
 # CONTEXT.md — Khmer OCR Pipeline
 
-Khmer-language document OCR pipeline for MEF Cambodia financial documents
+Khmer-language document OCR pipeline for GDDE financial documents
 (e.g. ARDB forms). Two entry points: a Streamlit UI (`app.py`) for
 interactive use, and a CLI batch processor
 (`src/khmer_pipeline/pipeline.py`).

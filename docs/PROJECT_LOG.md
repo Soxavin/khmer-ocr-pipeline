@@ -11,7 +11,7 @@ commit history. Newest milestones are toward the bottom of each section.
 
 **Goal.** Extract structured data from Khmer-language financial/economic documents
 (ARDB-style price tables, budget execution reports) into one CSV per table and one
-JSON per document, for analysts at MEF Cambodia. A working prototype — no model
+JSON per document, for analysts at GDDE. A working prototype — no model
 training.
 
 **Pipeline.** Five in-memory stages, typed dataclasses between them:
@@ -242,7 +242,7 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 ### 2.12 Table de-fragmentation — geometric stitcher (Path A): a useful negative result
 
 - **Problem.** On dense real pages Surya's *layout* model shatters one table into many
-  regions (real MEF page 2 → a 2 row-band × 4 col-group grid of **8 Table boxes**);
+  regions (real GDDE page 2 → a 2 row-band × 4 col-group grid of **8 Table boxes**);
   recognition then OCRs each fragment separately and serializes content column-wise,
   destroying row↔value links.
 - **Approach (Path A).** New `table_stitch.merge_table_regions` (transitive 2-D adjacency
@@ -403,7 +403,7 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   pages without a real table** (p3 phantom-table region inflates DocCER 0.220→0.526).
 - **Decision.** Default `KHMER_HYBRID_MODE=rowband`; `cell` kept opt-in for comparison. `hybrid`
   stays opt-in vs Surya for **production** (the recall trade + phantom-table behaviour on non-table
-  pages aren't fixed yet) — but for **table-heavy** MEF docs rowband is the recommended engine and
+  pages aren't fixed yet) — but for **table-heavy** GDDE docs rowband is the recommended engine and
   **closes the fragmentation arc**: structure is solvable (SLANet) *and* recognition of dense tables
   is now usable (rowband), where geometric stitching (2.12–2.13) and per-cell (2.15) both failed.
   Next leads if pursued: recover blank rows (retry blanks with extra context) and suppress
@@ -608,9 +608,9 @@ column drift. Rare; logged rather than chased. A column-alignment counterpart to
 *(Numbers from `eval/runs/<ts>_run_surya/results.csv`; regenerate with
 `uv run python -m khmer_pipeline.run_benchmark` then `uv run python -m khmer_pipeline.analyze_benchmark`.)*
 
-### Real-document results (first real MEF doc, 2026-06-22)
+### Real-document results (first real GDDE doc, 2026-06-22)
 
-A real born-digital MEF daily market-price PDF (3 pages, dense Khmer price tables),
+A real born-digital GDDE daily market-price PDF (3 pages, dense Khmer price tables),
 hand-labelled as ground truth (paragraphs). Run `eval/runs/20260622_114939_run_surya`.
 
 | Page | Tables_Found | Document_CER | Note |
