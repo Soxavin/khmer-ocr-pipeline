@@ -597,6 +597,41 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - Modules: `app.py`, `export.py` (`grid_to_csv`, `tables_to_xlsx`), `tests/test_export.py`. Merged to
   `main` (`15ebee5`).
 
+### 2.23 Layout-detector A/B (Thread B) — gate-first probe = **GO** for DocLayout-YOLO
+
+- **Why.** The central finding (§2.12) is that the bottleneck is table **structure/fragmentation**, not
+  recognition (the recognition axis closed in §2.21 — nothing turnkey beats Surya). Surya's *layout*
+  model fragments one dense table into multiple `Table` regions. Our structure model SLANet (`rapid_table`)
+  *is already* PaddleOCR's table model, so the genuinely open lever is the **layout/region detector** that
+  produces the table box. Question: does an alternative layout detector see the dense table as **one**
+  region where Surya fragments it?
+- **Gate-first probe** (`scripts/probe_layout_detectors.py`, standalone — no `src/` changes, no engine
+  wire-in, no end-to-end re-score yet). On the known fragmented page (real ARDB market-price PDF, p2,
+  §2.12), counts table regions per detector + a `covers_table_as_one` coverage ratio (largest box /
+  union of all table boxes) + saves visual overlays to `eval/runs/<ts>_layout_probe/`.
+- **Dependency win.** `rapid_layout` (RapidAI, same ONNX family as our `rapid_table`) resolved cleanly
+  (`uv add "rapid-layout>=1.2.1,<2.0"`, zero torch/surya/transformers churn, **no PaddlePaddle**) and
+  bundles ONNX ports of *both* candidates: `doclayout_docstructbench` (= DocLayout-YOLO, the
+  `juliozhao/DocLayout-YOLO-DocStructBench` weights) and `pp_doc_layoutv2/v3` (PP-DocLayout). No isolated
+  `--no-project` PyTorch path needed.
+- **Result (decisive):**
+
+  | detector | n_table_regions | covers_table_as_one | notes |
+  |---|---|---|---|
+  | surya | **8** | False | largest/union area ratio 0.27 |
+  | **doclayout_yolo** | **1** | **True** | ratio 1.00, no tuning; IoU vs Surya union 0.59 |
+  | pp_doclayout | 0 | n/a | below default conf 0.5 (table scored 0.34); at conf 0.1 v3→1 box but v2→4 (threshold-sensitive, inconclusive) |
+
+  Overlays confirm visually: Surya carves the table into column-group boxes (labels excluded);
+  DocLayout-YOLO wraps the whole data table in one box.
+- **Decision = GO** for DocLayout-YOLO (via `rapid_layout`). Next (separate plan): wire it in as a layout
+  source at the `surya.py` seam (~L211-228, where the existing stitcher rewrites `layout_result.bboxes`
+  before recognition) or as a new `OCR_ENGINE`, then re-score end-to-end with the existing
+  `evaluate_table` metrics (Cell_Accuracy / Recall / Table_CER) on the document GT. PP-DocLayout dropped
+  (threshold-sensitive, not decisive).
+- Modules: `scripts/probe_layout_detectors.py` (new), `scripts/README.md`, `pyproject.toml` +
+  `uv.lock` (added `rapid-layout`). ~360 tests still pass; nothing in `src/` changed.
+
 ---
 
 ## 3. Results Snapshot

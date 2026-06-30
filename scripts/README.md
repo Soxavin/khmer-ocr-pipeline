@@ -16,6 +16,7 @@ Most read real data from `eval/datasets/` (gitignored), so they won't run as-is 
 | `draft_document_gt.py` | Restructure per-page ground truth into a single document-level GT JSON (a draft for manual verification). |
 | `probe_rowstrip_recognition.py` | Early probe for the row-strip recognition idea (read each table row as a full-width strip). |
 | `discover_slanet_api.py` | One-off to inspect the `rapid_table` / SLANet API surface while integrating the structure model. |
+| `probe_layout_detectors.py` | Gate-first probe: does an alternative layout detector (DocLayout-YOLO / PP-DocLayout via `rapid_layout`, ONNX) see the dense GDDE table as one region where Surya fragments it into ~8 (PROJECT_LOG §2.12)? Detection only, no recognition. |
 
 Run from the repo root, e.g.:
 
