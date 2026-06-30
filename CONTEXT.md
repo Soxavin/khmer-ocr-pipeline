@@ -31,7 +31,7 @@ IngestResult -> PreprocessResult -> SuryaResult -> PostprocessResult -> ExportRe
 | 2. Preprocess | `preprocess.py` | `preprocess(IngestResult, PreprocessConfig) -> PreprocessResult` | OpenCV cleanup: deskew, stamp removal, sharpen, contrast, table-background normalisation. All steps are `PreprocessConfig` flags (default on). |
 | 3. Surya OCR | `surya.py` | `run_surya(PreprocessResult, on_page=callback) -> SuryaResult` | Layout detection + OCR + table recognition via lazily-loaded Surya model singletons. Issues (low confidence, phantom cells, OCR/table failures) collected in `SuryaResult.warnings`. |
 | 4. Postprocess | `postprocess.py` | `postprocess(SuryaResult, skip_qwen, anomaly_threshold) -> PostprocessResult` | Rule-based Khmer text correction; falls back to Qwen2.5-VL when the anomaly score (fraction of non-Khmer/non-Latin chars) exceeds `anomaly_threshold`. |
-| 5. Export | `export.py` | `export(PostprocessResult, convert_numerals, repair_tables) -> ExportResult` | Produces document JSON + per-table CSVs. Optional Khmer->Arabic numeral conversion and table-grid repair (pads short rows). |
+| 5. Export | `export.py` | `export(PostprocessResult, convert_numerals, repair_tables, stitch_pages) -> ExportResult` | Produces document JSON + per-table CSV/Excel. Optional Khmer->Arabic numeral conversion, table-grid repair (pads short rows), and `stitch_pages` to join a table that continues across pages into one. |
 
 Model checkpoints and tunable thresholds (Surya checkpoints, Qwen model
 path, `ANOMALY_THRESHOLD`, `CONFIDENCE_LOW`/`CONFIDENCE_MID`) all live in
@@ -48,8 +48,10 @@ unexpected failure (layout/OCR/our own code) is caught, logs a
 `OCREngine` (Stage 3: `(PreprocessResult, on_page=...) -> SuryaResult`) and
 `CorrectionEngine` (Stage 4: `(SuryaResult, skip_qwen=..., anomaly_threshold=...)
 -> PostprocessResult`). `src/khmer_pipeline/engine_registry.py` is the single
-source of truth for which implementation is active: it imports `run_surya` and
-`postprocess` and binds them to `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`.
+source of truth for which implementation is active: it maps the `OCR_ENGINE` env var
+(`surya` (default) / `tesseract` / `hybrid`) to the OCR engine and binds the correction
+engine, exposing them as `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`. (`hybrid` =
+SLANet table grid + Surya row-strip recognition, for dense fragmented tables.)
 
 **Rule:** orchestrators (`pipeline.py`, `app.py`) must only import execution
 functions (`ACTIVE_OCR_ENGINE`, `ACTIVE_CORRECTION_ENGINE`) from
@@ -77,11 +79,12 @@ call it after any new heavy model invocation you add.
 
 ## UI (`app.py`)
 
-Single-file Streamlit app (~520 lines). Flow: sidebar config -> file
-upload -> "Run Extraction" button -> runs all 5 stages (with
-`clear_device_cache()` after each, results cached into
-`st.session_state` incrementally per stage) -> **paginated** results
-display -> downloads (patched JSON + per-table CSV).
+Single-file Streamlit app. Flow: sidebar config (Primary settings + a
+collapsed Advanced expander) -> file upload -> "Run Extraction" button ->
+runs all 5 stages (with `clear_device_cache()` after each, results cached
+into `st.session_state` incrementally per stage) -> paginated
+**side-by-side review** (page image + editable tables) -> downloads
+(patched JSON + per-table CSV / Excel / zip).
 
 Results are cached in `st.session_state` keyed by a `settings_key`
 string so re-renders don't re-run the pipeline. Once results exist, the
