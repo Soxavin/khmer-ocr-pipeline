@@ -8,7 +8,7 @@ It pairs an automated extraction pipeline with a Streamlit review tool so a data
 machine's output before exporting. Everything runs **on-device** (no cloud APIs) so sensitive financial
 documents never leave the machine.
 
-> Personal internship R&D project (Ministry of Economy and Finance, Cambodia). It explores the best
+> Personal internship R&D project (GDDE, Cambodia). It explores the best
 > on-device workflow for Khmer table extraction; the evaluation harness backs the findings rather than
 > being the goal itself.
 
