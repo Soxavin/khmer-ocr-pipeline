@@ -52,6 +52,11 @@ source of truth for which implementation is active: it maps the `OCR_ENGINE` env
 (`surya` (default) / `tesseract` / `hybrid`) to the OCR engine and binds the correction
 engine, exposing them as `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`. (`hybrid` =
 SLANet table grid + Surya row-strip recognition, for dense fragmented tables.)
+The `hybrid` engine has two further env knobs: `KHMER_HYBRID_MODE` (`rowband` (default)
+/ `cell`) and `KHMER_LAYOUT_DETECTOR` (`surya` (default) / `doclayout`) which chooses the
+table-region source — Surya layout + geometric merge, or DocLayout-YOLO via `rapid_layout`.
+`doclayout` is opt-in and lost the end-to-end A/B (it clips the leftmost label columns); see
+`docs/PROJECT_LOG.md` §2.23–2.24.
 
 **Rule:** orchestrators (`pipeline.py`, `app.py`) must only import execution
 functions (`ACTIVE_OCR_ENGINE`, `ACTIVE_CORRECTION_ENGINE`) from

@@ -631,6 +631,42 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   (threshold-sensitive, not decisive).
 - Modules: `scripts/probe_layout_detectors.py` (new), `scripts/README.md`, `pyproject.toml` +
   `uv.lock` (added `rapid-layout`). ~360 tests still pass; nothing in `src/` changed.
+- **(Superseded by §2.24:** the gate GO held only for *detection*; end-to-end it lost — see below.)
+
+### 2.24 Layout-detector wire-in + end-to-end A/B — **NO-GO** (detection win ≠ extraction win)
+
+- **Why.** §2.23's gate proved DocLayout-YOLO *detects* the table as 1 clean box. But detection is not the
+  deliverable — better final tables are. This is the decisive end-to-end test.
+- **Wire-in (kept, opt-in).** New `src/khmer_pipeline/layout_detect.py` (`detect_table_boxes`, isolated
+  `rapid_layout` wrapper mirroring `slanet_structure.py`); `hybrid_engine.py` gains a
+  `KHMER_LAYOUT_DETECTOR` env knob (`surya` (default) / `doclayout`) that swaps the table-region source —
+  `doclayout` feeds DocLayout-YOLO's box straight to the *unchanged* SLANet + row-strip pipeline (no
+  `merge_table_regions`). Default `surya` preserves prior behavior exactly. TDD: **370 tests pass**.
+- **A/B (3-way, verified 75×9 document GT, `scripts/eval_document.py`):**
+
+  | engine | pred dims | Cell_Accuracy | Cell_Content_Recall | Table_CER |
+  |---|---|---|---|---|
+  | surya | 145×10 | 0.170 | **0.722** | 0.348 |
+  | **hybrid (surya-layout, rowband)** — current best | 84×9 | **0.181** | 0.566 | **0.341** |
+  | hybrid (doclayout) | 118×**8** | 0.080 | 0.542 | 0.560 |
+
+- **Result = NO-GO.** DocLayout-YOLO end-to-end is **less than half** the Cell_Accuracy of the current
+  hybrid (0.080 vs 0.181) and worse Table_CER (0.560 vs 0.341), and yields **8 columns, not 9**.
+- **Root cause (visually confirmed).** DocLayout-YOLO's `table` box covers only the **numeric grid** — it
+  *clips off the two leftmost columns* (Khmer item-name + unit), classing them as plain text. So its tidy
+  "1 box, coverage 1.00" gate result masked a semantic amputation: the most matchable column (item names)
+  is dropped → wrong column count, low accuracy. Surya's *fragmented* boxes, run through `merge_table_regions`,
+  actually preserve the full 9-column table better. (Verify with `scripts/visualize_layout.py`, which
+  overlays both detectors' boxes per page; or flip `KHMER_LAYOUT_DETECTOR=doclayout` in the app.)
+- **Lesson (for REPORT).** Echoes §2.12: a better table *bounding box* does not help if what it encloses is
+  wrong. Detection-only metrics (box count, coverage) can be actively misleading without an end-to-end
+  score. **Current hybrid (Surya-layout + rowband) remains the best engine.** Not chased: padding the
+  DocLayout box leftward to recover the label columns (breadth over depth — the gap is large and the box
+  semantics are the detector's, not a tuning artifact).
+- **Decision.** Keep the wire-in opt-in + this negative result on record (reproducible). Thread B closed;
+  next priority = **Thread A** (Khmer recognizer fine-tuning).
+- Modules: `src/khmer_pipeline/layout_detect.py` (new), `hybrid_engine.py`, `tests/test_layout_detect.py`
+  (new), `tests/test_hybrid_engine.py`, `scripts/visualize_layout.py` (new, verification overlays).
 
 ---
 

@@ -7,6 +7,7 @@ from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
 from .table_stitch import merge_table_regions
 from .slanet_structure import predict_cells
+from .layout_detect import detect_table_boxes
 from .surya import run_surya, _get_predictors, _parse_html_table, _build_table_from_grid
 from .memory import clear_device_cache
 
@@ -31,6 +32,10 @@ _ROW_STRIP_RETRY_Y_PAD_PX = 60
 
 def _hybrid_mode() -> str:
     return os.environ.get("KHMER_HYBRID_MODE", "rowband")
+
+
+def _layout_detector() -> str:
+    return os.environ.get("KHMER_LAYOUT_DETECTOR", "surya")
 
 
 def _ocr_cells(rec_pred, crop_rgb: np.ndarray, cells: list[dict]) -> list[str]:
@@ -163,17 +168,22 @@ def run_hybrid(
     base = run_surya(result, on_page)
     _, rec_pred = _get_predictors()
     rowband = _hybrid_mode() == "rowband"
+    detector = _layout_detector()
 
     pages: list[SuryaPageResult] = []
     for idx, page in enumerate(base.pages):
-        boxes = [tuple(float(v) for v in t["bbox"]) for t in page.tables if t.get("bbox")]
-        if not boxes:
-            pages.append(page)
-            continue
         img = result.page_images[idx]
         h, w = img.shape[:2]
+        if detector == "doclayout":
+            master_boxes = detect_table_boxes(img)
+        else:
+            boxes = [tuple(float(v) for v in t["bbox"]) for t in page.tables if t.get("bbox")]
+            master_boxes = merge_table_regions(boxes) if boxes else []
+        if not master_boxes:
+            pages.append(page)
+            continue
         new_tables: list[dict] = []
-        for mb in merge_table_regions(boxes):
+        for mb in master_boxes:
             x0, y0, x1, y1 = (max(0, int(mb[0])), max(0, int(mb[1])),
                               min(w, int(mb[2])), min(h, int(mb[3])))
             if x1 <= x0 or y1 <= y0:

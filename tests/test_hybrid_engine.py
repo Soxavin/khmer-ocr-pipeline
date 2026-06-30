@@ -95,6 +95,44 @@ def test_hybrid_mode_defaults_to_rowband(monkeypatch):
     assert he._hybrid_mode() == "rowband"
 
 
+# --- layout detector selection ---
+
+def test__layout_detector_defaults_to_surya(monkeypatch):
+    monkeypatch.delenv("KHMER_LAYOUT_DETECTOR", raising=False)
+    assert he._layout_detector() == "surya"
+
+
+def test_run_hybrid_doclayout_sources_region_from_detector_not_page_tables(monkeypatch):
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "doclayout")
+    page = SuryaPageResult(
+        page_index=0,
+        text_blocks=[{"text": "para", "bbox": [0, 0, 10, 10]}],
+        tables=[],
+        ocr_text="para",
+    )
+    base = SuryaResult(source_name="t.pdf", pages=[page], warnings=[])
+    grid = {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}
+    with patch.object(he, "run_surya", return_value=base), \
+         patch.object(he, "detect_table_boxes", return_value=[[10, 10, 200, 200]]), \
+         patch.object(he, "_get_predictors", return_value=(None, object())), \
+         patch.object(he, "predict_cells", return_value=_FAKE_CELLS), \
+         patch.object(he, "_ocr_rowbands", return_value=grid):
+        r = he.run_hybrid(_preprocess())
+    assert len(r.pages[0].tables) == 1
+    assert pred_table_grid(r.pages[0].tables[0]) == [["A", "B"], ["C", "D"]]
+
+
+def test_run_hybrid_doclayout_no_boxes_passthrough(monkeypatch):
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "doclayout")
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[], ocr_text="x")
+    base = SuryaResult(source_name="t.pdf", pages=[page], warnings=[])
+    with patch.object(he, "run_surya", return_value=base), \
+         patch.object(he, "detect_table_boxes", return_value=[]), \
+         patch.object(he, "_get_predictors", return_value=(None, object())):
+        r = he.run_hybrid(_preprocess())
+    assert r.pages[0] is page  # untouched
+
+
 def test_row_bands_full_width_and_padding():
     # a row whose cells do NOT span the full width must still produce a full-width strip
     cells = [
