@@ -572,6 +572,31 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   problem and is the next thread. Modules: `scripts/eval_recognizers.py`, `scripts/mlx_recognizer.py`,
   `scripts/colab_recognizer.ipynb`, `scripts/compare_recognizers.py`.
 
+### 2.22 Analyst UI overhaul — "hide the ML, show the data" (the deliverable)
+
+- **Why.** The pipeline produced good output, but `app.py` read like an ML control panel. The actual
+  deliverable is a tool non-technical GDDE analysts can use to review and correct extractions, so the
+  Streamlit UI was reworked around that.
+- **Editable tables (the core).** Read-only `st.dataframe` → `st.data_editor` on the **final export
+  tables** (the stitched document-level tables when stitching is on — *what-you-edit-is-what-you-
+  download*). ALL rows editable (including the real Khmer header row), neutral "Col N" column labels,
+  in-cell edits + add/delete rows, and a per-table "↺ Reset to original" button. Edits flow into the
+  CSV / Excel / JSON / zip downloads.
+- **Excel export.** New `tables_to_xlsx` (openpyxl; one worksheet per table, sanitized sheet names) +
+  `grid_to_csv` refactored out of `_table_to_csv` — both in `export.py`, TDD (~360 tests). Government
+  analysts live in Excel, so `.xlsx` is a first-class deliverable.
+- **Layout.** Sidebar split into **Primary** (stitch, numerals) vs a collapsed **⚙️ Advanced Engine
+  Settings** (DPI, preprocessing, overlay, etc.); **side-by-side review** (page image left, editable
+  tables right); OCR text / correction diff / stage timings demoted to a details expander.
+- **Guardrails.** >15-page "large document" warning; a prominent error (not a green "success") when 0
+  tables are detected; plain-language progress labels; backend-status caption reworded (the resident
+  `llama-server` spawns lazily on the first run — not an error before then).
+- **Design notes.** Editing the stitched (document-level) table means on multi-page docs the right-hand
+  editor spans pages while the left image paginates (cross-reference by flipping pages; 1:1 for
+  single-page docs). Engine selection stays env-only (`OCR_ENGINE`), deliberately not surfaced in the UI.
+- Modules: `app.py`, `export.py` (`grid_to_csv`, `tables_to_xlsx`), `tests/test_export.py`. Merged to
+  `main` (`15ebee5`).
+
 ---
 
 ## 3. Results Snapshot
