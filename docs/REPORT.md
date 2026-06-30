@@ -187,6 +187,30 @@ hallucinations — OCR-quality noise left unaddressed, consistent with the inten
 **review-ready draft** the analyst corrects, not a perfect extraction. Net: **hybrid is the engine for
 dense tables and the only one that enables clean stitching; Surya stays strong on mixed content.**
 
+### 4.8 Off-the-shelf recogniser A/B (recognition axis)
+Separately from *structure*, we measured how well each engine **recognises** Khmer — independent of
+layout — with a placement-agnostic **recognition CER** (all text pooled on each side vs a single-source
+ground truth; `evaluate_recognition`), across the 3 dense table pages + 1 genuine text page. Lower =
+better.
+
+| Engine | mean recognition CER | note |
+|---|---|---|
+| Surya | **0.316** | baseline; best overall |
+| Hybrid (rowband) | 0.315 | ties overall, but **0.667 → 0.288 on the dense table**; worse on cleaner pages |
+| Tesseract-khm | 0.576 | far behind on tables, competitive only on prose |
+| Qwen2.5-VL-7B (4-bit, local MLX) | 2.271 | **failed** — repetition collapse; CER > 1 = unusable output, not "worse reading" |
+
+Three takeaways. (1) **Surya remains the recogniser to beat**; Tesseract is not competitive on tables.
+(2) **Hybrid's row-strip re-reading is a *targeted* win** on the dense fragmented page — confirming the
+§4.4 result on the recognition ruler too — but adds noise on cleaner pages, so it is not a universal
+default. (3) **An off-the-shelf open VLM did not beat Surya**: Qwen2.5-VL-7B (the strongest T4-class
+candidate, run locally via MLX) collapsed into repetition loops even after decoding tuning, scoring
+CER > 1 on every page — it failed to produce usable output. This is bounded to the 4-bit build, but
+with the open *Khmer-specific* models being only hobby-grade line recognisers, the practical conclusion
+is that **no turnkey off-the-shelf model beats Surya today — the empirical justification for the Khmer
+fine-tuning experiment (§7).** (A data-quality aside: the text page's born-digital layer was a legacy
+Khmer font, unusable as ground truth — see §6.)
+
 ---
 
 ## 5. Discussion
@@ -216,11 +240,12 @@ behaviour on no-table pages.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
   `Tables_Found` are the more faithful signals.
 - **Hybrid stays opt-in for speed, not safety.** The "phantom table on text pages" worry is
-  **resolved** (§2.20): on a genuine text page (CambodiaBudget p2) hybrid is byte-identical to Surya
-  (`Tables_Found=0`, `Document_CER=0.312` both) — it only rebuilds tables Surya actually detects. So
-  hybrid is safe on text pages; it remains opt-in vs Surya because it is **~3× slower** and Surya is
-  competitive except on dense fragmented tables. (The earlier p3 "regression" was purely a GT
-  mislabel, §2.19.)
+  **resolved** (§2.20): on a genuine text page (CambodiaBudget p2) hybrid produces **no phantom table**
+  (`Tables_Found=0`, identical to Surya) — it only rebuilds tables Surya actually detects. So hybrid is
+  safe on text pages; it remains opt-in vs Surya because it is **~3× slower** and Surya is competitive
+  except on dense fragmented tables. (The earlier p3 "regression" was purely a GT mislabel, §2.19. The
+  `Document_CER` figure once reported for that page is **void** — its PDF text layer was a legacy Khmer
+  font, unusable as ground truth, §2.21/§4.8; the phantom-safety result is GT-independent.)
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
@@ -228,13 +253,15 @@ behaviour on no-table pages.
 ---
 
 ## 7. Future Work
-1. **Recogniser exploration** — an off-the-shelf A/B (Surya vs Tesseract-khm vs a heavier open model)
-   to map where Surya fails, then a **Khmer fine-tuning** experiment (fine-tune a recogniser on real
-   and/or synthetic Khmer word data) to try to beat it; and, separately, evaluating more of the
-   **PaddlePaddle** stack (we already use SLANet).
-2. **More real labelled data**, including scanned documents, to harden the evaluation and test the
+1. **Khmer recogniser fine-tuning** — the off-the-shelf recogniser A/B is **done** (§4.8): no turnkey
+   model beats Surya (Tesseract weaker on tables; Qwen2.5-VL-7B 4-bit collapses; open Khmer-specific
+   models are only hobby-grade line recognisers). The justified next step is a **fine-tuning**
+   experiment — a recogniser on real and/or synthetic Khmer word data — to try to beat Surya.
+2. **Layout/structure exploration** — a separate A/B on the *detection* axis (DocLayout-YOLO, PaddleOCR
+   PP-Structure, more of the PaddlePaddle stack vs Surya-layout + SLANet) targeting table fragmentation.
+3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
    preprocessing stack on real (not synthetic) degradation.
-3. **Column-fragmentation reconstruction** at the layout level, and recovering the residual stitched
+4. **Column-fragmentation reconstruction** at the layout level, and recovering the residual stitched
    row over-production (near-duplicate splits / recognition hallucinations on harder pages).
 
 ---

@@ -14,7 +14,9 @@ from khmer_pipeline.evaluate_structure import (
     evaluate_table,
     evaluate_text,
     evaluate_document,
+    evaluate_recognition,
     pool_gt_text,
+    pool_gt_recognition_text,
     pool_pred_text,
 )
 
@@ -528,3 +530,55 @@ def test_evaluate_document_pools_gt_table_cells():
     # pred pools same text in ocr_text
     result = evaluate_document("intro text cell one cell two foot", [], gt)
     assert result["document_cer"] == pytest.approx(0.0)
+
+# --- pool_gt_recognition_text (single-source, no double-count) ---
+
+def test_pool_gt_recognition_text_table_page_pools_cells_once():
+    # ARDB-style GT: paragraphs restate the table rows. pool_gt_text double-counts;
+    # the recognition pooler must use the table cells ONCE and ignore the paragraphs.
+    gt = {
+        "paragraphs": ["cell one cell two"],
+        "tables": [{"data": [["cell one", "cell two"]]}],
+        "footer": "",
+    }
+    result = pool_gt_recognition_text(gt)
+    assert result.count("cell one") == 1
+    assert result.count("cell two") == 1
+
+def test_pool_gt_recognition_text_text_page_uses_paragraphs():
+    # no table grid → fall back to paragraphs + footer
+    gt = {"paragraphs": ["hello world"], "tables": [], "footer": "foot"}
+    result = pool_gt_recognition_text(gt)
+    lines = result.split("\n")
+    assert "hello world" in lines
+    assert "foot" in lines
+
+def test_pool_gt_recognition_text_isolated_data_schema():
+    gt = {"data": [["ក", "ខ"], ["1", "2"]]}
+    result = pool_gt_recognition_text(gt)
+    lines = result.split("\n")
+    assert "ក" in lines and "ខ" in lines and "1" in lines and "2" in lines
+
+def test_pool_gt_recognition_text_skips_empty_cells():
+    gt = {"data": [["", "hello", ""]]}
+    assert pool_gt_recognition_text(gt) == "hello"
+
+# --- evaluate_recognition ---
+
+def test_evaluate_recognition_table_page_no_double_count():
+    # perfect prediction on a table page scores ~0 (would be ~0.5 under evaluate_document)
+    gt = {
+        "paragraphs": ["cell one cell two"],
+        "tables": [{"data": [["cell one", "cell two"]]}],
+        "footer": "",
+    }
+    assert evaluate_recognition("cell one cell two", [], gt)["recognition_cer"] == pytest.approx(0.0)
+
+def test_evaluate_recognition_flat_external_pred():
+    # a flat external model passes its text as ocr_text with pred_tables=[]
+    gt = {"paragraphs": ["hello world"], "tables": [], "footer": ""}
+    assert evaluate_recognition("hello world", [], gt)["recognition_cer"] == pytest.approx(0.0)
+
+def test_evaluate_recognition_wrong_prediction():
+    gt = {"paragraphs": ["hello world"], "tables": [], "footer": ""}
+    assert evaluate_recognition("zzzzzzzzzzz", [], gt)["recognition_cer"] > 0.5

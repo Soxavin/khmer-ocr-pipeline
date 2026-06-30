@@ -222,6 +222,26 @@ def evaluate_document(ocr_text: str, pred_tables: list[dict], gt: dict) -> dict:
     return {"document_cer": cer(_norm(pool_gt_text(gt)), _norm(pool_pred_text(ocr_text, pred_tables)))}
 
 
+def pool_gt_recognition_text(gt: dict) -> str:
+    # Single-source recognition GT: avoids pool_gt_text's double-count (our real-doc
+    # GT restates table rows in `paragraphs`). Table-bearing GT -> the cells once;
+    # text-only GT -> paragraphs + footer.
+    grid = gt_table_grid(gt)
+    if grid:
+        return "\n".join(c for row in grid for c in row if c)
+    parts = list(gt.get("paragraphs", []))
+    footer = gt.get("footer", "")
+    if footer:
+        parts.append(footer)
+    return "\n".join(p for p in parts if p)
+
+
+def evaluate_recognition(ocr_text: str, pred_tables: list[dict], gt: dict) -> dict:
+    # Recognition-only CER vs a single-source GT (no double-count). Pred is pooled
+    # like evaluate_document; a flat external model passes pred_tables=[].
+    return {"recognition_cer": cer(_norm(pool_gt_recognition_text(gt)), _norm(pool_pred_text(ocr_text, pred_tables)))}
+
+
 def evaluate_text(ocr_text: str, pred_tables: list[dict], gt: dict) -> dict:
     # isolated tables have no paragraphs — return None for all text metrics
     if "tables" not in gt:

@@ -514,6 +514,64 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   longer safety — it's **speed** (~3.3 min/page vs ~74 s) and Surya being competitive except on dense
   fragmented tables. Module: `scripts/eval_notable_page.py`.
 
+### 2.21 Off-the-shelf recognizer A/B — Surya wins; an open VLM does not
+
+- **Why.** Before deciding whether to *fine-tune* a recognizer (mentor idea #1), establish how well
+  off-the-shelf engines *recognize* Khmer and **where Surya fails** — don't fine-tune blind.
+- **Metric (recognition-only, new).** Per-page **recognition CER** on *single-source* pooled text:
+  `evaluate_recognition` / `pool_gt_recognition_text` (`evaluate_structure.py`). It is
+  **placement-agnostic** — pools all recognized text on each side and compares characters, scoring
+  *reading*, not *layout*. Deliberately distinct from the §2.18 `evaluate_table` ruler (row-aligned,
+  structure-aware); the two answer different questions, which is why the hybrid row below reads the way
+  it does. Single-source pooling (table grid if present, else paragraphs+footer) avoids the
+  paragraph/table double-count baked into `pool_gt_text`.
+- **Eval set.** 3 ARDB `09.06.26` table pages + 1 genuine text page (CambodiaBudget p2). Local engines
+  swap via `OCR_ENGINE`; an external model is scored from a predictions JSON
+  (`scripts/eval_recognizers.py --predictions`, same metric). 4-way table via
+  `scripts/compare_recognizers.py`.
+- **Results (recognition CER, lower = better):**
+
+  | Page | Surya | Tesseract-khm | Qwen2.5-VL-7B (4-bit MLX) | Hybrid (rowband) |
+  |---|---|---|---|---|
+  | ARDB p1 (table) | **0.369** | 0.710 | 2.363 | 0.414 |
+  | ARDB p2 (dense table) | 0.667 | 0.797 | 1.978 | **0.288** |
+  | ARDB p3 (table) | **0.220** | 0.733 | 2.748 | 0.547 |
+  | CambodiaBudget (text) | **0.009** | 0.065 | 1.993 | **0.009** |
+  | **mean** | **0.316** | 0.576 | 2.271 | 0.315 |
+
+- **Findings.**
+  - **Surya wins the baseline** (mean 0.316); **Tesseract-khm is far behind on tables** (0.71–0.80),
+    competitive only on prose.
+  - **Hybrid ties Surya overall (0.315) but is a *targeted* tool:** it nearly halves the error on the
+    **dense fragmented p2 (0.667 → 0.288)** while *hurting* the cleaner p1/p3 (rowband re-segmentation
+    adds noise where Surya already reads well). Consistent with §2.17–2.18 — hybrid is for the
+    dense-fragmentation case, not a universal default. (Note the contrast with the §2.18 *structure*
+    ruler: here we measure characters read, not cell placement.)
+  - **An off-the-shelf VLM did NOT beat Surya.** Qwen2.5-VL-7B (4-bit, local MLX) scored CER **> 1 on
+    every page** — i.e. it *failed to produce usable output*, not "2.3× worse recognition." CER > 1
+    means the output is both wrong **and** longer than the truth (garble + repetition bloat).
+- **Qwen failure detail (decoding fragility).** The 4-bit model collapsed into repetition loops and
+  needed deliberate decoding tuning even to reach the above: a "use Markdown tables" prompt → empty-grid
+  loop; plain-text prompt → word-repeat loop; `repetition_penalty=1.3` was the sweet spot (broke the
+  prose loop; dense tables still loop on near-identical numbers); 1.4 made it worse (broke the prose
+  page too). So the result is **bounded to the 4-bit MLX build** (8-bit untested by choice) and says
+  "this off-the-shelf *local* VLM is not turnkey for dense Khmer tables," not "Qwen2.5-VL can't do
+  Khmer." Run isolated from the project env (`uv run --no-project --with mlx-vlm`) because mlx-vlm needs
+  `transformers>=5.1` but Surya pins `<5.0`.
+- **Data-quality finding (legacy Khmer fonts).** The CambodiaBudget PDF's born-digital text layer uses
+  a **legacy Khmer font** (glyphs mapped onto Latin/extended codepoints: `ƒ Ǝ ſ ȥ`) — PyMuPDF returns
+  those raw codepoints, so it is **unusable as GT** (the page renders as Khmer but extracts as
+  mojibake). GT was rebuilt by OCR-draft + manual correction. **This retroactively voids §2.20's
+  `Document_CER = 0.312`** (scored against that corrupt text) — treat that number as meaningless; the
+  §2.20 `Tables_Found = 0` phantom-safety conclusion is GT-independent and still stands.
+- **Models flagged as likely silent failures for Khmer (recorded for rigor, not individually tested).**
+  GOT-OCR2.0, Florence-2, PaddleOCR/MinerU, Donut/Nougat — English/CJK-biased encoders/tokenizers that
+  mangle the Khmer script (stacked subscripts/coeng).
+- **Axis note.** This A/B is the **recognition** axis (reading text). The separate **layout/structure**
+  axis (DocLayout-YOLO, PP-Structure, more Paddle vs Surya-layout + SLANet) targets the *fragmentation*
+  problem and is the next thread. Modules: `scripts/eval_recognizers.py`, `scripts/mlx_recognizer.py`,
+  `scripts/colab_recognizer.ipynb`, `scripts/compare_recognizers.py`.
+
 ---
 
 ## 3. Results Snapshot
