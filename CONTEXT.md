@@ -12,7 +12,7 @@ interactive use, and a CLI batch processor
 - Python >=3.11, managed with `uv` (pyproject.toml + uv.lock)
 - OpenCV (`opencv-python-headless`) — image preprocessing
 - PyMuPDF (`fitz`) — PDF ingestion
-- `surya-ocr` (pinned `>=0.20.0,<0.21`) — layout detection, OCR, table recognition; on Apple Silicon uses the built-in llamacpp Metal backend (`SURYA_INFERENCE_BACKEND=llamacpp`)
+- `surya-ocr` (pinned `>=0.20.0,<0.21`) — layout detection, OCR, table recognition. Device is auto-selected by `device.py` (`configure_runtime()` sets `TORCH_DEVICE` → CUDA on NVIDIA, MPS on Apple Silicon, else CPU). On Apple Silicon, `setup-metal-macos.sh` opts into the faster built-in llamacpp Metal backend (`SURYA_INFERENCE_BACKEND=llamacpp`), which `device.py` respects. `mlx-lm` is a Mac-only (marker-gated) dependency; see `Dockerfile` for the Linux/GPU lane.
 - `mlx-lm` + `transformers` (pinned, see pyproject.toml) — Qwen2.5-7B-Instruct-4bit text correction
 - Streamlit >=1.35 — UI
 - pytest — tests
@@ -74,9 +74,10 @@ need to swap models.
 ## Memory management (`memory.py`)
 
 `src/khmer_pipeline/memory.py` provides `clear_device_cache()` —
-`gc.collect()` + `mx.clear_cache()` (MLX/Qwen), each best-effort/wrapped
-in try/except. Surya 0.20+ delegates to a C++ `llama-server` process that
-manages its own VRAM, so `torch.mps.empty_cache()` is no longer called.
+`gc.collect()` + `torch.cuda.empty_cache()` (Linux/NVIDIA) + `mx.clear_cache()`
+(MLX/Qwen), each best-effort/wrapped in try/except. On Apple Silicon, Surya 0.20+
+delegates to a C++ `llama-server` process that manages its own VRAM, so
+`torch.mps.empty_cache()` is not called there.
 Called after every stage in both `pipeline.py` and `app.py`, and also
 after any page in `postprocess()` where `qwen_used` is true. Exists to
 avoid OOM on 24GB unified-memory Macs during multi-stage ML inference —

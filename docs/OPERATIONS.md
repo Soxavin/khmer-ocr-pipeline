@@ -80,13 +80,19 @@ uv run python -m khmer_pipeline.generate_synthetic_documents --output-dir eval/d
 ```
 The generators abort (rather than emit a fallback-font image) if a font fails to load.
 
-## Future work — why not Docker?
+## Two deployment lanes (Mac native vs Docker)
 
-This app is **deliberately not containerized**. Its performance depends on local
-Apple-Silicon acceleration: Surya runs on the **Metal** GPU and Qwen runs on **MLX**.
-macOS containers run Linux in a VM with **no access to Metal**, and **MLX does not run
-on Linux** — a container today would silently fall back to CPU (far slower, likely OOM
-on the larger models). Containerization should be reconsidered only for a different
-future architecture: a **Linux/CUDA multi-user server** deployment, which would use
-different inference backends (no MLX) and is out of scope for this single-user thesis
-project.
+The project runs in **two lanes**, and the compute device is auto-selected by
+`src/khmer_pipeline/device.py` (`configure_runtime()` → `TORCH_DEVICE`):
+
+- **Mac (Apple Silicon) — run natively, no Docker.** Surya runs on the **Metal** GPU and
+  the optional Qwen step on **MLX**. macOS containers run Linux in a VM with **no access
+  to Metal**, and **MLX does not run on Linux**, so a container on a Mac would only fall
+  back to CPU. Mac users therefore run directly (`source setup-metal-macos.sh`).
+- **Linux / NVIDIA / cloud — use the `Dockerfile`.** The image installs the torch (CUDA)
+  backend and system deps (`mlx` is auto-excluded by its platform marker). `docker run
+  --gpus all` uses CUDA; without `--gpus` it falls back to CPU. This is the multi-user /
+  server lane.
+
+Both lanes share the same code; only the device backend differs. See the README
+"Running with Docker" section for the exact build/run commands.

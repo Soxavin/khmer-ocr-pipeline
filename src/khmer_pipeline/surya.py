@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable, Optional
 from PIL import Image
 from .models import PreprocessResult, SuryaResult, SuryaPageResult
+from .device import configure_runtime
 from .model_config import CONFIDENCE_LOW
 from .table_stitch import merge_table_regions, merge_table_rowbands
 
@@ -49,6 +50,7 @@ def preload_models() -> None:
 def _get_predictors():
     global _manager, _layout_pred, _rec_pred
     if _manager is None:
+        configure_runtime()
         _log("Initializing SuryaInferenceManager...")
         t0 = time.perf_counter()
         from surya.inference import SuryaInferenceManager

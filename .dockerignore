@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pyc
+sample_data/
+eval/datasets/
+eval/runs/
+docs/figures/
+.pytest_cache
+.claude
+scratchpad

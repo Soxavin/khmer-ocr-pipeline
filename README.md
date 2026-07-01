@@ -39,9 +39,11 @@ Surya row-strip recognition) for dense fragmented tables — selected via the `O
 
 ## Quickstart
 
-**Prerequisites:** Python ≥ 3.11, [`uv`](https://docs.astral.sh/uv/), and Apple Silicon (Surya uses a
-llama.cpp **Metal** backend). Tesseract with the `khm` language pack is optional (only for the Tesseract
-engine).
+**Prerequisites:** Python ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/). The pipeline is **cross-platform**
+and auto-selects its compute device (`src/khmer_pipeline/device.py`): **CUDA** on NVIDIA, **MPS** on Apple
+Silicon, **CPU** otherwise. On Apple Silicon, `source setup-metal-macos.sh` additionally enables Surya's
+faster llama.cpp **Metal** backend. Tesseract with the `khm` language pack is optional (only for the
+Tesseract engine); on Linux, the Docker image below bundles it.
 
 ```bash
 uv sync                                  # install dependencies (pyproject.toml + uv.lock)
@@ -55,8 +57,26 @@ uv run streamlit run lab.py             # (optional) researcher lab — compare 
 uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-deskew] [--no-qwen]
 
 # --- Tests ---
-uv run pytest -q
+uv run pytest -q          # (installs dev extras with: uv sync --extra dev)
 ```
+
+### Running with Docker (Linux / NVIDIA GPU)
+
+For non-Mac deployment, a Dockerfile packages the whole runtime (Tesseract, OpenCV libs, Python deps —
+`mlx` is auto-excluded off-Mac). The **same image** uses the GPU when one is passed, or falls back to CPU:
+
+```bash
+docker build -t khmer-ocr .
+docker run --gpus all -p 8501:8501 khmer-ocr   # NVIDIA GPU (CUDA) — needs the NVIDIA Container Toolkit
+docker run           -p 8501:8501 khmer-ocr   # CPU fallback (no --gpus)
+```
+
+The container logs the selected device (`[device] using cuda|cpu`) on first OCR, then serves the app at
+`http://localhost:8501`.
+
+> **Two lanes:** **Mac users run natively** (`setup-metal-macos.sh` → Metal/MLX) — Docker can't access the
+> Apple GPU. **Docker is the Linux / NVIDIA / CPU lane.** Both share the same code; the device is picked
+> automatically.
 
 ---
 
