@@ -62,21 +62,34 @@ uv run pytest -q
 
 ## Key results
 
-The central finding: on dense real Khmer tables the bottleneck is **table structure / fragmentation, not
-character recognition**. An off-the-shelf recognizer A/B (per-page recognition CER, lower = better;
-see [`docs/REPORT.md`](docs/REPORT.md) §4.8):
+On dense real Khmer tables, **preprocessing is what makes or breaks table structure.** Fed a *raw* page,
+Surya's layout fragments one dense table into ~8 regions; after the pipeline's preprocessing (contrast +
+table-background flattening) it detects the table as **one clean region** (reproduced on two separate
+bulletins). Scored against a hand-verified 75×9 ground-truth table under production (preprocessed)
+conditions, **plain Surya is the best engine** and recovers the exact table shape:
 
-| Engine | Mean CER | Notes |
-|--------|----------|-------|
-| **Surya** | **0.316** | best general recognizer |
-| Hybrid (rowband) | 0.315 | ties overall; **wins on the dense table (0.667 → 0.288)** |
-| Tesseract-`khm` | 0.576 | far behind on tables |
-| Qwen2.5-VL-7B (4-bit, local) | 2.271 | collapsed — no off-the-shelf VLM beat Surya |
+| Engine (preprocessed) | Cell accuracy | Recall | Table CER | Pred dims |
+|--------|--------------|--------|-----------|-----------|
+| **Surya** | **0.259** | 0.623 | **0.249** | **75×9 (= GT)** |
+| Hybrid (SLANet + row-strip) | 0.145 | 0.569 | 0.258 | 82×9 |
+| Hybrid + DocLayout-YOLO | 0.135 | 0.561 | 0.279 | 79×9 |
 
-No turnkey off-the-shelf model beats Surya today, which motivates the queued fine-tuning work. Full
-methodology, figures, and the fragmentation investigation are in
-[`docs/REPORT.md`](docs/REPORT.md); the dated decision log is in
-[`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md).
+A structure-focused effort (a SLANet-based **hybrid** engine and a **DocLayout-YOLO** layout detector) was
+built to fix the *raw-image* fragmentation — but once preprocessing is on, Surya already handles the
+structure, so those alternatives are unnecessary and score worse. The remaining gap is **recognition**, not
+structure. On that axis, an off-the-shelf A/B (per-page recognition CER, lower = better) found no turnkey
+model beats Surya:
+
+| Engine | Mean recognition CER |
+|--------|----------------------|
+| **Surya** | **0.316** |
+| Hybrid (rowband) | 0.315 |
+| Tesseract-`khm` | 0.576 |
+| Qwen2.5-VL-7B (4-bit, local) | 2.271 (collapsed) |
+
+— which points future work at fine-tuning a Khmer recognizer. Full methodology and the dated decision log
+(including the preprocessing revision, §2.25) are in [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) and
+[`docs/REPORT.md`](docs/REPORT.md).
 
 ---
 

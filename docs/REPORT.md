@@ -15,6 +15,16 @@ extraction is the dominant bottleneck** on dense real tables. We rigorously esta
 baseline comparison and three engineering interventions — that the limiting factor is **OCR
 recognition of small, isolated Khmer table cells**, not layout detection, which is solvable.
 
+> **⚠ Revision (2026-07-01 — see `PROJECT_LOG.md` §2.25).** The "table-structure is the dominant
+> bottleneck" framing throughout this report was measured on **raw (un-preprocessed) page images**. The
+> product always preprocesses first, which collapses Surya's dense-table layout from ~8 fragments to **one
+> clean region** (reproduced on two separate bulletins). Re-scored under production (preprocessed)
+> conditions, the engine ranking **flips**: plain **Surya wins** (Cell_Accuracy 0.259 vs hybrid 0.145 /
+> DocLayout-YOLO 0.135) and recovers the exact 75×9 table shape. So under production conditions Surya
+> handles the structure and the remaining gap is **recognition**; the geometric/hybrid/DocLayout structure
+> work (Sections 4–7) stands as documented negative results but is not needed once preprocessing is on. A
+> full re-narration of the sections below is deferred.
+
 ---
 
 ## 1. Introduction
