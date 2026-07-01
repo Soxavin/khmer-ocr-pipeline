@@ -46,9 +46,10 @@ engine).
 ```bash
 uv sync                                  # install dependencies (pyproject.toml + uv.lock)
 
-# --- Review UI ---
+# --- Review UI (analyst tool) ---
 source setup-metal-macos.sh              # configure the Surya Metal backend (sets env vars)
 uv run streamlit run app.py             # open the app, upload a document, click "Run Extraction"
+uv run streamlit run lab.py             # (optional) researcher lab — compare engines + inspect pipeline stages
 
 # --- Command line (batch) ---
 uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-deskew] [--no-qwen]

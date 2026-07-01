@@ -241,6 +241,11 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 
 ### 2.12 Table de-fragmentation — geometric stitcher (Path A): a useful negative result
 
+> **⚠ Caveat (see §2.25):** the fragmentation below was measured on **raw** (un-preprocessed) images. With
+> the pipeline's `preprocess()` — which the product always runs — Surya's page-2 layout collapses from 8
+> boxes to **1**, and plain Surya becomes the best engine. This whole arc addresses a problem preprocessing
+> largely solves.
+
 - **Problem.** On dense real pages Surya's *layout* model shatters one table into many
   regions (real GDDE page 2 → a 2 row-band × 4 col-group grid of **8 Table boxes**);
   recognition then OCRs each fragment separately and serializes content column-wise,
@@ -599,6 +604,10 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 
 ### 2.23 Layout-detector A/B (Thread B) — gate-first probe = **GO** for DocLayout-YOLO
 
+> **⚠ Caveat (see §2.25):** this probe (and §2.24) ran on **raw** images. With preprocessing, Surya no
+> longer fragments the table, so the problem DocLayout-YOLO "fixed" is mostly moot under production
+> conditions — and preprocessed Surya beats both hybrid variants.
+
 - **Why.** The central finding (§2.12) is that the bottleneck is table **structure/fragmentation**, not
   recognition (the recognition axis closed in §2.21 — nothing turnkey beats Surya). Surya's *layout*
   model fragments one dense table into multiple `Table` regions. Our structure model SLANet (`rapid_table`)
@@ -667,6 +676,42 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   next priority = **Thread A** (Khmer recognizer fine-tuning).
 - Modules: `src/khmer_pipeline/layout_detect.py` (new), `hybrid_engine.py`, `tests/test_layout_detect.py`
   (new), `tests/test_hybrid_engine.py`, `scripts/visualize_layout.py` (new, verification overlays).
+- **(Superseded by §2.25:** measured on **raw** images; with preprocessing Surya wins and the ranking flips.)
+
+### 2.25 The preprocessing confound — re-scored A/B flips the ranking (Surya wins)
+
+- **Why (methodology gap).** The product (`app.py`, `pipeline.py`) always runs `preprocess()` before OCR,
+  but the eval harness did **not** — `scripts/eval_document.py:_load_pages` fed Surya **raw** `ingest()`
+  images (as did the layout probe and `visualize_layout.py`). So the whole fragmentation arc was scored in
+  a regime the real system never runs in. Surfaced by a `lab.py` smoke-test (the lab preprocesses).
+- **The measurement.** On the dense page 2, Surya's layout gives **8 Table boxes raw but 1 clean box after
+  preprocessing** (contrast + table-background flattening). Fragmentation is largely a *raw-image artifact*.
+- **Re-scored A/B** (`eval_document.py --preprocess`, added this session; verified 75×9 doc GT):
+
+  | engine | RAW (§2.24) Acc / Rec / CER | **PREPROCESSED** Acc / Rec / CER | pred dims raw → pre |
+  |---|---|---|---|
+  | **surya** | 0.170 / 0.722 / 0.348 | **0.259 / 0.623 / 0.249** 🏆 | 145×10 → **75×9 (= GT)** |
+  | hybrid (rowband) | 0.181 / 0.566 / 0.341 | 0.145 / 0.569 / 0.258 | 84×9 → 82×9 |
+  | hybrid + doclayout | 0.080 / 0.542 / 0.560 | 0.135 / 0.561 / 0.279 | 118×8 → 79×9 |
+
+- **Result — the ranking flips.** Raw, hybrid narrowly "won" (0.181 vs 0.170). **Preprocessed, plain Surya
+  wins decisively** (Cell_Accuracy 0.259 vs 0.145/0.135) and lands the **exact GT dimensions 75×9** (raw it
+  over-produced 145×10). The hybrid gets *worse* with preprocessing, not better.
+- **Revised conclusion.** The "structure/fragmentation is the bottleneck" thesis (§2.12) was largely an
+  artifact of off-pipeline evaluation. **Under production conditions Surya handles the structure well**; the
+  hybrid engine (SLANet + rowband) and DocLayout-YOLO — the whole fragmentation-mitigation effort — are
+  **unnecessary and underperform**. The remaining gap is *recognition* (Recall ~0.62, CER ~0.25), which
+  realigns with §2.21 (recognition is the open axis → Thread A). **Reassuring corollary:** `app.py` has
+  always defaulted to **Surya + preprocessing** — i.e. the winning config — so the *deliverable* was correct
+  all along; only the R&D *narrative* was skewed.
+- **Eval hygiene going forward.** Run `eval_document.py --preprocess` to match production (recommended in
+  `eval/README.md`). Raw stays the default flag-off for now so §2.24's numbers remain reproducible; flipping
+  the default to preprocess is a deferred follow-up.
+- **Not chased (breadth over depth).** Re-running the full fragmentation arc (§2.12–2.20) under
+  preprocessing — only the current A/B was re-scored. The hybrid/DocLayout code stays in-tree, opt-in, as a
+  documented negative result.
+- Modules: `scripts/eval_document.py` (`--preprocess`), `lab.py` (per-page GT scoring), plus this log +
+  memory. No `src/` engine change (the product already does the right thing).
 
 ---
 

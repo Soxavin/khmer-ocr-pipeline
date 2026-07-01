@@ -10,6 +10,9 @@ the per-page tables into document tables, then reports:
     OCR_ENGINE=surya  uv run python scripts/eval_document.py [stem]
     OCR_ENGINE=hybrid KHMER_HYBRID_MODE=rowband uv run python scripts/eval_document.py [stem]
 
+Add --preprocess to run the same preprocess() the product applies (matches
+app.py/pipeline.py); default is raw images (see PROJECT_LOG §2.25).
+
 NOTE: scored numbers are only meaningful once you have verified the drafted GT
 (see scripts/draft_document_gt.py). Until then treat them as provisional.
 """
@@ -20,7 +23,8 @@ import sys
 from pathlib import Path
 
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.models import PreprocessResult
+from khmer_pipeline.models import IngestResult, PreprocessResult
+from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE
 from khmer_pipeline.table_merge_pages import merge_document_tables, _rows, _row_sig
 from khmer_pipeline.evaluate_structure import evaluate_table, pred_table_grid
@@ -29,11 +33,17 @@ _REAL_DIR = Path("eval/datasets/real")
 _DEFAULT_STEM = "តារាងតម្លៃទំនិញតាមទីផ្សារមួយចំនួននៅរាជធានីភ្នំពេញ-ប្រចាំថ្ងៃ-09.06.26"
 
 
-def _load_pages(stem: str) -> PreprocessResult:
+def _load_pages(stem: str, do_preprocess: bool = False) -> PreprocessResult:
+    # Default (raw) matches the historical §2.24 A/B. --preprocess runs the same
+    # preprocess() the product (app.py/pipeline.py) applies, so eval reflects
+    # production conditions (see PROJECT_LOG §2.25).
     pngs = sorted(glob.glob(str(_REAL_DIR / f"{stem}_p*.png")))
     images = []
     for p in pngs:
         images.extend(ingest(Path(p).read_bytes(), Path(p).name, dpi=200).page_images)
+    if do_preprocess:
+        ing = IngestResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
+        return preprocess(ing, PreprocessConfig())
     return PreprocessResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
 
 
@@ -46,13 +56,15 @@ def _duplicate_header_rows(table: dict) -> int:
 
 
 def main() -> int:
-    stem = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_STEM
+    do_preprocess = "--preprocess" in sys.argv
+    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+    stem = positional[0] if positional else _DEFAULT_STEM
     engine = getattr(ACTIVE_OCR_ENGINE, "__name__", "ocr")
-    pre = _load_pages(stem)
+    pre = _load_pages(stem, do_preprocess=do_preprocess)
     if not pre.page_images:
         print(f"No page PNGs for stem: {stem}")
         return 1
-    print(f"engine={engine}  pages={pre.page_count}")
+    print(f"engine={engine}  pages={pre.page_count}  preprocess={'on' if do_preprocess else 'off'}")
 
     result = ACTIVE_OCR_ENGINE(pre)
     per_page_tables = sum(len(p.tables) for p in result.pages)

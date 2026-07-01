@@ -123,7 +123,14 @@ All metrics are computed deterministically from ground truth — no LLM judge, n
 | `Paragraph_Recall` | higher = better | Fraction of GT paragraph lines found in the OCR output. |
 | `Paragraph_Leak` | lower = better | Body text wrongly captured inside a table cell — a §2.4 layout-correctness signal. Should be 0 on clean runs. |
 
-**Context:** all benchmarks run on raw renders (no preprocessing). This isolates OCR model quality from preprocessing effects. Preprocessing (`deskew`, `normalise_table_backgrounds`, etc.) is only applied in the live pipeline.
+**Context:** most benchmarks run on raw renders (no preprocessing). This isolates OCR model quality from preprocessing effects. Preprocessing (`deskew`, `normalise_table_backgrounds`, etc.) is applied in the live pipeline (`app.py`, `pipeline.py`).
+
+> **⚠ Raw isolates the model, but does NOT decide which engine to ship.** Engines respond to preprocessing
+> very differently, so a raw ranking can invert under production conditions. **For engine selection, run
+> `scripts/eval_document.py --preprocess`** to match the live pipeline. In the doc-level A/B this flipped the
+> result — raw favoured the hybrid, but *preprocessed* Surya wins decisively and hits the exact GT
+> dimensions (see `docs/PROJECT_LOG.md` §2.25). Raw stays the default for now so older numbers stay
+> reproducible.
 
 ---
 
