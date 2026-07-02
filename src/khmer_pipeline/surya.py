@@ -4,9 +4,9 @@ import os
 import time
 import warnings
 from html.parser import HTMLParser
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 from PIL import Image
-from .models import PreprocessResult, SuryaResult, SuryaPageResult
+from .models import PreprocessResult, SuryaResult, SuryaPageResult, Cell, Table, TextBlock
 from .device import configure_runtime
 from .model_config import CONFIDENCE_LOW
 from .table_stitch import merge_table_regions, merge_table_rowbands
@@ -183,18 +183,18 @@ def _find_matching_html(layout_bbox: list[float], table_html_map: dict[tuple, st
 
 
 def _build_table_from_grid(grid: dict[tuple[int, int], str], html: str,
-                           region_bbox: list[float]) -> dict[str, Any]:
+                           region_bbox: list[float]) -> Table:
     # Single source of truth: the VLM's HTML grid. Text is already in its
     # correct cell, so no index-join against a second (geometric) grid.
     if not grid:
         flat = _html_to_text(html)
-        cell = {"row_id": 0, "col_id": 0, "cell_id": 0, "bbox": [], "polygon": [],
-                "text_lines": [{"text": flat, "bbox": []}] if flat else []}
+        cell: Cell = {"row_id": 0, "col_id": 0, "cell_id": 0, "bbox": [], "polygon": [],
+                      "text_lines": [{"text": flat, "bbox": []}] if flat else []}
         return {"rows": [{"row_id": 0}], "cols": [{"col_id": 0}],
                 "cells": [cell], "image_bbox": list(region_bbox)}
     n_rows = max(r for r, _ in grid) + 1
     n_cols = max(c for _, c in grid) + 1
-    cells = []
+    cells: list[Cell] = []
     for cid, ((r, c), text) in enumerate(sorted(grid.items())):
         cells.append({"row_id": r, "col_id": c, "cell_id": cid,
                       "bbox": [], "polygon": [],
@@ -241,7 +241,7 @@ def _process_page(
                     layout_result.bboxes = others + new_tables
                     _log(f"Page {page_index}: stitched {len(table_lboxes)} table region(s) → {len(new_tables)}")
 
-        text_blocks: list[dict] = []
+        text_blocks: list[TextBlock] = []
         # Maps rounded table bbox → VLM-generated HTML (contains <table><tr><td> structure).
         # Populated from OCR blocks labelled "Table"; used later to fill cell text.
         table_html_map: dict[tuple, str] = {}
@@ -285,14 +285,14 @@ def _process_page(
         ocr_text = "\n\n".join(b["text"] for b in text_blocks if b.get("text"))
 
         table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
-        tables: list[dict] = []
+        tables: list[Table] = []
         for b in table_bboxes:
             table_html = _find_matching_html(b.bbox, table_html_map)
             if not table_html:
                 warnings.warn(
                     f"Page {page_index + 1}: no OCR HTML for table {len(tables) + 1}; cells will be empty."
                 )
-                tbl = {"rows": [], "cols": [], "cells": [], "image_bbox": list(b.bbox)}
+                tbl: Table = {"rows": [], "cols": [], "cells": [], "image_bbox": list(b.bbox)}
             else:
                 grid = _parse_html_table(table_html)
                 if not grid:

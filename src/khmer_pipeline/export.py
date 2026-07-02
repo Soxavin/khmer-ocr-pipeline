@@ -1,15 +1,20 @@
 from __future__ import annotations
+import codecs
 import csv
 import io
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 import openpyxl
-from .models import PostprocessResult, ExportResult
+from .models import PostprocessResult, ExportResult, Table, Cell
 from .table_merge_pages import merge_document_tables
 
 _XLSX_SHEET_NAME_ILLEGAL = set("[]:*?/\\")
 _XLSX_SHEET_NAME_MAX_LEN = 31
+
+# Excel requires a UTF-8 BOM prefix to open Khmer (or any non-ASCII) CSV text
+# correctly; this is the str-level equivalent of encoding with "utf-8-sig".
+_CSV_BOM = codecs.BOM_UTF8.decode("utf-8")  # U+FEFF, same char as the old literal "﻿"
 
 _KHMER_TO_ARABIC: dict[str, str] = {
     "០": "0", "១": "1", "២": "2", "៣": "3", "៤": "4",
@@ -23,7 +28,14 @@ def _convert_khmer_numerals(text: str) -> str:
     return "".join(_KHMER_TO_ARABIC.get(ch, ch) for ch in text)
 
 
-def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
+def _convert_grid_numerals(grid: list[list[str]]) -> list[list[str]]:
+    """Apply `_convert_khmer_numerals` to every cell in a row/col grid.
+    Shared by `grid_to_csv` and `tables_to_xlsx` so both export formats
+    convert numerals identically."""
+    return [[_convert_khmer_numerals(cell) for cell in row] for row in grid]
+
+
+def _validate_and_repair_table(table: Table) -> tuple[Table, bool]:
     """Pad rows that are shorter than the table's majority row length with
     empty placeholder cells, so the CSV/JSON grid is rectangular.
 
@@ -35,7 +47,7 @@ def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
     if not cells:
         return table, False
 
-    rows: dict[int, list] = {}
+    rows: dict[int, list[Cell]] = {}
     for c in cells:
         r = c.get("row_id", 0)
         rows.setdefault(r, []).append(c)
@@ -109,7 +121,7 @@ def _make_doc_table_id(source_name: str, n: int) -> str:
     return f"{Path(source_name).stem}_table{n + 1}"
 
 
-def _build_merged_tables_json(source_name: str, merged: list[dict]) -> list[dict]:
+def _build_merged_tables_json(source_name: str, merged: list[Table]) -> list[dict]:
     out = []
     for i, table in enumerate(merged):
         out.append({
@@ -140,12 +152,12 @@ def grid_to_csv(grid: list[list[str]], convert_numerals: bool = False) -> str:
     for Excel to open Khmer text correctly). Optionally converts Khmer digits to
     Arabic first."""
     buf = io.StringIO()
-    buf.write("﻿")  # UTF-8 BOM — required for Excel to open Khmer text correctly
+    buf.write(_CSV_BOM)
     writer = csv.writer(buf)
     if not grid:
         return buf.getvalue()
     if convert_numerals:
-        grid = [[_convert_khmer_numerals(cell) for cell in row] for row in grid]
+        grid = _convert_grid_numerals(grid)
     writer.writerows(grid)
     return buf.getvalue()
 
@@ -176,7 +188,7 @@ def tables_to_xlsx(tables: list[tuple[str, list[list[str]]]], convert_numerals: 
         if not grid or not any(any(cell for cell in row) for row in grid):
             continue
         if convert_numerals:
-            grid = [[_convert_khmer_numerals(cell) for cell in row] for row in grid]
+            grid = _convert_grid_numerals(grid)
         sheet_name = _sanitize_sheet_name(table_id, used_names)
         used_names.add(sheet_name)
         ws = wb.create_sheet(sheet_name)
@@ -191,7 +203,7 @@ def tables_to_xlsx(tables: list[tuple[str, list[list[str]]]], convert_numerals: 
     return buf.getvalue()
 
 
-def _table_to_csv(table: dict, convert_numerals: bool = False) -> str:
+def _table_to_csv(table: Table, convert_numerals: bool = False) -> str:
     cells = table.get("cells", [])
     if not cells:
         return grid_to_csv([])
