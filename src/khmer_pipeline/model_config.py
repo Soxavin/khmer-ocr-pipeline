@@ -6,6 +6,7 @@ stage file (surya.py for Stage 3, postprocess.py for Stage 4).
 Stage 3 options: "surya-0.17.1"
 Stage 4 options: "qwen2.5-7b-instruct-4bit-mlx"
 """
+from __future__ import annotations
 
 # Stage 3 — Layout detection, OCR, table recognition
 STAGE3_MODEL: str = "surya-0.17.1"

@@ -41,6 +41,7 @@ def _get_qwen():
     return _qwen_model, _qwen_tokenizer
 
 def qwen_loaded() -> bool:
+    """Return True if the Qwen correction model is already loaded into memory."""
     return _qwen_model is not None
 
 # ---------------------------------------------------------------------------
@@ -196,6 +197,9 @@ def postprocess(
     skip_qwen: bool = True,  # Qwen is opt-in; deterministic normalizer always runs
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> PostprocessResult:
+    """Apply deterministic Khmer normalization to every page's text blocks, optionally
+    escalating anomalous blocks to the Qwen VLM for correction (`skip_qwen=False`).
+    Returns a `PostprocessResult` with per-page raw/corrected text and diffs."""
     pages = []
     for page in result.pages:
         corrected_page = _correct_page(

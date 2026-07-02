@@ -40,10 +40,12 @@ _rec_pred = None
 
 
 def models_loaded() -> bool:
+    """Return True if the Surya layout/recognition predictors are already initialized."""
     return _manager is not None
 
 
 def preload_models() -> None:
+    """Eagerly initialize the Surya inference manager and predictors, if not already loaded."""
     _get_predictors()
 
 
@@ -67,6 +69,10 @@ def run_surya(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
 ) -> SuryaResult:
+    """Run Surya layout detection, OCR, and table recognition over every page image
+    in `result`. `on_page(idx, total)` is called before each page if given. Returns
+    a `SuryaResult` with per-page text blocks/tables and any warnings raised during
+    processing."""
     layout_pred, rec_pred = _get_predictors()
     pil_images = [Image.fromarray(img) for img in result.page_images]
     total = len(pil_images)
@@ -87,9 +93,11 @@ class _TagStripper(HTMLParser):
         self._parts: list[str] = []
 
     def handle_data(self, data: str) -> None:
+        """Collect a chunk of text data encountered while parsing HTML."""
         self._parts.append(data)
 
     def get_text(self) -> str:
+        """Return all collected text data joined into a single whitespace-normalized string."""
         return " ".join(p.strip() for p in self._parts if p.strip())
 
 
@@ -112,6 +120,7 @@ class _TableHTMLParser(HTMLParser):
         self._current_colspan = 1
 
     def handle_starttag(self, tag: str, attrs) -> None:
+        """Start tracking a new row (`tr`) or cell (`td`/`th`), reading `colspan` if present."""
         if tag == "tr":
             self._current_row = []
         elif tag in ("td", "th"):
@@ -122,6 +131,7 @@ class _TableHTMLParser(HTMLParser):
                     self._current_colspan = int(value)
 
     def handle_endtag(self, tag: str) -> None:
+        """Close the current cell or row, appending padding cells for any `colspan`."""
         if tag in ("td", "th") and self._current_cell is not None:
             text = " ".join(self._current_cell).strip()
             if self._current_row is not None:
@@ -136,10 +146,12 @@ class _TableHTMLParser(HTMLParser):
             self._current_row = None
 
     def handle_data(self, data: str) -> None:
+        """Append text data to the currently open table cell, if any."""
         if self._current_cell is not None:
             self._current_cell.append(data)
 
     def grid(self) -> dict[tuple[int, int], str]:
+        """Return the parsed table as a `(row, col) -> cell text` mapping."""
         return {
             (r, c): text
             for r, row in enumerate(self._rows)

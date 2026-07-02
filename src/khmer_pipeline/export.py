@@ -65,6 +65,9 @@ def _validate_and_repair_table(table: dict) -> tuple[dict, bool]:
 
 def export(result: PostprocessResult, convert_numerals: bool = False, repair_tables: bool = False,
            stitch_pages: bool = False) -> ExportResult:
+    """Build the final export payload from a `PostprocessResult`: the document JSON plus
+    one CSV per table (optionally repairing ragged rows and/or stitching continuation
+    tables across pages first). Returns an `ExportResult`."""
     # Repair tables in place before building the JSON, so was_repaired and
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
@@ -133,6 +136,9 @@ def _make_table_id(source_name: str, page_index: int, table_index: int) -> str:
 
 
 def grid_to_csv(grid: list[list[str]], convert_numerals: bool = False) -> str:
+    """Render a row/col grid of strings as CSV text with a UTF-8 BOM prefix (required
+    for Excel to open Khmer text correctly). Optionally converts Khmer digits to
+    Arabic first."""
     buf = io.StringIO()
     buf.write("﻿")  # UTF-8 BOM — required for Excel to open Khmer text correctly
     writer = csv.writer(buf)
@@ -160,6 +166,9 @@ def _sanitize_sheet_name(table_id: str, used: set[str]) -> str:
 
 
 def tables_to_xlsx(tables: list[tuple[str, list[list[str]]]], convert_numerals: bool = False) -> bytes:
+    """Build an XLSX workbook with one sheet per non-blank table, named from each
+    table's id (sanitized/de-duped for Excel's sheet-name rules). Returns the
+    workbook's bytes."""
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # default sheet; only keep sheets for non-blank tables
     used_names: set[str] = set()

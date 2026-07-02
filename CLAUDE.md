@@ -25,10 +25,12 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `use_container_width=True`.
 
 ## Code conventions
-- `src/khmer_pipeline/*.py` modules use **no docstrings** — short `#`
-  comments only, and only when the *why* isn't obvious from the code
-  (e.g. a non-obvious axis-swap, a workaround for a library bug). Match
-  this convention in new code in these files.
+- `src/khmer_pipeline/*.py` modules require concise docstrings (1–3
+  lines: what it does, key args, return) on **public** functions.
+  Private `_`-prefixed helpers don't need them. Keep using short `#`
+  comments for the non-obvious *why* (e.g. a non-obvious axis-swap, a
+  workaround for a library bug). Match this convention in new code in
+  these files.
 - Tunable numeric thresholds get extracted as module-level
   `_UPPER_SNAKE_CASE` constants near their point of use (e.g.
   `_DESKEW_MIN_ANGLE_DEG`, `_TABLE_BG_MIN_VALUE`,

@@ -6,6 +6,7 @@ CLI:
     uv run python -m khmer_pipeline.generate_synthetic_documents \\
         [--output-dir ./synthetic_documents] [--font all] [--count 3]
 """
+from __future__ import annotations
 
 import argparse
 import json
