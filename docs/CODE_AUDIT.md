@@ -108,32 +108,37 @@ Out-of-surgical-scope, documented as a prioritized backlog:
 
 ---
 
-## 6. Proposed Directory Restructuring (→ REPORT section; do NOT execute now)
+## 6. Directory Restructuring — IMPLEMENTED 2026-07-02
 
-`src/khmer_pipeline/` is **32 flat modules**, plus a separate top-level `scripts/` (10) and 2 root apps
-(`app.py`, `lab.py`) — this flatness is what reads as "too many files / non-standard." Proposed grouping
-(future work, high import/test-breakage risk → not executed):
+> **Status:** executed on branch `chore/restructure-src-layout` (commit `5797bbe`). The flat 32-module
+> package was split into functional sub-packages; 24 files `git mv`'d (history preserved), all imports
+> rewritten, 377 tests green, import + CLI smoke checks pass. Core stages kept at top level.
 
-| Sub-package | Modules |
+**As-built layout:**
+
+| Location | Modules |
 |---|---|
+| (top level) | models, model_config, pipeline, ingest, preprocess, postprocess, export |
 | `engines/` | surya, tesseract_engine, hybrid_engine, engine_registry, protocols, layout_detect, slanet_structure, table_stitch, table_merge_pages |
-| `pipeline/` | ingest, preprocess, postprocess, export, models, pipeline |
-| `eval/` | run_benchmark, evaluate_structure, evaluate_judge, analyze_benchmark, visualize_benchmark |
+| `evaluation/` | run_benchmark, analyze_benchmark, visualize_benchmark, evaluate_structure, evaluate_judge |
 | `datagen/` | generate_synthetic_tables, generate_synthetic_documents, generate_degraded, harvest_ground_truth, inspect_pdf |
-| `cli/` | consolidate the 10 loose `scripts/*.py` + CLI entry points |
-| (root utils) | device, memory, model_config, backend_status, fonts, khmer_normalize |
+| `utils/` | device, memory, backend_status, fonts, khmer_normalize |
 
-**Coherence smell to note:** overlap between `src/` eval modules and `scripts/` eval scripts (e.g.
-`scripts/eval_document.py` / `eval_recognizers.py` / `eval_notable_page.py` vs `run_benchmark.py` +
-`evaluate_structure.py`). **Only low-risk consolidation now if time permits:** move the loose
-`scripts/*.py` into a unified `cli/` folder.
+Named `evaluation/` (not `eval/`) to avoid shadowing the builtin and the repo-root `eval/` datasets dir.
+**CLI `-m` paths changed** for the moved modules (e.g. `khmer_pipeline.evaluation.run_benchmark`,
+`khmer_pipeline.datagen.inspect_pdf`); `khmer_pipeline.pipeline` is unchanged.
+
+**Not done (deferred):** the root `app.py`/`lab.py` and top-level `scripts/` were left in place (a `cli/`
+consolidation of the loose scripts is optional future work). **Coherence smell still open:** overlap
+between `evaluation/` modules and `scripts/` eval scripts (`scripts/eval_document.py` etc.).
 
 ---
 
 ## Appendix — per-file raw data
 
 `pub` = public funcs/methods · `doc` = how many have docstrings · `.get` = dict-access count ·
-`fut` = has `from __future__ import annotations`.
+`fut` = has `from __future__ import annotations`. *(Paths below are pre-restructure — see §6 for the
+current sub-package locations.)*
 
 ### src/khmer_pipeline
 | file | pub | doc | .get | fut |
