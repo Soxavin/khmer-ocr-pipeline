@@ -13,6 +13,16 @@ the per-page tables into document tables, then reports:
 Add --preprocess to run the same preprocess() the product applies (matches
 app.py/pipeline.py); default is raw images (see PROJECT_LOG §2.25).
 
+When --preprocess is set, one (and only one) leave-one-out flag may also be
+given to flip a single PreprocessConfig field off while leaving the other four
+on — used for the E1 component-isolation ablation (PROJECT_LOG §2.25 confound):
+  --no-deskew        deskew=False
+  --no-sharpen        sharpen=False
+  --no-normalise      normalise=False (CLAHE contrast)
+  --no-remove-stamps  remove_stamps=False
+  --no-table-bg       normalise_table_backgrounds=False (HSV cell desaturation)
+These flags are no-ops without --preprocess.
+
 NOTE: scored numbers are only meaningful once you have verified the drafted GT
 (see scripts/draft_document_gt.py). Until then treat them as provisional.
 """
@@ -32,8 +42,23 @@ from khmer_pipeline.evaluation.evaluate_structure import evaluate_table, pred_ta
 _REAL_DIR = Path("eval/datasets/real")
 _DEFAULT_STEM = "តារាងតម្លៃទំនិញតាមទីផ្សារមួយចំនួននៅរាជធានីភ្នំពេញ-ប្រចាំថ្ងៃ-09.06.26"
 
+# CLI flag -> PreprocessConfig field, for the E1 leave-one-out ablation.
+_ABLATION_FLAGS = {
+    "--no-deskew": "deskew",
+    "--no-sharpen": "sharpen",
+    "--no-normalise": "normalise",
+    "--no-remove-stamps": "remove_stamps",
+    "--no-table-bg": "normalise_table_backgrounds",
+}
 
-def _load_pages(stem: str, do_preprocess: bool = False) -> PreprocessResult:
+
+def _build_preprocess_config(argv: list[str]) -> PreprocessConfig:
+    """Build a PreprocessConfig with all flags on except any --no-<flag> in argv."""
+    overrides = {field: False for flag, field in _ABLATION_FLAGS.items() if flag in argv}
+    return PreprocessConfig(**overrides)
+
+
+def _load_pages(stem: str, do_preprocess: bool = False, config: PreprocessConfig | None = None) -> PreprocessResult:
     # Default (raw) matches the historical §2.24 A/B. --preprocess runs the same
     # preprocess() the product (app.py/pipeline.py) applies, so eval reflects
     # production conditions (see PROJECT_LOG §2.25).
@@ -43,7 +68,7 @@ def _load_pages(stem: str, do_preprocess: bool = False) -> PreprocessResult:
         images.extend(ingest(Path(p).read_bytes(), Path(p).name, dpi=200).page_images)
     if do_preprocess:
         ing = IngestResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
-        return preprocess(ing, PreprocessConfig())
+        return preprocess(ing, config or PreprocessConfig())
     return PreprocessResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
 
 
@@ -60,13 +85,21 @@ def main() -> int:
     positional = [a for a in sys.argv[1:] if not a.startswith("--")]
     stem = positional[0] if positional else _DEFAULT_STEM
     engine = getattr(ACTIVE_OCR_ENGINE, "__name__", "ocr")
-    pre = _load_pages(stem, do_preprocess=do_preprocess)
+    config = _build_preprocess_config(sys.argv[1:]) if do_preprocess else None
+    pre = _load_pages(stem, do_preprocess=do_preprocess, config=config)
     if not pre.page_images:
         print(f"No page PNGs for stem: {stem}")
         return 1
-    print(f"engine={engine}  pages={pre.page_count}  preprocess={'on' if do_preprocess else 'off'}")
+    ablation_note = ""
+    if do_preprocess:
+        off = [field for flag, field in _ABLATION_FLAGS.items() if flag in sys.argv]
+        ablation_note = f"  ablation_off={off or 'none (all-on)'}"
+    print(f"engine={engine}  pages={pre.page_count}  preprocess={'on' if do_preprocess else 'off'}{ablation_note}")
 
     result = ACTIVE_OCR_ENGINE(pre)
+    print("\n--- per-page Table region counts (fragmentation signal) ---")
+    for p in result.pages:
+        print(f"    page{p.page_index + 1}: Tables_Found={len(p.tables)}")
     per_page_tables = sum(len(p.tables) for p in result.pages)
     per_page_rows = sum(len(pred_table_grid(t)) for p in result.pages for t in p.tables)
 
