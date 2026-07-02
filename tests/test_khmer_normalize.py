@@ -1,6 +1,6 @@
 from __future__ import annotations
 import unicodedata
-from khmer_pipeline.khmer_normalize import normalize_khmer
+from khmer_pipeline.utils.khmer_normalize import normalize_khmer
 
 # --- character constants (chr resolves at module load) ---
 _KO = chr(0x1780)        # ក base consonant

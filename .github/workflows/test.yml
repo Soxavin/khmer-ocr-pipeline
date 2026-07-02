@@ -25,4 +25,4 @@ jobs:
         run: uv run pytest -q --tb=short
 
       - name: Compile check
-        run: python3 -m py_compile app.py src/khmer_pipeline/*.py
+        run: python3 -m py_compile app.py $(find src/khmer_pipeline -name '*.py')

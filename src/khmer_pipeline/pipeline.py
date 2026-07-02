@@ -13,10 +13,10 @@ from pathlib import Path
 
 from .ingest import ingest
 from .preprocess import preprocess, PreprocessConfig
-from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
+from .engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from .export import export
 from .model_config import ANOMALY_THRESHOLD
-from .memory import clear_device_cache
+from .utils.memory import clear_device_cache
 
 def run(
     source_path: str | Path,

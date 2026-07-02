@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from khmer_pipeline.generate_degraded import degrade_page
+from khmer_pipeline.datagen.generate_degraded import degrade_page
 
 
 def _img() -> np.ndarray:

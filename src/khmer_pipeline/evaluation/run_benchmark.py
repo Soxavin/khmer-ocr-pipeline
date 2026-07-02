@@ -8,12 +8,12 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .ingest import ingest
-from .models import PreprocessResult
-from .preprocess import preprocess, PreprocessConfig
-from .engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
+from ..ingest import ingest
+from ..models import PreprocessResult
+from ..preprocess import preprocess, PreprocessConfig
+from ..engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document, pool_gt_text, pool_pred_text
-from .memory import clear_device_cache
+from ..utils.memory import clear_device_cache
 from .analyze_benchmark import summarize
 
 _EVAL_ROOT = Path("eval")

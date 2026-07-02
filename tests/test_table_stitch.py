@@ -1,5 +1,5 @@
 from __future__ import annotations
-from khmer_pipeline.table_stitch import merge_table_regions, merge_table_rowbands
+from khmer_pipeline.engines.table_stitch import merge_table_regions, merge_table_rowbands
 
 # Real page-2 fragmentation: one table shattered into a 2 row-band x 4 col-group
 # grid of 8 boxes that tile the contiguous rectangle (30,220)-(1970,1960).

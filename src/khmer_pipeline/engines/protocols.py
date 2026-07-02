@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Callable, Optional, Protocol
-from .models import PreprocessResult, SuryaResult, PostprocessResult
+from ..models import PreprocessResult, SuryaResult, PostprocessResult
 
 class OCREngine(Protocol):
     """Interface for Stage 3: Layout, Text OCR, and Table Recognition."""

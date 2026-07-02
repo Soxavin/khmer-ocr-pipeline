@@ -30,7 +30,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.surya import _get_predictors
+from khmer_pipeline.engines.surya import _get_predictors
 
 # Real GDDE market-price PDF; page index 1 (page 2) is the dense table Surya
 # fragments into ~8 regions (docs/PROJECT_LOG.md §2.12).

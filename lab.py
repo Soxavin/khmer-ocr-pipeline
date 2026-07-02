@@ -26,16 +26,16 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw
 
-from khmer_pipeline.evaluate_structure import evaluate_table, pred_table_grid
+from khmer_pipeline.evaluation.evaluate_structure import evaluate_table, pred_table_grid
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.layout_detect import detect_table_boxes
-from khmer_pipeline.memory import clear_device_cache
+from khmer_pipeline.engines.layout_detect import detect_table_boxes
+from khmer_pipeline.utils.memory import clear_device_cache
 from khmer_pipeline.models import IngestResult, PreprocessResult, SuryaResult
 from khmer_pipeline.preprocess import PreprocessConfig, preprocess
-from khmer_pipeline.slanet_structure import predict_cells
-from khmer_pipeline.surya import preload_models, run_surya
-from khmer_pipeline.hybrid_engine import run_hybrid
-from khmer_pipeline.table_merge_pages import merge_document_tables
+from khmer_pipeline.engines.slanet_structure import predict_cells
+from khmer_pipeline.engines.surya import preload_models, run_surya
+from khmer_pipeline.engines.hybrid_engine import run_hybrid
+from khmer_pipeline.engines.table_merge_pages import merge_document_tables
 
 # lab.py calls run_surya / run_hybrid directly rather than using
 # engine_registry.ACTIVE_OCR_ENGINE because the registry exposes ONE active

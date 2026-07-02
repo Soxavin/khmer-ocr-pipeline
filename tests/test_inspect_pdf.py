@@ -7,7 +7,7 @@ from pathlib import Path
 import fitz
 import pytest
 
-from khmer_pipeline.inspect_pdf import (
+from khmer_pipeline.datagen.inspect_pdf import (
     inspect_pdf,
     _khmer_char_count,
     _latin_char_count,

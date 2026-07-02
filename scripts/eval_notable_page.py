@@ -14,9 +14,9 @@ import fitz
 import numpy as np
 
 from khmer_pipeline.models import PreprocessResult
-from khmer_pipeline.surya import run_surya
-from khmer_pipeline.hybrid_engine import run_hybrid
-from khmer_pipeline.evaluate_structure import evaluate_document
+from khmer_pipeline.engines.surya import run_surya
+from khmer_pipeline.engines.hybrid_engine import run_hybrid
+from khmer_pipeline.evaluation.evaluate_structure import evaluate_document
 
 _PDF = Path("sample_data/CambodiaBudgetExecutioninApr-2024.pdf")
 _PAGE = 1  # 0-indexed → page 2

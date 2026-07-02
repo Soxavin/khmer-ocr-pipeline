@@ -6,9 +6,9 @@ import warnings
 from html.parser import HTMLParser
 from typing import Callable, Optional
 from PIL import Image
-from .models import PreprocessResult, SuryaResult, SuryaPageResult, Cell, Table, TextBlock
-from .device import configure_runtime
-from .model_config import CONFIDENCE_LOW
+from ..models import PreprocessResult, SuryaResult, SuryaPageResult, Cell, Table, TextBlock
+from ..utils.device import configure_runtime
+from ..model_config import CONFIDENCE_LOW
 from .table_stitch import merge_table_regions, merge_table_rowbands
 
 _BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)

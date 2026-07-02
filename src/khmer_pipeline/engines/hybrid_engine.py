@@ -4,12 +4,12 @@ from typing import Callable, Optional
 import numpy as np
 from PIL import Image
 
-from .models import PreprocessResult, SuryaResult, SuryaPageResult
+from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from .table_stitch import merge_table_regions
 from .slanet_structure import predict_cells
 from .layout_detect import detect_table_boxes
 from .surya import run_surya, _get_predictors, _parse_html_table, _build_table_from_grid
-from .memory import clear_device_cache
+from ..utils.memory import clear_device_cache
 
 # Hybrid OCR engine: SLANet for table STRUCTURE (unified grid + per-cell coords),
 # Surya for RECOGNITION. Two modes (KHMER_HYBRID_MODE):

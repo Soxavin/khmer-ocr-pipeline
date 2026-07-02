@@ -95,7 +95,7 @@ def evaluate_ocr_quality(
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python -m khmer_pipeline.evaluate_judge <image_path> <extracted_text_or_txt_file>")
+        print("Usage: python -m khmer_pipeline.evaluation.evaluate_judge <image_path> <extracted_text_or_txt_file>")
         sys.exit(1)
 
     image_path = sys.argv[1]

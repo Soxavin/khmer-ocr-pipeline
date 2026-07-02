@@ -2,7 +2,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 import numpy as np
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
-from khmer_pipeline.surya import run_surya, _parse_html_table, _find_matching_html
+from khmer_pipeline.engines.surya import run_surya, _parse_html_table, _find_matching_html
 
 
 def _make_preprocess_result(n_pages: int = 2) -> PreprocessResult:
@@ -72,46 +72,46 @@ def _make_predictors(with_table: bool = False):
 # --- Contract tests ---
 
 def test_run_surya_returns_surya_result():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     assert isinstance(r, SuryaResult)
 
 
 def test_run_surya_preserves_source_name():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     assert r.source_name == "ardb.pdf"
 
 
 def test_run_surya_page_count_matches():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=3))
     assert len(r.pages) == 3
 
 
 def test_run_surya_pages_are_surya_page_result():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     for page in r.pages:
         assert isinstance(page, SuryaPageResult)
 
 
 def test_run_surya_page_index_is_zero_based():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=2))
     assert r.pages[0].page_index == 0
     assert r.pages[1].page_index == 1
 
 
 def test_run_surya_text_blocks_is_list_of_dicts():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     assert isinstance(r.pages[0].text_blocks, list)
     assert all(isinstance(b, dict) for b in r.pages[0].text_blocks)
 
 
 def test_run_surya_block_has_required_keys():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     block = r.pages[0].text_blocks[0]
     for key in ("label", "bbox", "polygon", "reading_order"):
@@ -119,31 +119,31 @@ def test_run_surya_block_has_required_keys():
 
 
 def test_run_surya_ocr_text_is_str():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     assert isinstance(r.pages[0].ocr_text, str)
 
 
 def test_run_surya_ocr_text_contains_khmer():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result())
     assert "ខ្មែរ" in r.pages[0].ocr_text
 
 
 def test_run_surya_no_tables_gives_empty_list():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=False)):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors(with_table=False)):
         r = run_surya(_make_preprocess_result())
     assert r.pages[0].tables == []
 
 
 def test_run_surya_with_table_gives_non_empty_list():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result())
     assert len(r.pages[0].tables) == 1
 
 
 def test_run_surya_table_dict_has_required_keys():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result())
     table = r.pages[0].tables[0]
     for key in ("rows", "cols", "cells", "image_bbox", "bbox"):
@@ -152,7 +152,7 @@ def test_run_surya_table_dict_has_required_keys():
 
 def test_table_bbox_is_page_space_layout_bbox():
     # tbl['bbox'] must be the page-space bbox of the Table layout region.
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors(with_table=True)):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors(with_table=True)):
         r = run_surya(_make_preprocess_result(n_pages=1))
     table = r.pages[0].tables[0]
     assert table["bbox"] == [10.0, 60.0, 200.0, 150.0]
@@ -177,7 +177,7 @@ def test_table_cells_get_ocr_text():
 
     rec_pred = MagicMock(return_value=[page_ocr])
 
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
@@ -188,7 +188,7 @@ def test_table_cells_get_ocr_text():
 
 def test_region_label_in_text_blocks():
     """Every text block must have a 'region_label' key."""
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
     assert r.pages[0].text_blocks, "Expected at least one text block"
     for block in r.pages[0].text_blocks:
@@ -197,7 +197,7 @@ def test_region_label_in_text_blocks():
 
 def test_ocr_text_has_no_region_labels():
     """ocr_text must be plain text — layout label names must not appear as prefixes."""
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
     ocr_text = r.pages[0].ocr_text
     for label in ("Text:", "Table:", "Title:", "Figure:", "Caption:", "Picture:"):
@@ -231,7 +231,7 @@ def test_per_region_ocr_batched_in_single_call():
     page_ocr.blocks = [block1, block2]
     rec_pred = MagicMock(return_value=[page_ocr])
 
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
@@ -272,16 +272,16 @@ def test_multiple_tables_built_from_html():
 
     # Disable table stitching: this test exercises HTML→table building, not the
     # layout-region merge (these two stacked regions would otherwise be merged).
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)), \
-         patch("khmer_pipeline.surya._stitch_enabled", return_value=False):
+         patch("khmer_pipeline.engines.surya._stitch_enabled", return_value=False):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
     assert len(r.pages[0].tables) == 2
 
 
 def test_run_surya_warnings_empty_when_no_issues():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
     assert r.warnings == []
 
@@ -304,7 +304,7 @@ def test_low_confidence_block_emits_warning():
     page_ocr.blocks = [_make_low_confidence_block_mock(0)]
     rec_pred = MagicMock(return_value=[page_ocr])
 
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
@@ -312,7 +312,7 @@ def test_low_confidence_block_emits_warning():
 
 
 def test_high_confidence_blocks_emit_no_warning():
-    with patch("khmer_pipeline.surya._get_predictors", return_value=_make_predictors()):
+    with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))
     assert not any("low OCR confidence" in w for w in r.warnings)
 
@@ -352,7 +352,7 @@ def test_flat_text_fallback_when_vlm_omits_table_tag():
     page_ocr.blocks = [table_block]
     rec_pred = MagicMock(return_value=[page_ocr])
 
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 
@@ -393,7 +393,7 @@ def test_table_cells_not_shifted_by_extra_html_row():
     page_ocr.blocks = [table_block]
     rec_pred = MagicMock(return_value=[page_ocr])
 
-    with patch("khmer_pipeline.surya._get_predictors",
+    with patch("khmer_pipeline.engines.surya._get_predictors",
                return_value=(layout_pred, rec_pred)):
         r = run_surya(_make_preprocess_result(n_pages=1))
 

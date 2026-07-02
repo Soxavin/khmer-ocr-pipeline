@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import openpyxl
 from .models import PostprocessResult, ExportResult, Table, Cell
-from .table_merge_pages import merge_document_tables
+from .engines.table_merge_pages import merge_document_tables
 
 _XLSX_SHEET_NAME_ILLEGAL = set("[]:*?/\\")
 _XLSX_SHEET_NAME_MAX_LEN = 31

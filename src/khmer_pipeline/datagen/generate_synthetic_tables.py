@@ -10,7 +10,7 @@ try:
 except ImportError:
     sync_playwright = None  # type: ignore[assignment]
 
-from .fonts import font_face_style_tag
+from ..utils.fonts import font_face_style_tag
 
 _FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
 _DEFAULT_COUNT = 3

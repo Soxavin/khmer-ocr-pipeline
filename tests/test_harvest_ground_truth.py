@@ -7,7 +7,7 @@ from pathlib import Path
 import fitz
 import pytest
 
-from khmer_pipeline.harvest_ground_truth import harvest
+from khmer_pipeline.datagen.harvest_ground_truth import harvest
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from types import SimpleNamespace
-from khmer_pipeline.table_merge_pages import merge_document_tables
-from khmer_pipeline.evaluate_structure import pred_table_grid
+from khmer_pipeline.engines.table_merge_pages import merge_document_tables
+from khmer_pipeline.evaluation.evaluate_structure import pred_table_grid
 
 _H = ["ល.រ", "មុខទំនិញ", "តម្លៃ"]
 

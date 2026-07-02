@@ -24,9 +24,9 @@ from PIL import Image
 
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import PreprocessResult
-from khmer_pipeline.surya import run_surya, _get_predictors, _html_to_text, _parse_html_table
-from khmer_pipeline.table_stitch import merge_table_regions
-from khmer_pipeline.slanet_structure import predict_cells
+from khmer_pipeline.engines.surya import run_surya, _get_predictors, _html_to_text, _parse_html_table
+from khmer_pipeline.engines.table_stitch import merge_table_regions
+from khmer_pipeline.engines.slanet_structure import predict_cells
 
 _DEFAULT_PAGE = ("eval/datasets/real/"
                  "តារាងតម្លៃទំនិញតាមទីផ្សារមួយចំនួននៅរាជធានីភ្នំពេញ-ប្រចាំថ្ងៃ-09.06.26_p2.png")

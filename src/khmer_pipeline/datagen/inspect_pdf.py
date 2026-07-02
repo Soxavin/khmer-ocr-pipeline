@@ -1,7 +1,7 @@
 """Diagnose real PDFs: text layer presence, Unicode vs legacy Khmer encoding, scanned/image-only.
 
 CLI:
-    python -m khmer_pipeline.inspect_pdf <path-to-pdf-or-dir> [--output inspect_report.json]
+    python -m khmer_pipeline.datagen.inspect_pdf <path-to-pdf-or-dir> [--output inspect_report.json]
 """
 
 from __future__ import annotations

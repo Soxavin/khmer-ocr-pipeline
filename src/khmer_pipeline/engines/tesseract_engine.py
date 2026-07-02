@@ -1,7 +1,7 @@
 from __future__ import annotations
 import warnings as _warnings
 from typing import Any, Callable, Optional
-from .models import PreprocessResult, SuryaPageResult, SuryaResult
+from ..models import PreprocessResult, SuryaPageResult, SuryaResult
 
 _TESSERACT_LANG = "khm"
 

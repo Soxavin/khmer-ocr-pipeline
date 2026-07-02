@@ -14,13 +14,13 @@ from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
-from khmer_pipeline.surya import preload_models
+from khmer_pipeline.engines.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
-from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
+from khmer_pipeline.engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export, grid_to_csv, tables_to_xlsx
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
-from khmer_pipeline.memory import clear_device_cache  # NEW: Memory management import
-from khmer_pipeline.backend_status import llama_server_running
+from khmer_pipeline.utils.memory import clear_device_cache  # NEW: Memory management import
+from khmer_pipeline.utils.backend_status import llama_server_running
 
 # Effective-page threshold (pages x DPI/200) above which a soft "large job" warning
 # shows. Stress test (10 pages @ 300 DPI, effective 15) showed NO memory distress

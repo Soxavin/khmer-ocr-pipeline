@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from khmer_pipeline.run_benchmark import (
+from khmer_pipeline.evaluation.run_benchmark import (
     _default_run_dir,
     _done_keys,
     _engine_name,
@@ -18,14 +18,14 @@ from khmer_pipeline.run_benchmark import (
     _DEFAULT_DATASETS,
 )
 from khmer_pipeline.models import IngestResult, PreprocessResult
-from khmer_pipeline.analyze_benchmark import summarize
+from khmer_pipeline.evaluation.analyze_benchmark import summarize
 
 
 def test_engine_name(monkeypatch):
     def fake_ocr(pre):
         pass
     fake_ocr.__name__ = "run_fake"
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr)
     assert _engine_name() == "run_fake"
 
 
@@ -33,7 +33,7 @@ def test_engine_name_fallback(monkeypatch):
     # object with no __name__ falls back to "ocr"
     class NoName:
         pass
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.ACTIVE_OCR_ENGINE", NoName())
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ACTIVE_OCR_ENGINE", NoName())
     assert _engine_name() == "ocr"
 
 
@@ -204,16 +204,16 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
 
     fake_ocr_engine.__name__ = "run_fake"
 
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.ingest", fake_ingest)
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr_engine)
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_table", lambda pred, gt_grid: canned_table_metrics)
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_text", lambda text, pred, gt: canned_text_metrics)
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.evaluate_document", lambda text, pred, gt: {"document_cer": 0.123})
-    monkeypatch.setattr("khmer_pipeline.run_benchmark.clear_device_cache", lambda: None)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ingest", fake_ingest)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr_engine)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_table", lambda pred, gt_grid: canned_table_metrics)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_text", lambda text, pred, gt: canned_text_metrics)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_document", lambda text, pred, gt: {"document_cer": 0.123})
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.clear_device_cache", lambda: None)
 
     run_dir = tmp_path / "run"
 
-    from khmer_pipeline.run_benchmark import run_benchmark
+    from khmer_pipeline.evaluation.run_benchmark import run_benchmark
     run_benchmark([data_dir], run_dir=run_dir)
 
     # run dir must exist and contain the three artifacts

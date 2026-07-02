@@ -40,7 +40,7 @@ Surya row-strip recognition) for dense fragmented tables — selected via the `O
 ## Quickstart
 
 **Prerequisites:** Python ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/). The pipeline is **cross-platform**
-and auto-selects its compute device (`src/khmer_pipeline/device.py`): **CUDA** on NVIDIA, **MPS** on Apple
+and auto-selects its compute device (`src/khmer_pipeline/utils/device.py`): **CUDA** on NVIDIA, **MPS** on Apple
 Silicon, **CPU** otherwise. On Apple Silicon, `source setup-metal-macos.sh` additionally enables Surya's
 faster llama.cpp **Metal** backend. Tesseract with the `khm` language pack is optional (only for the
 Tesseract engine); on Linux, the Docker image below bundles it.

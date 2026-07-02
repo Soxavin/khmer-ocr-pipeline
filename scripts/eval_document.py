@@ -25,9 +25,9 @@ from pathlib import Path
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import IngestResult, PreprocessResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
-from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE
-from khmer_pipeline.table_merge_pages import merge_document_tables, _rows, _row_sig
-from khmer_pipeline.evaluate_structure import evaluate_table, pred_table_grid
+from khmer_pipeline.engines.engine_registry import ACTIVE_OCR_ENGINE
+from khmer_pipeline.engines.table_merge_pages import merge_document_tables, _rows, _row_sig
+from khmer_pipeline.evaluation.evaluate_structure import evaluate_table, pred_table_grid
 
 _REAL_DIR = Path("eval/datasets/real")
 _DEFAULT_STEM = "តារាងតម្លៃទំនិញតាមទីផ្សារមួយចំនួននៅរាជធានីភ្នំពេញ-ប្រចាំថ្ងៃ-09.06.26"

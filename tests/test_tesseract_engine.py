@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from khmer_pipeline.models import PreprocessResult, SuryaResult
-from khmer_pipeline.tesseract_engine import (
+from khmer_pipeline.engines.tesseract_engine import (
     _import_pytesseract,
     _dicts_to_words,
     _build_text_blocks,
@@ -50,7 +50,7 @@ def fake_pytesseract(monkeypatch):
     """Replace _import_pytesseract with one that returns a fake module."""
     fake = _make_fake_pytesseract(TWO_LINE_DATA)
     monkeypatch.setattr(
-        "khmer_pipeline.tesseract_engine._import_pytesseract",
+        "khmer_pipeline.engines.tesseract_engine._import_pytesseract",
         lambda: fake,
     )
     return fake
@@ -66,7 +66,7 @@ def test_import_pytesseract_raises_clear_error(monkeypatch):
             "Install with: brew install tesseract tesseract-lang"
         )
     monkeypatch.setattr(
-        "khmer_pipeline.tesseract_engine._import_pytesseract", fake_import
+        "khmer_pipeline.engines.tesseract_engine._import_pytesseract", fake_import
     )
     with pytest.raises(ImportError, match="brew install tesseract"):
         run_tesseract(_make_preprocess_result())
@@ -240,7 +240,7 @@ def test_run_tesseract_swallows_page_errors(monkeypatch):
         Output=SimpleNamespace(DICT="dict"),
     )
     monkeypatch.setattr(
-        "khmer_pipeline.tesseract_engine._import_pytesseract",
+        "khmer_pipeline.engines.tesseract_engine._import_pytesseract",
         lambda: fake,
     )
     r = run_tesseract(_make_preprocess_result(n_pages=2))

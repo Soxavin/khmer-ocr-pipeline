@@ -25,13 +25,13 @@ from pathlib import Path
 
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.models import PreprocessResult
-from khmer_pipeline.engine_registry import ACTIVE_OCR_ENGINE
-from khmer_pipeline.evaluate_structure import (
+from khmer_pipeline.engines.engine_registry import ACTIVE_OCR_ENGINE
+from khmer_pipeline.evaluation.evaluate_structure import (
     evaluate_recognition,
     pool_gt_recognition_text,
     pool_pred_text,
 )
-from khmer_pipeline.memory import clear_device_cache
+from khmer_pipeline.utils.memory import clear_device_cache
 
 _REAL = Path("eval/datasets/real")
 _RUNS = Path("eval/runs")

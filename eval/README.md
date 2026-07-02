@@ -12,7 +12,7 @@ eval/
 │   └── synthetic_documents/         # full-page document images (from generate_synthetic_documents)
 └── runs/                            # gitignored
     └── <YYYYMMDD_HHMMSS>_<engine>/  # one folder per benchmark run
-        ├── results.csv              # per-image rows (fixed schema, see run_benchmark.py)
+        ├── results.csv              # per-image rows (fixed schema, see evaluation/run_benchmark.py)
         ├── manifest.json            # provenance record (what / on what / using what / by what)
         └── summary.txt              # captured analyze output for this run
 ```
@@ -27,12 +27,12 @@ Requires Playwright + Chromium (`uv run playwright install chromium` once).
 
 ```bash
 # Isolated table images (5 fonts × N templates × count each)
-uv run python -m khmer_pipeline.generate_synthetic_tables \
+uv run python -m khmer_pipeline.datagen.generate_synthetic_tables \
     --output-dir eval/datasets/synthetic_tables \
     --count 3
 
 # Full-page document images
-uv run python -m khmer_pipeline.generate_synthetic_documents \
+uv run python -m khmer_pipeline.datagen.generate_synthetic_documents \
     --output-dir eval/datasets/synthetic_documents \
     --count 3
 ```
@@ -47,7 +47,7 @@ Both include a **font-load guarantee**: `document.fonts.check()` is called after
 Raw render, free, no API key required:
 
 ```bash
-uv run python -m khmer_pipeline.run_benchmark
+uv run python -m khmer_pipeline.evaluation.run_benchmark
 ```
 
 This creates `eval/runs/<YYYYMMDD_HHMMSS>_<engine>/` containing `results.csv`, `manifest.json`, and `summary.txt`.
@@ -138,16 +138,16 @@ All metrics are computed deterministically from ground truth — no LLM judge, n
 
 ```bash
 # Analyze a specific run directory
-uv run python -m khmer_pipeline.analyze_benchmark eval/runs/20260619_163242_run_surya/
+uv run python -m khmer_pipeline.evaluation.analyze_benchmark eval/runs/20260619_163242_run_surya/
 
 # Analyze a specific CSV
-uv run python -m khmer_pipeline.analyze_benchmark eval/runs/20260619_163242_run_surya/results.csv
+uv run python -m khmer_pipeline.evaluation.analyze_benchmark eval/runs/20260619_163242_run_surya/results.csv
 
 # Default: latest run under eval/runs/ (no args)
-uv run python -m khmer_pipeline.analyze_benchmark
+uv run python -m khmer_pipeline.evaluation.analyze_benchmark
 
 # Compare two runs side by side (per-Engine section shows both)
-uv run python -m khmer_pipeline.analyze_benchmark \
+uv run python -m khmer_pipeline.evaluation.analyze_benchmark \
     eval/runs/20260619_163242_run_surya/ \
     eval/runs/20260620_100000_run_other/
 ```
@@ -161,10 +161,10 @@ the thesis report. `matplotlib` lives in the **dev** extra (`uv sync` resolves i
 
 ```bash
 # One run
-uv run python -m khmer_pipeline.visualize_benchmark eval/runs/<run>/ --out eval/figures
+uv run python -m khmer_pipeline.evaluation.visualize_benchmark eval/runs/<run>/ --out eval/figures
 
 # Two runs (enables the comparison charts)
-uv run python -m khmer_pipeline.visualize_benchmark \
+uv run python -m khmer_pipeline.evaluation.visualize_benchmark \
     eval/runs/<surya_run>/ eval/runs/<tesseract_run>/ --out eval/figures
 ```
 
@@ -208,7 +208,7 @@ eval/datasets/real/
 ### Step 1: Diagnose your PDFs
 
 ```bash
-uv run python -m khmer_pipeline.inspect_pdf path/to/real_docs/ --output inspect_report.json
+uv run python -m khmer_pipeline.datagen.inspect_pdf path/to/real_docs/ --output inspect_report.json
 ```
 
 Each PDF is classified as:
@@ -225,7 +225,7 @@ Thresholds used: `_MIN_TEXT_CHARS=100`, `_UNICODE_KHMER_RATIO=0.5`, `_LEGACY_KHM
 ### Step 2: Harvest born-digital PDFs
 
 ```bash
-uv run python -m khmer_pipeline.harvest_ground_truth path/to/doc.pdf \
+uv run python -m khmer_pipeline.datagen.harvest_ground_truth path/to/doc.pdf \
     --output-dir eval/datasets/real --dpi 200
 ```
 
@@ -253,7 +253,7 @@ This renders each page to `<stem>_p<N>.png` and emits `<stem>_p<N>_ground_truth.
 ### Run benchmark on real documents
 
 ```bash
-uv run python -m khmer_pipeline.run_benchmark --data-dir eval/datasets/real
+uv run python -m khmer_pipeline.evaluation.run_benchmark --data-dir eval/datasets/real
 ```
 
 ---
@@ -261,7 +261,7 @@ uv run python -m khmer_pipeline.run_benchmark --data-dir eval/datasets/real
 ## 9. Conventions
 
 - **Never edit `results.csv` in place.** If a run is wrong, create a new one.
-- **New model = new run folder.** Register it via `engine_registry.py` and run normally.
+- **New model = new run folder.** Register it via `engines/engine_registry.py` and run normally.
 - **Cite results by `run_id`** (folder name) — it encodes the timestamp and engine so references are unambiguous.
 - `eval/datasets/` contents are gitignored — regenerate from the generators above.
 - `eval/runs/` are gitignored — reproduce from the same code + datasets.

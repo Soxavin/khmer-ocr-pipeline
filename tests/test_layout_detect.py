@@ -2,7 +2,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 import numpy as np
-import khmer_pipeline.layout_detect as ld
+import khmer_pipeline.engines.layout_detect as ld
 
 
 def _img() -> np.ndarray:

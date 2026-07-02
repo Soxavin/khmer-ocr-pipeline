@@ -75,15 +75,15 @@ The synthetic generators render HTML with **vendored OFL Khmer fonts** embedded 
 base64 `@font-face` (see `fonts/` and `fonts/MANIFEST.txt`) — no live
 `fonts.googleapis.com` dependency, so datasets regenerate deterministically offline:
 ```bash
-uv run python -m khmer_pipeline.generate_synthetic_tables --output-dir eval/datasets/synthetic_tables
-uv run python -m khmer_pipeline.generate_synthetic_documents --output-dir eval/datasets/synthetic_documents
+uv run python -m khmer_pipeline.datagen.generate_synthetic_tables --output-dir eval/datasets/synthetic_tables
+uv run python -m khmer_pipeline.datagen.generate_synthetic_documents --output-dir eval/datasets/synthetic_documents
 ```
 The generators abort (rather than emit a fallback-font image) if a font fails to load.
 
 ## Two deployment lanes (Mac native vs Docker)
 
 The project runs in **two lanes**, and the compute device is auto-selected by
-`src/khmer_pipeline/device.py` (`configure_runtime()` → `TORCH_DEVICE`):
+`src/khmer_pipeline/utils/device.py` (`configure_runtime()` → `TORCH_DEVICE`):
 
 - **Mac (Apple Silicon) — run natively, no Docker.** Surya runs on the **Metal** GPU and
   the optional Qwen step on **MLX**. macOS containers run Linux in a VM with **no access

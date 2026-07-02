@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import csv
 import pytest
-from khmer_pipeline.visualize_benchmark import (
+from khmer_pipeline.evaluation.visualize_benchmark import (
     _coerce_float,
     _coerce_int,
     _mean,
@@ -308,7 +308,7 @@ def _write_run_csv(run_dir: Path, rows: list[dict]) -> None:
 def test_visualize_empty_rows_writes_no_files(tmp_path, monkeypatch):
     rendered = []
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda *a, **kw: rendered.append(kw.get("out_path")),
     )
     written = visualize([], tmp_path / "out")
@@ -327,7 +327,7 @@ def test_visualize_calls_renderer_for_each_renderable_chart(tmp_path, monkeypatc
     )
     calls = []
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda agg, group_col, series_labels, ylabel, title, out_path: calls.append(out_path.name),
     )
     out = tmp_path / "figures"
@@ -346,7 +346,7 @@ def test_visualize_creates_out_dir(tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
     _write_run_csv(run_dir, [_row()])
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda *a, **kw: None,
     )
     out = tmp_path / "does_not_exist" / "yet"
@@ -359,7 +359,7 @@ def test_visualize_returns_list_of_paths(tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
     _write_run_csv(run_dir, [_row()])
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda *a, **kw: None,
     )
     written = visualize([run_dir], tmp_path / "out")
@@ -377,7 +377,7 @@ def test_visualize_skips_charts_with_no_data(tmp_path, monkeypatch, capsys):
     _write_run_csv(run_dir, rows)
     skipped_charts = []
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda *a, **kw: None,
     )
     written = visualize([run_dir], tmp_path / "out")
@@ -390,7 +390,7 @@ def test_visualize_skips_engine_comparison_for_single_engine(tmp_path, monkeypat
     run_dir = tmp_path / "run"
     _write_run_csv(run_dir, [_row(engine="run_surya")])
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda *a, **kw: None,
     )
     written = visualize([run_dir], tmp_path / "out")
@@ -410,7 +410,7 @@ def test_visualize_renders_correction_ab_for_two_corrected_values(tmp_path, monk
     )
     calls = []
     monkeypatch.setattr(
-        "khmer_pipeline.visualize_benchmark._render_grouped_bars",
+        "khmer_pipeline.evaluation.visualize_benchmark._render_grouped_bars",
         lambda agg, group_col, series_labels, ylabel, title, out_path: calls.append((tuple(series_labels), out_path.name)),
     )
     written = visualize([run_dir], tmp_path / "out")

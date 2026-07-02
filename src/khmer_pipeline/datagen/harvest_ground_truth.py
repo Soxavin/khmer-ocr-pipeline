@@ -1,7 +1,7 @@
 """Extract born-digital PDF pages into eval/datasets/real/ ground-truth pairs.
 
 CLI:
-    python -m khmer_pipeline.harvest_ground_truth <pdf> [--output-dir eval/datasets/real] [--dpi 200]
+    python -m khmer_pipeline.datagen.harvest_ground_truth <pdf> [--output-dir eval/datasets/real] [--dpi 200]
 
 NOTE: harvested GT paragraphs must be hand-verified and tables hand-filled
 with {"data": [[...]]} entries before use in benchmarks.

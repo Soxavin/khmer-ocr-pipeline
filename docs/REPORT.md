@@ -292,6 +292,6 @@ and is a defensible, evidence-backed thesis result.
 ### Appendix — reproducibility
 - Code + decision history: this repo; `PROJECT_LOG.md` (§1–§3), `GLOSSARY.md`, `OPERATIONS.md`,
   `eval/README.md`.
-- Re-run: `uv run python -m khmer_pipeline.run_benchmark` → `analyze_benchmark` →
+- Re-run: `uv run python -m khmer_pipeline.evaluation.run_benchmark` → `analyze_benchmark` →
   `visualize_benchmark`. Each run folder carries a `manifest.json` (git commit, versions, datasets).
 - Engines: `OCR_ENGINE=surya|tesseract|hybrid`. Figures: `docs/figures/`.

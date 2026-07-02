@@ -4,7 +4,7 @@ from .protocols import OCREngine, CorrectionEngine
 from .surya import run_surya
 from .tesseract_engine import run_tesseract
 from .hybrid_engine import run_hybrid
-from .postprocess import postprocess
+from ..postprocess import postprocess
 
 _OCR_ENGINES: dict[str, OCREngine] = {
     "surya": run_surya,

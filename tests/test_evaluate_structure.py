@@ -2,7 +2,7 @@ from __future__ import annotations
 import unicodedata
 import pytest
 
-from khmer_pipeline.evaluate_structure import (
+from khmer_pipeline.evaluation.evaluate_structure import (
     _norm,
     _strip_title_row,
     _align_rows,

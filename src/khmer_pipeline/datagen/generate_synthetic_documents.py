@@ -3,7 +3,7 @@
 Produces *_ground_truth.json + *.png pairs that run_benchmark.py can pick up.
 
 CLI:
-    uv run python -m khmer_pipeline.generate_synthetic_documents \\
+    uv run python -m khmer_pipeline.datagen.generate_synthetic_documents \\
         [--output-dir ./synthetic_documents] [--font all] [--count 3]
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from .fonts import font_face_style_tag
+from ..utils.fonts import font_face_style_tag
 
 _FONTS = ["Noto Sans Khmer", "Battambang", "Hanuman", "Moul", "Fasthand"]
 

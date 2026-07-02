@@ -10,8 +10,8 @@ except ImportError:
 
 from .models import SuryaResult, SuryaPageResult, PostprocessResult, CorrectedPageResult
 from .model_config import ANOMALY_THRESHOLD, STAGE4_MODEL_PATH
-from .memory import clear_device_cache
-from .khmer_normalize import normalize_khmer
+from .utils.memory import clear_device_cache
+from .utils.khmer_normalize import normalize_khmer
 
 # ---------------------------------------------------------------------------
 # Rule table — deliberately empty. Add targeted pairs only after review.

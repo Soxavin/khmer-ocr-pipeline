@@ -2,9 +2,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 import numpy as np
-import khmer_pipeline.hybrid_engine as he
+import khmer_pipeline.engines.hybrid_engine as he
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
-from khmer_pipeline.evaluate_structure import pred_table_grid
+from khmer_pipeline.evaluation.evaluate_structure import pred_table_grid
 
 
 def _preprocess(n_pages: int = 1) -> PreprocessResult:

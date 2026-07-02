@@ -3,9 +3,9 @@
 See `CONTEXT.md` for architecture/data-flow orientation.
 
 ## Workflow
-- After any change to `src/khmer_pipeline/*.py` or `app.py`, run:
+- After any change to `src/khmer_pipeline/**/*.py` or `app.py`, run:
   ```bash
-  uv run pytest -q --tb=short && python3 -m py_compile app.py src/khmer_pipeline/*.py
+  uv run pytest -q --tb=short && python3 -m py_compile app.py $(find src/khmer_pipeline -name '*.py')
   ```
 - This project uses `uv` for dependency management — use `uv add <pkg>`,
   not pip/poetry, and pin upper bounds for ML libraries (e.g.
@@ -17,7 +17,7 @@ See `CONTEXT.md` for architecture/data-flow orientation.
 - This is a 24GB unified-memory M4 Pro Mac running PyTorch (Surya) and
   MLX (Qwen) in the same process. After any new heavy model
   invocation, call `clear_device_cache()` from
-  `src/khmer_pipeline/memory.py` (already wired in after each pipeline
+  `src/khmer_pipeline/utils/memory.py` (already wired in after each pipeline
   stage and after any page where Qwen runs) — use `mx.clear_cache()`,
   not the deprecated `mx.metal.clear_cache()`.
 - Streamlit width: use `width="stretch"` on `st.image`/`st.button`/
@@ -25,7 +25,7 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `use_container_width=True`.
 
 ## Code conventions
-- `src/khmer_pipeline/*.py` modules require concise docstrings (1–3
+- `src/khmer_pipeline/**/*.py` modules require concise docstrings (1–3
   lines: what it does, key args, return) on **public** functions.
   Private `_`-prefixed helpers don't need them. Keep using short `#`
   comments for the non-obvious *why* (e.g. a non-obvious axis-swap, a
@@ -45,11 +45,11 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   (`st.warning`) and `pipeline.py` (`WARNING:` prefix). Don't add new
   ad-hoc UI plumbing for warnings — extend this mechanism.
 - Stage 3 (OCR) and Stage 4 (correction) execution functions are swapped via
-  `engine_registry.py` (see CONTEXT.md "Engine Swappability"). Orchestrators
+  `engines/engine_registry.py` (see CONTEXT.md "Engine Swappability"). Orchestrators
   (`pipeline.py`, `app.py`) must import `ACTIVE_OCR_ENGINE` /
   `ACTIVE_CORRECTION_ENGINE` from there, never `run_surya`/`postprocess`
   directly. State-checking helpers (`models_loaded`, `preload_models`,
-  `qwen_loaded`) are still imported directly from `surya.py`/`postprocess.py`.
+  `qwen_loaded`) are still imported directly from `engines/surya.py`/`postprocess.py`.
 - Multi-page results in `app.py` use the established pagination
   pattern: `st.session_state.current_page_idx` (clamped to
   `[0, total_pages - 1]`, reset on new file upload), a "Jump to page"

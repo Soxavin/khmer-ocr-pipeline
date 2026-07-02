@@ -22,7 +22,7 @@ Like a person reading a page:
 |---|---|---|
 | **1. Ingest** | Turn the PDF into page images | `ingest.py` |
 | **2. Preprocess** | Clean the image (straighten, de-stamp, contrast) | `preprocess.py` |
-| **3. OCR** | Read the page (two sub-steps below) | `surya.py` |
+| **3. OCR** | Read the page (two sub-steps below) | `engines/surya.py` |
 | **4. Post-process** | Tidy/normalize the text | `postprocess.py` |
 | **5. Export** | Save as JSON / CSV | `export.py` |
 
@@ -54,7 +54,7 @@ sub-steps**, and the difference between them is the key to this whole project:
 - **MLX** — Apple's machine-learning framework for running models on Apple-Silicon GPUs.
 - **SLANet** — a small specialist model whose *only* job is to find a table's **grid**
   (row/column count + the coordinates of every cell). New, promising — see §5.
-- **Khmer normalizer** (`khmer_normalize.py`) — deterministic text cleanup: fixes invisible
+- **Khmer normalizer** (`utils/khmer_normalize.py`) — deterministic text cleanup: fixes invisible
   junk characters, Unicode ordering, duplicate marks. This is what replaced Qwen as the
   default post-processing.
 
@@ -72,7 +72,7 @@ in one box and "all the prices" in another — **destroying which value belongs 
 The letters are right (~90%); the **structure** is wrong. That's the bottleneck.
 
 ### What we tried to fix it (the "stitcher" experiments — all documented, all OFF by default)
-- **Geometric stitcher** (`table_stitch.py`) — glue the fragmented boxes back together
+- **Geometric stitcher** (`engines/table_stitch.py`) — glue the fragmented boxes back together
   *before* reading.
   - **Master mode** — glue all into one big box → the VLM choked on the huge crop (worse). ❌
   - **Row-band mode** — glue into full-width horizontal strips → best geometric attempt,
@@ -91,8 +91,8 @@ Khmer text). This is the planned next build.
 
 ## 5. Evaluation & metrics (how we measure "better")
 We score the OCR output against hand-checked **ground truth** using free, deterministic
-metrics (no paid AI judge). Tools: `run_benchmark.py` (runs OCR over a dataset),
-`analyze_benchmark.py` (summarizes numbers), `visualize_benchmark.py` (makes charts).
+metrics (no paid AI judge). Tools: `evaluation/run_benchmark.py` (runs OCR over a dataset),
+`evaluation/analyze_benchmark.py` (summarizes numbers), `evaluation/visualize_benchmark.py` (makes charts).
 
 | Term | Plain meaning | Direction |
 |---|---|---|
@@ -113,7 +113,7 @@ metrics (no paid AI judge). Tools: `run_benchmark.py` (runs OCR over a dataset),
 ---
 
 ## 6. Architecture & workflow concepts
-- **Engine registry** (`engine_registry.py`) — a "swappable socket" so we can switch OCR
+- **Engine registry** (`engines/engine_registry.py`) — a "swappable socket" so we can switch OCR
   engines (`run_surya`, `run_tesseract`, future `hybrid`) via the `OCR_ENGINE` setting without
   touching the rest of the code. Every engine returns the **same shape of result**.
 - **Eval harness** (`eval/`) — datasets + saved benchmark runs. Each run is one timestamped
@@ -141,13 +141,14 @@ metrics (no paid AI judge). Tools: `run_benchmark.py` (runs OCR over a dataset),
 ## 8. Where things live (file map)
 ```
 src/khmer_pipeline/
-  ingest.py / preprocess.py / surya.py / postprocess.py / export.py   # the 5 stages
-  engine_registry.py        # swappable OCR engine socket
-  tesseract_engine.py       # the Tesseract baseline engine
-  khmer_normalize.py        # deterministic Khmer text cleanup
-  table_stitch.py           # the (default-off) fragmentation stitcher experiments
+  ingest.py / preprocess.py / postprocess.py / export.py   # 4 of the 5 stages (top level)
+  engines/surya.py          # the 5th stage: Surya OCR
+  engines/engine_registry.py   # swappable OCR engine socket
+  engines/tesseract_engine.py  # the Tesseract baseline engine
+  utils/khmer_normalize.py  # deterministic Khmer text cleanup
+  engines/table_stitch.py   # the (default-off) fragmentation stitcher experiments
   model_config.py           # model names + tunable thresholds
-  run_benchmark.py / analyze_benchmark.py / visualize_benchmark.py    # evaluation
+  evaluation/run_benchmark.py / analyze_benchmark.py / visualize_benchmark.py    # evaluation
 app.py                      # the Streamlit web UI
 eval/                       # datasets + benchmark runs + eval/README.md
 docs/                       # PROJECT_LOG, OPERATIONS, FINAL_SPRINT_PLAN, this GLOSSARY
@@ -159,8 +160,8 @@ setup-metal-macos.sh / stop-metal-macos.sh   # start/stop the OCR backend
 ```bash
 source setup-metal-macos.sh                      # start the OCR backend (do this first)
 uv run streamlit run app.py                      # launch the web UI
-uv run python -m khmer_pipeline.run_benchmark    # run the benchmark
-uv run python -m khmer_pipeline.analyze_benchmark   # summarize the latest run
+uv run python -m khmer_pipeline.evaluation.run_benchmark    # run the benchmark
+uv run python -m khmer_pipeline.evaluation.analyze_benchmark   # summarize the latest run
 uv run pytest -q                                 # run the test suite
 bash stop-metal-macos.sh                         # stop the OCR backend when done
 ```
