@@ -902,6 +902,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "bleach" },
+    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "openai" },
@@ -916,6 +917,7 @@ dependencies = [
     { name = "rapid-table" },
     { name = "streamlit" },
     { name = "surya-ocr" },
+    { name = "torch" },
     { name = "transformers" },
 ]
 
@@ -929,6 +931,7 @@ dev = [
 requires-dist = [
     { name = "bleach", specifier = ">=6.0" },
     { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.8,<4.0" },
+    { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.31.2,<0.32" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.21" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", specifier = ">=1.0,<2.0" },
@@ -944,6 +947,7 @@ requires-dist = [
     { name = "rapid-table", specifier = ">=3.0,<4.0" },
     { name = "streamlit", specifier = ">=1.35" },
     { name = "surya-ocr", specifier = ">=0.20.0,<0.21" },
+    { name = "torch", specifier = ">=2.12,<2.13" },
     { name = "transformers", specifier = ">=4.56.1,<5.0" },
 ]
 provides-extras = ["dev"]
