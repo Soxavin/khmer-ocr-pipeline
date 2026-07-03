@@ -742,7 +742,9 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   **geometric / resolution normalization**, not deskew / contrast / stamps / color. The §2.25 color-cue
   hypothesis (`normalise_table_backgrounds`) is **falsified**: removing the only color-stripping step
   changes nothing. The mechanism (a too-large dense table makes Surya's layout model tile & fragment it;
-  downscaling merges it into one region) is document-agnostic, so it is *expected* to generalize.
+  downscaling merges it into one region). **⚠ Corrected by §2.28 (E3):** originally framed as
+  document-agnostic / expected to generalize, but a structurally different dense table (CambodiaBudget)
+  does **not** fragment at any resolution — so the effect is **layout-specific, not universal**.
 - **⚠ Variance caveat.** Surya is non-deterministic: all-on scored Cell_Acc **0.179 / 67×11** here vs
   §2.25's **0.259 / 75×9** (same config). The **binary 8→1 fragmentation signal is robust and reproduced**;
   the accuracy point-estimates are **noisy** and must be reported with repeats, not as single numbers.
@@ -753,7 +755,8 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   also sharply improves content on this 2nd doc — Table_CER **0.360 → 0.091**, Recall **0.736 → 0.783**,
   pred dims **144×11 → 75×10** (≈ GT 75×9). The small Cell_Acc dip (0.187→0.170) is a spurious 10th column
   shifting cells, not a content regression. **n=2 generalization of the resolution mechanism confirmed** —
-  across *instances of this template*; cross-*layout* generalization still untested.
+  across *instances of this template*. **Cross-*layout* generalization is now tested in §2.28 (E3) and is
+  NEGATIVE** — the effect does not extend to a structurally different dense-table layout.
 - **15.06.26 GT provenance.** Its ground truth was built by transferring 09.06.26's hand-verified Khmer
   item-names + table structure and injecting 15.06.26's own numeric cells (prices/percentages/dates
   extracted from its text layer). This is valid because the two PDFs share the *same* broken ToUnicode
@@ -790,6 +793,41 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   misrecognized Riel prefix (`#` / `វ` / `អ` `/…` → `៛/…`) could recover a large share of recall for
   near-zero cost — worth trying before the 4–6 week fine-tune. (Extends `postprocess.py` / `khmer_normalize.py`.)
 - Modules: `scripts/recall_taxonomy.py` (new).
+
+### 2.28 Cross-layout fragmentation probe (E3) — the defrag effect is LAYOUT-SPECIFIC, not universal (corrects §2.26)
+
+- **Why.** E1/E2 established the raw→~8, preprocessed→1 collapse and its resolution lever, but only on the
+  market-price *bulletin* template (09/15 = same layout, different dates). Does it generalize to a
+  structurally different dense table? GT-free test — fragmentation = `Tables_Found` from Surya's layout
+  output on pixels, so no ground truth is needed (font-independent).
+- **Method.** `scripts/probe_cambodiabudget_fragmentation.py`: on `CambodiaBudgetExecutioninApr-2024.pdf`
+  dense-table pages (3,4,5,6,8,9), count Surya "Table" layout regions on RAW vs PREPROCESSED images
+  (default all-on config), DPI 200, `OCR_ENGINE=surya`, cache cleared between passes. Variance re-check on
+  page 3 (2 passes, identical).
+- **Result — NO fragmentation on any page, either condition:**
+
+  | page(s) | raw Table-regions | preprocessed | raw long edge |
+  |---|---|---|---|
+  | 3 / 4 / 5 / 6 | 1 | 1 | 4400 px |
+  | 8 / 9 | 1 | 1 | 4151 px |
+
+- **Correction to §2.26.** These pages have raw long edges **4151–4400 px — far above** the 2048 px
+  `_cap_resolution` threshold — yet **do not fragment raw**. So high resolution is NOT *sufficient* to cause
+  fragmentation, and §2.26's "large raw dims → tile → downscale merges → document-agnostic, expected to
+  generalize" was **too strong**. The defrag effect is not a universal dense-table fix — on this layout
+  there is nothing to fix.
+- **Refined mechanism (hypothesis).** Fragmentation is **layout-specific**: the bulletin is a mosaic of
+  many small, individually shaded/colored price cells packed edge-to-edge (plausible sub-structure for
+  Surya's layout tiler to split along at high resolution); the budget-execution table is one bounded
+  uniform grid with no cell-level color fill (nothing to fragment along), regardless of pixel count. So the
+  trigger is a **visual-density / cell-structure pattern interacting with resolution**, not raw pixel count
+  alone. (Downscaling still resolves it *on the bulletin*, per E1 — it just isn't a general fix.)
+- **Thesis consequence.** Scope the claim to *"preprocessing resolves the fragmentation of the dense
+  colored-cell market-bulletin layout"* (validated across 09/15), **not** *"preprocessing fixes dense-table
+  fragmentation in general."*
+- **Open.** Separate visual-structure vs resolution on the bulletin (color-flatten-without-downscale vs
+  downscale-keeping-color); resolution-threshold sweep.
+- Modules: `scripts/probe_cambodiabudget_fragmentation.py` (new).
 
 ---
 
