@@ -23,7 +23,10 @@ recognition of small, isolated Khmer table cells**, not layout detection, which 
 > DocLayout-YOLO 0.135) and recovers the exact 75×9 table shape. So under production conditions Surya
 > handles the structure and the remaining gap is **recognition**; the geometric/hybrid/DocLayout structure
 > work (Sections 4–7) stands as documented negative results but is not needed once preprocessing is on. A
-> full re-narration of the sections below is deferred.
+> full re-narration of the sections below is consolidated in **§4.9** — an ablation + cross-layout + recall
+> analysis showing the fix is *resolution* normalisation (not colour/flags), that it is *layout-specific*
+> (a structurally different dense report does not fragment at all), and that the residual gap is
+> *recognition*, not layout.
 
 ---
 
@@ -138,6 +141,11 @@ order-sensitive, this *reordering* drives the apparent error — not bad OCR. **
 fragmentation is the bottleneck.** See `docs/figures/table_fragmentation.png`.
 
 ### 4.4 The fragmentation investigation (four interventions)
+
+> **⚠ Superseded as the production account (see §4.9):** these interventions were measured on *raw* images;
+> under production preprocessing the dense table no longer fragments, so they are unnecessary — retained
+> here as documented negative results that rule out alternatives.
+
 We attacked fragmentation systematically; all are documented with A/B numbers (PROJECT_LOG
 §2.12–2.17) and kept in the codebase behind flags.
 
@@ -197,6 +205,10 @@ hallucinations — OCR-quality noise left unaddressed, consistent with the inten
 **review-ready draft** the analyst corrects, not a perfect extraction. Net: **hybrid is the engine for
 dense tables and the only one that enables clean stitching; Surya stays strong on mixed content.**
 
+> **⚠ Superseded (§4.9):** under production preprocessing, plain Surya wins on the dense page too and
+> recovers the exact table shape, so the single production default is **Surya + preprocessing**; the hybrid
+> framing here reflects the earlier raw-image analysis and is retained as a documented negative result.
+
 ### 4.8 Off-the-shelf recogniser A/B (recognition axis)
 Separately from *structure*, we measured how well each engine **recognises** Khmer — independent of
 layout — with a placement-agnostic **recognition CER** (all text pooled on each side vs a single-source
@@ -221,6 +233,49 @@ is that **no turnkey off-the-shelf model beats Surya today — the empirical jus
 fine-tuning experiment (§7).** (A data-quality aside: the text page's born-digital layer was a legacy
 Khmer font, unusable as ground truth — see §6.)
 
+### 4.9 The preprocessing confound — what actually drives fragmentation, and how far it generalises
+
+*(Added 2026-07; see `PROJECT_LOG.md` §2.25–2.28. Under production this section supersedes the raw-image
+framing of §4.3–4.7.)*
+
+The results in §4.3–4.7 were measured on **raw** page images, but the product always preprocesses first;
+re-scoring under production conditions changes the picture materially.
+
+**The confound.** With `preprocess()` on, Surya's layout model collapses the dense page-2 table from ~8
+fragments to **one** region, and the engine ranking flips: plain **Surya wins** (Cell_Accuracy 0.259 vs
+hybrid 0.145 / DocLayout-YOLO 0.135) and recovers the exact 75×9 shape. So under production Surya handles
+the structure, and the geometric / hybrid / DocLayout work (§4.4) stands as **documented negative results**
+that is not needed. The shipped app already defaulted to Surya + preprocessing — the deliverable was always
+correct; only the earlier raw-image *narrative* was skewed.
+
+**What in preprocessing does it (ablation).** A component-isolation ablation shows it is **not** the tunable
+OpenCV steps: with preprocessing on, disabling any one of the five flags — deskew, sharpen, contrast,
+stamp-removal, or table-background (colour) normalisation — still yields one region, and disabling **all
+five** still yields one region. The lever is the two **always-on** steps — margin-crop + **downscale to
+≤ 2048 px** — i.e. **resolution normalisation**, not colour or contrast. The original colour-cue hypothesis
+is falsified.
+
+**How far it generalises.** The 8→1 collapse **reproduces on a second bulletin** (15.06.26; Table_CER
+0.360 → 0.091) — but that is the *same layout, different day*. A cross-*layout* test on a structurally
+different dense report (a budget-execution document, pp. 3–9) finds **no fragmentation at all**, in either
+condition, despite raw pages of 4151–4400 px — far above the 2048 px cap. So high resolution is **not
+sufficient** to cause fragmentation; the effect is **layout-specific** — it is the bulletin's mosaic of
+many small, individually-shaded cells that Surya's layout tiler splits along at high resolution, which
+downscaling dissolves. The correctly-scoped claim is therefore *"preprocessing resolves the fragmentation
+of the dense colour-cell market-bulletin layout"* — **not** a universal dense-table fix.
+
+**The residual gap is recognition, not layout.** Under production, ~30–38% of GT cell content is still
+unrecovered. Classifying every miss: **96% are recognition errors** (wrong or blank text on
+correctly-positioned cells), only **4% segmentation** (a few merged rows). Misses concentrate in the unit
+column (51%), driven by a single systematic confusion — the Riel glyph `៛` misread as `#` / `វ` / `អ` —
+plus Khmer subscript-consonant substitutions in item names. This **empirically justifies recogniser
+fine-tuning** as the next lever (§7), and points to a cheap deterministic `៛`-normalisation rule as a
+near-term recall win.
+
+**Caveat.** Accuracy point-estimates are noisy — Surya is non-deterministic (the same config scored 0.179
+vs 0.259 across runs) — so these conclusions rest on the *structural* signals (`Tables_Found`, `Table_CER`),
+not single `Cell_Accuracy` numbers.
+
 ---
 
 ## 5. Discussion
@@ -233,6 +288,10 @@ The headline scientific result is a clean **decomposition of the table-extractio
   0.024→0.393 (§4.4, §2.17), turning the "open limit" into a *recall* problem (blank strips)
   rather than a *correctness* one.
 
+> **⚠ Superseded by §4.9:** under production preprocessing, plain Surya wins on the dense page too and
+> recovers the exact table shape, so the single production default is **Surya + preprocessing**. The
+> hybrid recommendation below reflects the earlier raw-image analysis and is retained for the record.
+
 For financial tables specifically, the metric that matters is `Cell_Accuracy` (row↔value
 correctness), and the practical recommendation today is: **use Surya for clean/single-table pages
 and pages without tables (where it is strong and has no phantom-table cost), and the row-strip
@@ -243,8 +302,11 @@ behaviour on no-table pages.
 ---
 
 ## 6. Limitations
-- **One real labelled document** (3 pages) — real-world numbers are indicative, not statistically
-  robust; more labelled GDDE documents are the highest-value data investment.
+- **Two real labelled documents, one layout** (09.06.26 + 15.06.26 — the same market-bulletin template,
+  6 pages; §4.9) — real-world numbers are indicative, not statistically robust, and cross-*layout*
+  generalisation was tested only GT-free (fragmentation counts on a budget-execution doc, §4.9). More
+  labelled GDDE documents — especially *different* layouts and scanned pages — remain the highest-value
+  data investment.
 - **OCR non-determinism** — Surya output varies slightly run-to-run; we rely on structural metrics
   and fixed-output A/Bs to control for it.
 - **Order-sensitive CER** over-penalises column-wise fragmentation; `Cell_Accuracy` /
@@ -266,7 +328,10 @@ behaviour on no-table pages.
 1. **Khmer recogniser fine-tuning** — the off-the-shelf recogniser A/B is **done** (§4.8): no turnkey
    model beats Surya (Tesseract weaker on tables; Qwen2.5-VL-7B 4-bit collapses; open Khmer-specific
    models are only hobby-grade line recognisers). The justified next step is a **fine-tuning**
-   experiment — a recogniser on real and/or synthetic Khmer word data — to try to beat Surya.
+   experiment — a recogniser on real and/or synthetic Khmer word data — to try to beat Surya. The recall
+   taxonomy (§4.9) reinforces this: **96% of residual misses are recognition, not layout**, concentrated in
+   a systematic `៛`-glyph confusion and Khmer subscript substitutions — so a cheap **deterministic
+   `៛`-normalisation post-processing rule** is a high-leverage near-term recall win *before* the full fine-tune.
 2. **Layout/structure exploration** — a separate A/B on the *detection* axis (DocLayout-YOLO, PaddleOCR
    PP-Structure, more of the PaddlePaddle stack vs Surya-layout + SLANet) targeting table fragmentation.
 3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
