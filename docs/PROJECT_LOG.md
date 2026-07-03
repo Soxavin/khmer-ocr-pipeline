@@ -713,6 +713,51 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 - Modules: `scripts/eval_document.py` (`--preprocess`), `lab.py` (per-page GT scoring), plus this log +
   memory. No `src/` engine change (the product already does the right thing).
 
+### 2.26 Preprocessing ablation (E1) — the fragmentation fix is RESOLUTION normalization, not the OpenCV flags
+
+- **Why.** §2.25 established that preprocessing collapses the dense page-2 layout **8→1** boxes, but not
+  *which* step. Working hypothesis (from the design intent of `normalise_table_backgrounds`): stripping
+  colored-cell cues is what stops the layout model fragmenting. Tested by component isolation.
+- **Method.** Added a per-flag ablation to `scripts/eval_document.py`
+  (`--no-deskew` / `--no-sharpen` / `--no-normalise` / `--no-remove-stamps` / `--no-table-bg`,
+  leave-one-out on top of `--preprocess`) plus per-page `Tables_Found` printing. Scored on the verified
+  75×9 09.06.26 document GT, `OCR_ENGINE=surya`. Committed `d7a9beb`.
+- **Result — leave-one-out (page-2 `Tables_Found = 1` in EVERY preprocessed config):**
+
+  | config | p2 boxes | Cell_Acc | Recall | Table_CER | pred dims |
+  |---|---|---|---|---|---|
+  | raw (no preprocess) | **8** | 0.170 | 0.722 | 0.348 | 145×10 |
+  | all-on | 1 | 0.179 | 0.700 | 0.155 | 67×11 |
+  | −deskew | 1 | 0.600 | 0.623 | 0.230 | 74×9 |
+  | −sharpen | 1 | 0.243 | 0.783 | 0.074 | 75×11 |
+  | −normalise (CLAHE) | 1 | 0.265 | 0.750 | 0.123 | 75×9 |
+  | −remove_stamps | 1 | 0.206 | 0.755 | 0.142 | 75×9 |
+  | −table_bg | 1 | 0.227 | 0.691 | 0.179 | 75×9 |
+
+- **Decisive probe — all 5 flags OFF (crop+resize only):** page-2 `Tables_Found = 1`, Cell_Acc 0.225,
+  dims **75×9**. With every tunable flag disabled, fragmentation stays fixed.
+- **Conclusion.** No single `PreprocessConfig` flag is *necessary*, and disabling all five still prevents
+  fragmentation. The cause is the two **always-on, ungated** steps in `preprocess.py` — `_crop_margins`
+  and `_cap_resolution` (downscale long edge ≤ 2048 px, `_CAP_RESOLUTION_MAX_DIM`) — i.e.
+  **geometric / resolution normalization**, not deskew / contrast / stamps / color. The §2.25 color-cue
+  hypothesis (`normalise_table_backgrounds`) is **falsified**: removing the only color-stripping step
+  changes nothing. The mechanism (a too-large dense table makes Surya's layout model tile & fragment it;
+  downscaling merges it into one region) is document-agnostic, so it is *expected* to generalize.
+- **⚠ Variance caveat.** Surya is non-deterministic: all-on scored Cell_Acc **0.179 / 67×11** here vs
+  §2.25's **0.259 / 75×9** (same config). The **binary 8→1 fragmentation signal is robust and reproduced**;
+  the accuracy point-estimates are **noisy** and must be reported with repeats, not as single numbers.
+  (`−deskew`'s 0.600 is a single-run outlier — a hint that some steps may *hurt* on clean born-digital
+  docs — needs repeats before trusting.)
+- **E2 — multi-doc validation (2nd document, 15.06.26, same template / different day).** The 8→1 collapse
+  **reproduces**: page-2 `Tables_Found` = **8 raw → 1 preprocessed**, identical to 09.06.26. Preprocessing
+  also sharply improves content on this 2nd doc — Table_CER **0.360 → 0.091**, Recall **0.736 → 0.783**,
+  pred dims **144×11 → 75×10** (≈ GT 75×9). The small Cell_Acc dip (0.187→0.170) is a spurious 10th column
+  shifting cells, not a content regression. **n=2 generalization of the resolution mechanism confirmed** —
+  across *instances of this template*; cross-*layout* generalization still untested.
+- **Open follow-ups.** Confirm resize-vs-crop is the lever + find the resolution threshold (sweep the
+  2048 px cap); variance repeats on raw / all-on / all-off.
+- Modules: `scripts/eval_document.py` (`--no-*` ablation flags + per-page `Tables_Found`).
+
 ---
 
 ## 3. Results Snapshot
