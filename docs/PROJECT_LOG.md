@@ -754,9 +754,42 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
   pred dims **144×11 → 75×10** (≈ GT 75×9). The small Cell_Acc dip (0.187→0.170) is a spurious 10th column
   shifting cells, not a content regression. **n=2 generalization of the resolution mechanism confirmed** —
   across *instances of this template*; cross-*layout* generalization still untested.
+- **15.06.26 GT provenance.** Its ground truth was built by transferring 09.06.26's hand-verified Khmer
+  item-names + table structure and injecting 15.06.26's own numeric cells (prices/percentages/dates
+  extracted from its text layer). This is valid because the two PDFs share the *same* broken ToUnicode
+  CMap: the garbled Khmer is unusable as text but **stable** (same item → same garbled string), so it
+  aligns rows reliably, while digits extract correctly in both. All 71 data rows were verified to align
+  1:1 (section index + row number + garbled name) before transfer; document GT = 75×9. (The one-off
+  builder script is not kept in-tree.)
 - **Open follow-ups.** Confirm resize-vs-crop is the lever + find the resolution threshold (sweep the
   2048 px cap); variance repeats on raw / all-on / all-off.
 - Modules: `scripts/eval_document.py` (`--no-*` ablation flags + per-page `Tables_Found`).
+
+### 2.27 Recall-failure taxonomy — the residual gap is RECOGNITION, not layout → fine-tuning is justified
+
+- **Why.** Under production (Surya + preprocessing) the doc reaches ~correct dims but `Cell_Content_Recall`
+  ≈ 0.62–0.78 — 20–38% of GT content unrecovered. *Which* failure mode? This decides the fine-tuning fork:
+  recognition misses → fine-tuning can help; segmentation misses → it won't.
+- **Method.** `scripts/recall_taxonomy.py` reruns the production pipeline on 09.06.26, aligns the stitched
+  predicted grid to the 75×9 GT (the same `evaluate_structure` difflib alignment), and classifies every
+  unrecovered GT cell. Row correspondence cross-checked with an independent fuzzy item-name match to rule
+  out an alignment artifact (difflib collapsed to one `replace` block because pred had 11 cols vs GT 9).
+  Single run (`Cell_Content_Recall = 0.759`; 139 missed of 576 non-empty). Surya variance applies.
+- **Taxonomy:** WRONG-TEXT 64.0%, CELL-BLANK 31.7%, MERGED 4.3%, ROW-DROPPED / SPLIT 0. →
+  **recognition-attributable 95.7%, segmentation 4.3%** (the 6 merged rows are all in the grains section).
+- **Where misses cluster.** Unit column `ឯកតា` = **51%** of misses; item names 25%; the four numeric price
+  columns are barely affected (0.7–2.9% each). Root cause of the unit misses: the **Riel glyph `៛` is
+  systematically misrecognized** (`៛/គ.ក` → `#គ.ក` 22×, `វ/គ.ក` 12×, `អ/គ.ក` 9×) — one narrow, concentrated
+  confusion. Item-name misses are Khmer subscript-consonant substitutions (e.g. `គោ`→`តោ`). By section,
+  grains is worst (50.6% miss + all 6 merged rows).
+- **Conclusion.** The residual gap is **recognition (glyph-level) on correctly-segmented cells**, not
+  layout. **Fine-tuning is the justified lever** (echoes §2.21: no turnkey model beats Surya). Layout /
+  stitch work would touch only the ~4% segmentation slice.
+- **Cheap near-term win (not yet done).** The unit column is near-constant (`៛/គ.ក` / `៛/គ្រាប់` / `៛/ផ្លែ`)
+  and drives 51% of misses through one glyph, so a **deterministic post-processing rule** normalizing the
+  misrecognized Riel prefix (`#` / `វ` / `អ` `/…` → `៛/…`) could recover a large share of recall for
+  near-zero cost — worth trying before the 4–6 week fine-tune. (Extends `postprocess.py` / `khmer_normalize.py`.)
+- Modules: `scripts/recall_taxonomy.py` (new).
 
 ---
 
