@@ -25,6 +25,9 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
         page_images=processed,
         dpi=result.dpi,
         page_count=result.page_count,
+        # Keep the raw pages so the surya_kiri engine can recognise cells from
+        # un-preprocessed pixels (preprocessing degrades Kiri — see the engine).
+        raw_page_images=[img.copy() for img in result.page_images],
     )
 
 

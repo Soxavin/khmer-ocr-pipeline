@@ -867,6 +867,50 @@ Thread A (recognition) opened on two fronts. Full write-ups live under `experime
 
 ---
 
+### 2.30 `surya_kiri` engine shipped + honest head-to-head — a modest, situational win (2026-07-06)
+
+Productionised the Surya-detect + Kiri-recognize(fast) + per-cell-Otsu hybrid as a selectable engine
+`OCR_ENGINE=surya_kiri` (`engines/surya_kiri_engine.py`, `engines/kiri_recognizer.py`, vendored recognizer
+under `engines/kiri_vendor/`). Kiri is **vendored, not depended-on**: only the CTC (`fast`) path + a
+weights loader, so there is **no `onnxruntime-gpu`** (no macOS-ARM wheels) and no network dep beyond the HF
+weight download. Equivalence-tested against the upstream git-main package: **12/12 byte-identical** cell reads.
+
+- **Vendoring gotcha (the hard part).** The HF checkpoint's `config.json` is **stale** (describes an older
+  dim-256/4-layer variant) and uses a non-`CFG` schema, so trusting it silently mis-sizes the model and
+  `load_state_dict(strict=False)` leaves whole modules random → garbage OCR. The architecture must be
+  **inferred from the weights** and copied **verbatim**: `SiLU` (not GELU), conv strides `(1,1),(2,2),(2,2),(2,1)`,
+  6 encoder layers, **6 attention heads** (`dim//64`, not the config's "8"), the exact 2-D positional encoding,
+  and gray-128 padding. The loader now infers all of this and hard-fails if any CTC-path key is missing.
+- **Step 0 — raw vs preprocessed (resolved: raw).** Preprocessing (CLAHE/desaturation) helps Surya's
+  structure but **degrades Kiri recognition even after Otsu** (p2 CellAcc 0.790 raw → 0.675 preprocessed).
+  Because preprocessing also deskews/crops, preprocessed-space bboxes don't map onto raw pixels, so the engine
+  runs its **whole** table pipeline (layout → TableRec → crop) on the raw page. Threaded via a new optional
+  `PreprocessResult.raw_page_images` (populated by `preprocess()`; falls back to `page_images`). Verified: the
+  production path `ingest → preprocess → surya_kiri` reproduces the raw score (p2 = 0.790).
+- **Honest head-to-head (both engines, production path, all 6 real pages — corrects the §2.29 direction).**
+
+  | engine | Cell_Accuracy | Recall | Table_CER |
+  |---|---|---|---|
+  | `surya` | 0.511 | **0.759** | 0.097 |
+  | `surya_kiri` | **0.580** | 0.755 | **0.086** |
+
+  `surya_kiri` wins Cell_Accuracy (+0.07) and CER and ties Recall — but the earlier **"beats Surya on ALL
+  metrics"** claim (based on a stale single-page Surya baseline of 0.259, pre-§2.25) **does NOT hold**. A
+  fair, fresh full-page comparison shows Surya-alone is strong (0.511) and actually **edges the hybrid on the
+  cleanest data page p2 (0.844 vs 0.790)**. The hybrid's real advantage is **robustness on structurally harder
+  pages** (p3: 0.75 vs 0.51, where Surya mis-counts rows) and lower CER. Verdict: a **modest, situational**
+  improvement worth shipping as an option — not a landslide.
+- **Known limitation (p1 header pages, ~0.20 CellAcc / 0.75 Recall).** Diagnosed precisely: Surya's
+  `TableRecPredictor` splits the **two-physical-line column header** (date line + `បោះដុំ/លក់រាយ` line) into
+  **two** rows, while the GT merges them into **one** logical header row (pred 25×9 vs GT 24×9). Everything
+  from the category-title row onward aligns; recall is unaffected. Left as a documented limitation rather than
+  a header-merge heuristic (which would risk overfitting these 2 pages and regressing the matched p2).
+- Modules: `engines/surya_kiri_engine.py`, `engines/kiri_recognizer.py`, `engines/kiri_vendor/{model,loader}.py`,
+  `tests/test_{surya_kiri_engine,kiri_recognizer}.py` (new); `engines/engine_registry.py` (register),
+  `engines/surya.py` (`get_manager()`), `models.py` + `preprocess.py` (`raw_page_images`). ~394 tests green.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

@@ -76,6 +76,12 @@ class PreprocessResult:
     page_images: list[np.ndarray]       # RGB uint8, cleaned
     dpi: int                            # preserved from IngestResult
     page_count: int
+    # Original (un-preprocessed) page images, RGB uint8, aligned 1:1 with
+    # page_images. The surya_kiri engine recognises table cells from these:
+    # preprocessing (CLAHE/desaturation) helps Surya's structure but degrades
+    # Kiri recognition, so that engine needs the raw pixels. None when unavailable
+    # (older callers / benchmark harness) — engines fall back to page_images.
+    raw_page_images: list[np.ndarray] | None = None
 
 
 @dataclass

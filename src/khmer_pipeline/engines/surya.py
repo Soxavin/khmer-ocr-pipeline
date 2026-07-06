@@ -44,6 +44,14 @@ def models_loaded() -> bool:
     return _manager is not None
 
 
+def get_manager():
+    """Return the shared SuryaInferenceManager, initializing it if necessary.
+    Exposed so sibling engines (e.g. surya_kiri) can create predictors that share
+    the same inference backend without duplicating the manager."""
+    _get_predictors()
+    return _manager
+
+
 def preload_models() -> None:
     """Eagerly initialize the Surya inference manager and predictors, if not already loaded."""
     _get_predictors()
