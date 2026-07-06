@@ -164,23 +164,35 @@ Key learnings:
   structurally *without* preprocessing, so Kiri reads raw crops at its ~99% quality.
 - **Artifact fixes:** stripping Kiri's **trailing `.`** on numbers + **no cell
   padding** (padding pulls in neighbours) is the best recipe.
-- **%-cell root cause (diagnosed by dumping the crops):** the last two %-change
-  columns are **low-contrast yellow-on-orange** text, whereas the price columns are
-  yellow-on-**green** (high contrast). In grayscale (which Kiri uses) yellow-on-orange
-  nearly vanishes → garble. Boxes are correctly sized/located (188×64px, same as
-  prices). A per-cell **CLAHE** contrast boost did NOT help (it also noised the good
-  green cells → 0.395). Needs a **color-aware** contrast fix or **fine-tuning** — a
-  scoped follow-up, not a blocker.
-- **Broadened validation (6 market-price pages, 09.06.26 + 15.06.26 p1–p3):**
-  **mean Cell_Accuracy 0.455 vs Surya-alone 0.259** — the win generalizes across two
-  docs. Per page: p2/p3 strong (**0.51–0.63**); **p1 pages weak (0.181)** because the
-  document header above the table breaks row alignment (fixable: tighter table-region
-  crop / skip header rows; p1 Recall stays ~0.57). Recall (~0.55) still a touch under
-  Surya (0.623), concentrated in the %-cells + p1 headers.
-- **Net:** the Surya-detect + Kiri-recognize hybrid is a **validated, no-fine-tune,
-  local, Apache-2.0** improvement over Surya on exact cell accuracy. Open follow-ups:
-  %-cell color fix, p1 header handling, and a full per-page Surya baseline for a
-  complete head-to-head.
+- **%-cell root cause + fix (diagnosed by dumping the crops):** the two %-change
+  columns are **low-contrast yellow-on-orange** text (price columns are yellow-on-
+  **green** = high contrast). Boxes are correct (188×64px). **Plain grayscale and the
+  pipeline's `_normalise_table_backgrounds` (desaturation) do NOT help** — they
+  preserve luminance, so the low contrast survives. **Per-cell Otsu THRESHOLDING
+  fixes it** (reads `-3.85%`/`0.00%`/`-2.86%`/`7.14%` perfectly): Otsu snaps the
+  yellow(226)/orange(166) split to crisp black-on-white. (CLAHE failed — noised the
+  good cells.) Add auto-polarity (`if binarized.mean()<127: invert`) so normal
+  dark-on-light cells aren't flipped.
+- **Broadened validation (6 market-price pages, 09.06.26 + 15.06.26 p1–p3), WITH
+  per-cell Otsu — beats Surya on ALL THREE metrics:**
+
+  | | Surya + Kiri + Otsu | Surya-alone |
+  |---|---|---|
+  | Cell_Accuracy (mean) | **0.580** | 0.259 |
+  | Recall (mean) | **~0.75** | 0.623 |
+  | CER (mean, lower=better) | **~0.09** | 0.249 |
+
+  Data pages (p2/p3) hit **~0.79 Cell_Accuracy / ~0.05 CER**. Otsu helps *every*
+  colored-background column, not just %. Only **p1 header pages** lag on exact
+  accuracy (0.19–0.21) — but their Recall is 0.75, so it's purely a header/row-
+  alignment issue, not recognition.
+- **Net:** the **Surya-detect + Kiri-recognize + per-cell Otsu** hybrid is a
+  **validated, no-fine-tune, local, Apache-2.0** recogniser that **beats Surya-alone
+  on all metrics** across two real documents. Winning recipe: RAW page → Surya layout
+  → `merge_table_regions` → `TableRecPredictor` cells → per-cell Otsu (+auto-polarity)
+  → Kiri `recognize_single_line_image(decode_method="fast")` → strip trailing `.`, no
+  padding. Open follow-ups: **p1 header/row-alignment**, full per-page Surya baseline,
+  and productionising as `OCR_ENGINE=surya_kiri`.
 
 ## 4. Datasets (tiered by value)
 
