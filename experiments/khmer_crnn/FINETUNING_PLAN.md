@@ -140,6 +140,48 @@ the real docs via the `evaluation/` harness (Cell metrics + CER). Optional per-c
 routing (Khmer cells → whichever wins; numeric → Surya) if Kiri doesn't beat Surya
 everywhere. Packaging caveats for Kiri on Mac are in §3b.
 
+**RESULT (prototyped 2026-07-06, real page `09.06.26_p2`, scored via `evaluate_table`).**
+Winning recipe: **RAW page → Surya layout → `merge_table_regions` (8 fragments → 1
+table) → Surya `TableRecPredictor` (243 cells, exact 27×9 grid) → crop each cell
+from the RAW image → Kiri `recognize_single_line_image` with `decode_method="fast"`**.
+
+| Config | Cell_Accuracy | Recall | CER |
+|---|---|---|---|
+| **Surya-cells + Kiri (raw + merge, +trailing-`.` fix)** | **0.444** | 0.430 | 0.328 |
+| Surya-cells + Kiri (raw + merge, no fix) | 0.342 | 0.323 | 0.339 |
+| Surya-alone baseline | 0.259 | 0.623 | 0.249 |
+| Surya-cells + Kiri (preprocessed) | 0.255 | 0.234 | 0.364 |
+| SLANet cells + Kiri | 0.041 | — | — |
+| Kiri-DB / Surya-line-detect + Kiri (geom. grid) | 0.008–0.041 | — | — |
+
+Key learnings:
+- **The hybrid BEATS Surya-alone on exact Cell_Accuracy (0.342 vs 0.259, +32% rel).**
+- **Structure must come from Surya `TableRecPredictor` + `merge_table_regions`** (gives
+  cell polygons + row/col). SLANet and geometric grid-reconstruction both fail badly.
+- **Preprocessing tension:** Surya's *structure* wants preprocessing (collapses the
+  8-fragment split), but preprocessing *wrecks Kiri's recognition* (prices garble).
+  Resolution: use the **RAW** image — `merge_table_regions` fixes the fragmentation
+  structurally *without* preprocessing, so Kiri reads raw crops at its ~99% quality.
+- **Artifact fixes:** stripping Kiri's **trailing `.`** on numbers + **no cell
+  padding** (padding pulls in neighbours) is the best recipe.
+- **%-cell root cause (diagnosed by dumping the crops):** the last two %-change
+  columns are **low-contrast yellow-on-orange** text, whereas the price columns are
+  yellow-on-**green** (high contrast). In grayscale (which Kiri uses) yellow-on-orange
+  nearly vanishes → garble. Boxes are correctly sized/located (188×64px, same as
+  prices). A per-cell **CLAHE** contrast boost did NOT help (it also noised the good
+  green cells → 0.395). Needs a **color-aware** contrast fix or **fine-tuning** — a
+  scoped follow-up, not a blocker.
+- **Broadened validation (6 market-price pages, 09.06.26 + 15.06.26 p1–p3):**
+  **mean Cell_Accuracy 0.455 vs Surya-alone 0.259** — the win generalizes across two
+  docs. Per page: p2/p3 strong (**0.51–0.63**); **p1 pages weak (0.181)** because the
+  document header above the table breaks row alignment (fixable: tighter table-region
+  crop / skip header rows; p1 Recall stays ~0.57). Recall (~0.55) still a touch under
+  Surya (0.623), concentrated in the %-cells + p1 headers.
+- **Net:** the Surya-detect + Kiri-recognize hybrid is a **validated, no-fine-tune,
+  local, Apache-2.0** improvement over Surya on exact cell accuracy. Open follow-ups:
+  %-cell color fix, p1 header handling, and a full per-page Surya baseline for a
+  complete head-to-head.
+
 ## 4. Datasets (tiered by value)
 
 1. **Small REAL labeled set from the actual GDDE market-price PDFs** — *highest
