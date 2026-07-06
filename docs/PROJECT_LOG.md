@@ -831,6 +831,42 @@ Each entry: **Problem → Investigation → Decision → Outcome.**
 
 ---
 
+### 2.29 Recognizer track kickoff — CRNN training exercise + off-the-shelf Khmer-OCR survey (2026-07-06)
+
+Thread A (recognition) opened on two fronts. Full write-ups live under `experiments/khmer_crnn/`
+(`FINDINGS.md`, `FINETUNING_PLAN.md`, `HANDOFF_TASKS.md`); summary here.
+
+- **CRNN training exercise.** Adapted a mentor-provided (CUDA-oriented) starter script into a portable,
+  rigor-added trainer (`experiments/khmer_crnn/train.py`) that trains a ResNet+BiRNN+CTC recognizer **from
+  scratch** on `seanghay/khmer-hanuman-100k` (single font) — purpose: **learn the training loop + benchmark
+  epoch time on the M4 (MPS)**. Adaptations: portable device (`utils/device.detect_device`), MPS **CTC
+  runs on CPU fallback** (`aten::_ctc_loss` unimplemented on MPS), leakage-safe split + train-only vocab,
+  validation CER, seeding/checkpoints, warmup-aware timing, and a **CTC-feasibility check** that surfaced
+  the real dataset shape (labels up to 139 chars, images ~1068px wide) → widened input 256→1024px + label
+  filter.
+- **Benchmark + convergence.** ~**121 s/epoch** (ResNet34) / ~**76 s** (ResNet18, ~1.6× faster); GRU≈LSTM
+  for speed (CNN + CPU-CTC bound); no thermal throttling. Trains cleanly: CTC blank-collapse breakout at
+  epoch 3–4 → **~3.4% CER** (short-label curriculum) and **~3.7% CER** (full sentence-length task). Confirms
+  the pipeline is sound; single-font Hanuman won't read the real GDDE docs (by design).
+- **Off-the-shelf survey (via `seanghay/awesome-khmer-language`).** Empirically tested two Khmer OCRs on the
+  **real** page `09.06.26_p2`:
+  - **seanghay/KhmerOCR** — Khmer-**script-only** output vocab (98 chars; no Arabic digits/punctuation).
+    **Dropped all six Arabic-numeral price/percentage columns** → architecturally unusable for our tables.
+  - **mrrtmob/kiri-ocr** — bilingual EN+Khmer, **Apache-2.0**, transformer CTC+attention (vocab 967 covers
+    Arabic digits + `%.,-/()` + Latin + Khmer). Off-the-shelf it duplicated digits — **traced to the decoder**:
+    `decode_method="accurate"/"beam"` doubles digits, but **`decode_method="fast"` (pure CTC) reads the real
+    page's Khmer, row numbers, `៛` units, and all Arabic prices correctly at ~99% confidence**. Only the small
+    %-cells fail, and that's a *detector* mis-crop (recognizer reads `-2.86%` perfectly when cleanly cropped).
+- **Direction.** The near-term win is a **Surya-detect + Kiri-recognize(fast) hybrid** (Surya's table
+  structure + Kiri's mixed-script recognition), evaluated vs Surya-alone via the `evaluation/` harness — a
+  local, MEF-safe (Apache-2.0), **no-fine-tune** path to better recognition. Fine-tuning (Kiri ships
+  `training.py`, or our own CRNN) stays as an optional later quality lever. Spec: `HANDOFF_TASKS.md` Task #4.
+- Modules: `experiments/khmer_crnn/{train,metrics,plot_metrics}.py` + `{README,FINDINGS,FINETUNING_PLAN,HANDOFF_TASKS}.md` (new);
+  `pyproject.toml` (new `experiments` optional dep group: torchvision/datasets/psutil, pinned). Training run
+  artifacts (`experiments/khmer_crnn/runs/`) are gitignored.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

@@ -29,6 +29,14 @@ dev = [
     "pytest>=8.0",
     "matplotlib>=3.8,<4.0",
 ]
+# Isolated group for the from-scratch CRNN training experiment
+# (experiments/khmer_crnn/). Kept out of the core pipeline env — only
+# install with `uv sync --extra experiments` when running that trainer.
+experiments = [
+    "torchvision>=0.27,<0.28",
+    "datasets>=5.0,<6.0",
+    "psutil>=7.2,<8.0",
+]
 
 [build-system]
 requires = ["hatchling"]

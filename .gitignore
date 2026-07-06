@@ -19,3 +19,6 @@ eval/figures/
 inspect_report.json
 # recognizer-A/B output derived from real pages — never commit
 predictions.json
+
+# CRNN training-experiment run artifacts (checkpoints, metrics, plots)
+experiments/khmer_crnn/runs/
