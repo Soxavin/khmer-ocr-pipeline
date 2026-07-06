@@ -110,6 +110,9 @@ metrics (no paid AI judge). Tools: `evaluation/run_benchmark.py` (runs OCR over 
 > **Tables_Found vs Expected** matter more than raw CER, because a number in the wrong cell is
 > worse than a slightly misspelled word.
 
+> For the exact **formulas** and the *how/why* of each metric (plus the NFC / title-strip / row-alignment
+> steps applied before scoring), see [`eval/README.md` §5.1](../eval/README.md#51-how-each-metric-is-computed--and-why-with-formulas).
+
 ---
 
 ## 6. Architecture & workflow concepts

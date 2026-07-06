@@ -117,11 +117,74 @@ All metrics are computed deterministically from ground truth — no LLM judge, n
 |---|---|---|
 | `Tables_Found` / `Tables_Expected` | ratio → 1.0 | Table detection rate (Surya layout pass). `TabRatio` in analyze output. |
 | `Cell_Accuracy` | higher = better | Fraction of cells matching ground truth positionally (row-aligned via `difflib.SequenceMatcher`). Measures *where* content lands. |
-| `Cell_Content_Recall` | higher = better | Order-insensitive cell match: was each GT cell value found anywhere in the predicted row? Measures *what* content is present. Gap between `Cell_Content_Recall` and `Cell_Accuracy` reveals row shifts vs. garbled text. |
+| `Cell_Content_Recall` | higher = better | Order-insensitive cell match: was each GT cell value found anywhere in the predicted table (multiset — duplicates count)? Measures *what* content is present. Gap between `Cell_Content_Recall` and `Cell_Accuracy` reveals row shifts vs. garbled text. |
 | `Table_CER` | lower = better | Levenshtein character error rate over the full table text (GT vs. predicted, concatenated). |
 | `Text_CER` | lower = better | Levenshtein CER over the full page body text (excluding table cells). |
 | `Paragraph_Recall` | higher = better | Fraction of GT paragraph lines found in the OCR output. |
 | `Paragraph_Leak` | lower = better | Body text wrongly captured inside a table cell — a §2.4 layout-correctness signal. Should be 0 on clean runs. |
+
+### 5.1 How each metric is computed — and why (with formulas)
+
+Source of truth: `src/khmer_pipeline/evaluation/evaluate_structure.py::evaluate_table`. Math notation
+below matches that code exactly; formulas render on GitHub and in most Markdown viewers.
+
+**Three fairness steps run first**, so we score OCR quality rather than artefacts:
+- **NFC normalisation** (`_norm`) of every GT and predicted cell — Khmer can encode the same visual
+  glyph with different codepoint orders; without NFC we'd count identical-looking text as wrong. Also
+  collapses runs of whitespace.
+- **Title-row strip** (`_strip_title_row`) — drops row 0 when it is a merged-colspan document title
+  (first cell filled, rest empty); that band is not tabular data.
+- **Monotonic row alignment** (`_align_rows`, `difflib.SequenceMatcher` over row signatures) — pairs
+  GT rows to predicted rows around inserted/deleted rows, so one extra/missing row (e.g. a split
+  header) does not cascade into "every row below is wrong."
+
+**Notation.** After title-strip the GT grid has `R` rows × `C` cols. `ĝ(r,c)` / `p̂(r,c)` = NFC-normalised
+GT / predicted cell strings; `A` = the set of aligned `(i,j)` GT→pred row pairs; `𝟙[·]` = 1 if true else 0.
+
+#### `Cell_Accuracy` — exact positional match
+
+$$\text{Cell\_Accuracy}=\frac{\displaystyle\sum_{(i,j)\in A}\ \sum_{c=1}^{C}\ \mathbb{1}\!\left[\hat g(i,c)=\hat p(j,c)\right]}{R\times C}$$
+
+- **How:** denominator is the full GT cell count `R·C`; a cell scores 1 only if the normalised strings
+  are **identical**. GT rows with no aligned predicted partner contribute 0 to the numerator, so
+  missing/extra rows are penalised. One wrong glyph fails the whole cell.
+- **Why:** strictest, most honest *"can an analyst trust this cell without editing it?"* For a financial
+  table a cell is usable or it isn't — partial credit would overstate readiness.
+
+#### `Cell_Content_Recall` — multiset content presence
+
+Let `𝒢` = multiset of non-empty GT cell values, `𝒫` = multiset of all predicted cell values, and
+`count_X(v)` = occurrences of value `v` in multiset `X`:
+
+$$\text{Cell\_Content\_Recall}=\frac{\displaystyle\sum_{v\,\in\,\text{set}(\mathcal G)}\min\!\big(\text{count}_{\mathcal G}(v),\ \text{count}_{\mathcal P}(v)\big)}{|\mathcal G|}$$
+
+- **How:** whole-table (not per-row) multiset overlap; `|𝒢|` = number of non-empty GT cells; the `min`
+  makes duplicated values count only as often as they truly appear. **Position-independent.**
+- **Why:** separates *recognition* from *placement*. A value read correctly but dropped one row over
+  fails `Cell_Accuracy` yet still scores here — so **`Cell_Content_Recall − Cell_Accuracy` ≈ how much
+  error is mis-placement (structure) vs mis-reading (recognition).**
+
+#### `Table_CER` / `Text_CER` — character error rate
+
+Flatten to one normalised string per side (`g` = GT, `p` = pred; table cells row-major for `Table_CER`,
+page body text for `Text_CER`):
+
+$$\text{CER}=\frac{\operatorname{Lev}(g,\,p)}{|g|}$$
+
+where `|g|` = GT length in **Unicode codepoints** and `Lev` is Levenshtein edit distance (minimum
+single-character insertions + deletions + substitutions):
+
+$$\operatorname{Lev}(i,j)=\begin{cases}\max(i,j)&\min(i,j)=0\\[2pt]\min\begin{cases}\operatorname{Lev}(i-1,j)+1\\ \operatorname{Lev}(i,j-1)+1\\ \operatorname{Lev}(i-1,j-1)+\mathbb{1}[g_i\neq p_j]\end{cases}&\text{otherwise}\end{cases}$$
+
+- **How:** codepoint-level; edge cases in `cer()` — 0 if both empty, 1 if GT empty but pred non-empty.
+  (Codepoint-level is slightly stricter than grapheme-level for Khmer, where one glyph spans several
+  codepoints; fine for relative comparison.)
+- **Why:** shows *how close* a wrong cell is — a single-glyph slip is 1 edit in dozens of chars, so CER
+  stays tiny even when `Cell_Accuracy` fails. Also the standard OCR metric, comparable across systems.
+
+**Read the trio together — the divergence is the diagnosis:** high `Cell_Content_Recall` + low
+`Cell_Accuracy` ⇒ a **structure/placement** fault; low `Table_CER` + low `Cell_Accuracy` ⇒ a
+**systematic glyph** fault. No single metric distinguishes these; the three together do.
 
 **Context:** most benchmarks run on raw renders (no preprocessing). This isolates OCR model quality from preprocessing effects. Preprocessing (`deskew`, `normalise_table_backgrounds`, etc.) is applied in the live pipeline (`app.py`, `pipeline.py`).
 
