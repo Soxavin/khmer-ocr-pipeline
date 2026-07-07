@@ -33,6 +33,10 @@ Out of scope for now: fine-tuning, broad multi-source generalization, production
 **Notation.** After title-strip, GT grid has `R` rows × `C` cols; normalized cell = `ĝ(r,c)` for GT and
 `p̂(r,c)` for pred. `A` = set of aligned `(i,j)` GT→pred row pairs. `𝟙[·]` = 1 if true else 0.
 
+> **Slide-ready formula images** (transparent PNG, drop straight into any slide tool) live in
+> [`docs/presentations/figures/`](figures/): `01_cell_accuracy.png`, `02_cell_content_recall.png`,
+> `03_table_cer.png`, `04_levenshtein.png`. The LaTeX/plain-text below is the same math as source.
+
 **Metric 1 — Cell_Accuracy (EXACT match).**
 - *Formula:*
 
