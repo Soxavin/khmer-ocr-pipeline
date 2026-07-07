@@ -87,9 +87,9 @@ def _run(base=None, *, with_table=True, cells=None, recognize="42",
         p("get_manager")
         p("_get_predictors", return_value=(_fake_layout_pred(with_table), None))
         if isinstance(recognize, list):
-            p("recognize_cell", side_effect=recognize)
+            p("recognize_cells", return_value=recognize)
         else:
-            p("recognize_cell", return_value=recognize)
+            p("recognize_cells", side_effect=lambda crops: [recognize] * len(crops))
         mock_tbl = MagicMock()
         mock_result = MagicMock()
         mock_result.cells = cells

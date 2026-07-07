@@ -25,7 +25,7 @@ from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from ..utils.memory import clear_device_cache
 from .surya import run_surya, get_manager, _get_predictors, _build_table_from_grid
 from .table_stitch import merge_table_regions
-from .kiri_recognizer import recognize_cell
+from .kiri_recognizer import recognize_cells
 
 
 def run_surya_kiri(
@@ -94,7 +94,11 @@ def run_surya_kiri(
                 continue
 
             # Build a (row, col) → text grid from TableRecPredictor cells.
+            # Pass 1: compute axis-aligned crops, applying the size guard directly
+            # so tiny cells get "" without ever reaching the batched recognizer.
             grid: dict[tuple[int, int], str] = {}
+            pending_keys: list[tuple[int, int]] = []
+            pending_crops: list[np.ndarray] = []
             for cell in cells:
                 # Polygon → axis-aligned bounding box within the crop.
                 xs = [p[0] for p in cell.polygon]
@@ -103,13 +107,17 @@ def run_surya_kiri(
                 cx0, cy0 = max(0, cx0), max(0, cy0)
                 cx1, cy1 = min(crop.shape[1], cx1), min(crop.shape[0], cy1)
 
+                key = (cell.row_id, cell.col_id)
                 if cx1 - cx0 < 3 or cy1 - cy0 < 3:
-                    text = ""
+                    grid[key] = ""
                 else:
-                    cell_crop = crop[cy0:cy1, cx0:cx1]
-                    text = recognize_cell(cell_crop)
+                    pending_keys.append(key)
+                    pending_crops.append(crop[cy0:cy1, cx0:cx1])
 
-                grid[(cell.row_id, cell.col_id)] = text
+            # Pass 2: recognize all qualifying cells for this table in one batch.
+            texts = recognize_cells(pending_crops)
+            for key, text in zip(pending_keys, texts):
+                grid[key] = text
 
             if not grid:
                 continue

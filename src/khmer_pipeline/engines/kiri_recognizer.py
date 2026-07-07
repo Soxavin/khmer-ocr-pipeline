@@ -1,32 +1,33 @@
 """Kiri OCR recognizer wrapper — per-cell Otsu binarization + CTC recognition.
 
 Provides the thin integration layer between the vendored Kiri model and the
-surya_kiri hybrid engine. Exposes two public functions:
+surya_kiri hybrid engine. Exposes three public functions:
 
-  otsu_cell(rgb)        — Otsu-threshold a cell crop, auto-inverting dark backgrounds
-  recognize_cell(crop_rgb) — Full pipeline: Otsu → Kiri CTC decode → clean text
+  otsu_cell(rgb)             — Otsu-threshold a cell crop, auto-inverting dark backgrounds
+  recognize_cell(crop_rgb)   — Full pipeline for a single crop: Otsu → Kiri CTC decode → clean text
+  recognize_cells(crops_rgb) — Batched equivalent of recognize_cell over a list of crops
 
 Model weights are lazy-loaded on first call and cached for the process lifetime.
 """
 from __future__ import annotations
 
-import os
-import tempfile
 import warnings
 from typing import Optional
 
 import cv2
 import numpy as np
+import torch
 from PIL import Image
 
 from .kiri_vendor.loader import load_kiri_model
-from .kiri_vendor.model import preprocess_pil, greedy_ctc_decode
+from .kiri_vendor.model import preprocess_pil
 
 # ---------------------------------------------------------------------------
 # Tunable constants
 # ---------------------------------------------------------------------------
 
 _OTSU_INVERT_MEAN_THRESHOLD = 127  # mean below this → invert binary (auto-polarity)
+_BATCH_SIZE = 64  # cap on cells stacked into a single model forward pass
 
 # ---------------------------------------------------------------------------
 # Lazy singleton
@@ -79,30 +80,54 @@ def otsu_cell(rgb: np.ndarray) -> np.ndarray:
 def recognize_cell(crop_rgb: np.ndarray) -> str:
     """Recognize text in a single table-cell crop.
 
-    Pipeline: Otsu binarization → save as temp PNG → Kiri CTC decode (fast path).
-    The temp file is cleaned up immediately after recognition.
-    Returns the recognised string (stripped, trailing '.' removed).
+    Pipeline: Otsu binarization → Kiri CTC decode (fast path) → clean text.
+    Delegates to `recognize_cells` so there is a single recognition code path.
     """
-    binary = otsu_cell(crop_rgb)
+    return recognize_cells([crop_rgb])[0]
 
-    # Kiri's recognize_single_line_image takes a file path, so save to a temp PNG.
-    fd, tmp_path = tempfile.mkstemp(suffix=".png")
-    os.close(fd)
+
+def recognize_cells(crops_rgb: list[np.ndarray]) -> list[str]:
+    """Recognize text for a batch of table-cell crops in one or few model passes.
+
+    Equivalent to ``[recognize_cell(c) for c in crops_rgb]`` but batches the
+    Otsu-binarized crops into ``(N,1,IMG_H,IMG_W)`` tensors (chunked by
+    `_BATCH_SIZE`) so `encode`/`ctc_head` run once per chunk instead of once
+    per cell. Returns one string per input crop, in order. Any failure warns
+    and falls back to `""` for the affected crops rather than raising.
+    """
+    if not crops_rgb:
+        return []
+
     try:
-        Image.fromarray(binary).save(tmp_path)
-
         model, cfg, tokenizer = _get_kiri()
-        pil_img = Image.open(tmp_path).convert("L")
-        tensor = preprocess_pil(cfg, pil_img)
-        text, _confidence = greedy_ctc_decode(model, tensor, tokenizer, cfg)
     except Exception as exc:
         warnings.warn(f"Kiri recognition failed: {exc}")
-        text = ""
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        return [""] * len(crops_rgb)
 
-    # Post-processing: strip whitespace, trailing dots (Kiri often emits a '.' after numbers)
-    return text.strip().rstrip(".").strip()
+    results: list[str] = [""] * len(crops_rgb)
+    for start in range(0, len(crops_rgb), _BATCH_SIZE):
+        chunk = crops_rgb[start:start + _BATCH_SIZE]
+        try:
+            tensors = []
+            for crop_rgb in chunk:
+                binary = otsu_cell(crop_rgb)
+                tensors.append(preprocess_pil(cfg, Image.fromarray(binary)))
+            batch = torch.cat(tensors, dim=0)
+
+            with torch.inference_mode():
+                mem = model.encode(batch)
+                logits = model.ctc_head(mem)
+                pred_ids = logits.argmax(dim=-1)
+
+            for i in range(len(chunk)):
+                text = tokenizer.decode_ctc(pred_ids[i].tolist())
+                if cfg.COLLAPSE_WHITESPACE:
+                    text = " ".join(text.split())
+                # Post-processing: strip whitespace, trailing dots (Kiri often
+                # emits a '.' after numbers).
+                results[start + i] = text.strip().rstrip(".").strip()
+        except Exception as exc:
+            warnings.warn(f"Kiri recognition failed: {exc}")
+            # Affected chunk falls back to "" (already the default in results).
+
+    return results

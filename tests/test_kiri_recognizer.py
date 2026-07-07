@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from khmer_pipeline.engines.kiri_recognizer import otsu_cell, recognize_cell
+from khmer_pipeline.engines.kiri_recognizer import otsu_cell, recognize_cell, recognize_cells
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,15 @@ class TestOtsuCell:
 
 
 # ---------------------------------------------------------------------------
+# Batched API — empty-input case needs no model load (early-return in
+# recognize_cells before `_get_kiri()` is ever called).
+# ---------------------------------------------------------------------------
+
+def test_recognize_cells_empty_list_returns_empty():
+    assert recognize_cells([]) == []
+
+
+# ---------------------------------------------------------------------------
 # Recognition integration test (skipped unless model is cached)
 # ---------------------------------------------------------------------------
 
@@ -107,3 +116,15 @@ class TestRecognizeCellIntegration:
         img[10:38, 20:180] = 0  # dark bar
         text = recognize_cell(img)
         assert isinstance(text, str)
+
+    def test_recognize_cells_batched_matches_single(self):
+        """Batched recognize_cells([a, b]) must equal per-cell recognize_cell calls."""
+        img_a = np.full((40, 120, 3), 255, dtype=np.uint8)
+        img_b = np.full((48, 200, 3), 255, dtype=np.uint8)
+        img_b[10:38, 20:180] = 0  # dark bar
+
+        batched = recognize_cells([img_a, img_b])
+        assert isinstance(batched, list)
+        assert len(batched) == 2
+        assert all(isinstance(t, str) for t in batched)
+        assert batched == [recognize_cell(img_a), recognize_cell(img_b)]
