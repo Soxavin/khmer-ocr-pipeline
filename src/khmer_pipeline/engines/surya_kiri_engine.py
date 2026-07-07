@@ -6,17 +6,13 @@ with per-cell Otsu binarization and Kiri CTC recognition. Registered as
 
 Architecture
 ------------
-1. ``run_surya`` for page-level text blocks + table *detection* (the VLM table
-   recognition results are discarded — only bboxes are kept).
-2. ``TableRecPredictor`` (reusing Surya's shared SuryaInferenceManager) for
-   cell polygon + (row_id, col_id) structure.
+1. ``run_surya(skip_tables=True)`` for the page-level text layer only — Table
+   regions are dropped before recognition, so Surya's expensive table-HTML VLM
+   never runs (this engine rebuilds tables from raw-image structure instead).
+2. A dedicated layout + ``TableRecPredictor`` pass on the RAW page for cell
+   polygons + (row_id, col_id) structure.
 3. Per cell: Otsu threshold → Kiri CTC decode → strip trailing dots.
 4. ``_build_table_from_grid`` to produce standard pipeline ``Table`` dicts.
-
-.. note::
-   Surya's table VLM is still run in step 1 (it's bundled with the OCR pass).
-   A future optimisation can skip it when ``OCR_ENGINE=surya_kiri`` to halve
-   Surya inference time — see the ``# TODO(speed)`` comment below.
 """
 from __future__ import annotations
 
@@ -41,13 +37,14 @@ def run_surya_kiri(
     Returns a ``SuryaResult`` whose tables are built from TableRecPredictor
     structure + Kiri CTC recognition instead of Surya's VLM HTML output.
     """
-    # TODO(speed): run_surya still invokes Surya's table VLM, whose results we
-    # discard. A future optimisation could add a `skip_table_vlm=True` parameter
-    # to run_surya / _process_page to halve Surya inference time for this engine.
+    # TODO(speed): the table-VLM waste is now resolved via `skip_tables=True`
+    # below. The only remaining minor redundancy is the second layout pass on
+    # the raw page (below) to locate table regions for TableRecPredictor.
 
-    # 1. Reuse Surya for page-level text blocks + ocr_text (its table VLM output
-    #    is discarded — we rebuild tables from raw-image structure below).
-    base = run_surya(result, on_page)
+    # 1. Reuse Surya for page-level text blocks + ocr_text; skip_tables=True
+    #    drops Table regions before recognition (we rebuild tables from
+    #    raw-image structure below, so Surya's table VLM would be wasted work).
+    base = run_surya(result, on_page, skip_tables=True)
 
     # 2. Lazy-init predictors on Surya's shared inference manager.
     manager = get_manager()

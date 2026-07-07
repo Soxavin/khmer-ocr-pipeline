@@ -2,7 +2,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 import numpy as np
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
-from khmer_pipeline.engines.surya import run_surya, _parse_html_table, _find_matching_html
+from khmer_pipeline.engines.surya import run_surya, _process_page, _parse_html_table, _find_matching_html
 
 
 def _make_preprocess_result(n_pages: int = 2) -> PreprocessResult:
@@ -409,3 +409,40 @@ def test_table_cells_not_shifted_by_extra_html_row():
     assert by_pos[(1, 0)]["text_lines"][0]["text"] == "A"
     assert by_pos[(1, 1)]["text_lines"][0]["text"] == "B"
     assert by_pos[(1, 2)]["text_lines"][0]["text"] == "C"
+
+
+def test_skip_tables_drops_table_regions_before_recognition():
+    """skip_tables=True strips Table bboxes before rec_pred so no table HTML is
+    produced (surya_kiri rebuilds tables itself and would otherwise pay for
+    Surya's table VLM pass for nothing)."""
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+    layout_result = layout_pred.return_value[0]
+    pil_img = MagicMock()
+
+    page = _process_page(0, pil_img, layout_pred, rec_pred, skip_tables=True)
+
+    call_kwargs = rec_pred.call_args[1]
+    passed_layout_results = call_kwargs["layout_results"]
+    assert all(
+        b.label != "Table"
+        for lr in passed_layout_results
+        for b in lr.bboxes
+    )
+    assert page.tables == []
+
+
+def test_skip_tables_false_passes_table_region_through():
+    """Companion check: with skip_tables=False (default), a Table region is
+    still passed to rec_pred so table HTML continues to be produced."""
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+
+    page = _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
+
+    call_kwargs = rec_pred.call_args[1]
+    passed_layout_results = call_kwargs["layout_results"]
+    assert any(
+        b.label == "Table"
+        for lr in passed_layout_results
+        for b in lr.bboxes
+    )
+    assert len(page.tables) == 1

@@ -76,11 +76,14 @@ def _get_predictors():
 def run_surya(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
+    skip_tables: bool = False,
 ) -> SuryaResult:
     """Run Surya layout detection, OCR, and table recognition over every page image
     in `result`. `on_page(idx, total)` is called before each page if given. Returns
     a `SuryaResult` with per-page text blocks/tables and any warnings raised during
-    processing."""
+    processing. When `skip_tables=True`, Table regions are dropped before recognition
+    (no table HTML is produced; `tables` will be empty) — for callers that rebuild
+    tables themselves."""
     layout_pred, rec_pred = _get_predictors()
     pil_images = [Image.fromarray(img) for img in result.page_images]
     total = len(pil_images)
@@ -90,7 +93,7 @@ def run_surya(
         for idx, pil_img in enumerate(pil_images):
             if on_page is not None:
                 on_page(idx, total)
-            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred))
+            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, skip_tables=skip_tables))
         collected_warnings = [str(w.message) for w in caught]
     return SuryaResult(source_name=result.source_name, pages=pages, warnings=collected_warnings)
 
@@ -217,6 +220,7 @@ def _process_page(
     pil_img: Image.Image,
     layout_pred,
     rec_pred,
+    skip_tables: bool = False,
 ) -> SuryaPageResult:
     try:
         _log(f"Page {page_index}: layout detection...")
@@ -230,7 +234,11 @@ def _process_page(
 
         # De-fragment tables: merge adjacent Table regions into master boxes so
         # recognition OCRs each whole table at once (not column-wise fragments).
-        if _stitch_enabled():
+        if skip_tables:
+            # Caller (e.g. surya_kiri) rebuilds tables itself; drop Table regions
+            # before recognition so Surya skips its expensive table-HTML VLM pass.
+            layout_result.bboxes = [b for b in layout_result.bboxes if b.label != "Table"]
+        elif _stitch_enabled():
             table_lboxes = [b for b in layout_result.bboxes if b.label == "Table"]
             if len(table_lboxes) > 1:
                 others = [b for b in layout_result.bboxes if b.label != "Table"]
