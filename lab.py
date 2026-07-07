@@ -35,6 +35,7 @@ from khmer_pipeline.preprocess import PreprocessConfig, preprocess
 from khmer_pipeline.engines.slanet_structure import predict_cells
 from khmer_pipeline.engines.surya import preload_models, run_surya
 from khmer_pipeline.engines.hybrid_engine import run_hybrid
+from khmer_pipeline.engines.surya_kiri_engine import run_surya_kiri
 from khmer_pipeline.engines.table_merge_pages import merge_document_tables
 
 # lab.py calls run_surya / run_hybrid directly rather than using
@@ -66,9 +67,10 @@ _SLANET_CELL_COLOR = "#9B59B6"  # purple
 
 # Engine names — the canonical strings used as keys throughout the UI
 _ENGINE_SURYA = "Surya"
+_ENGINE_SURYA_KIRI = "Surya + Kiri"
 _ENGINE_HYBRID_ROW = "Hybrid (rowband)"
 _ENGINE_HYBRID_DOC = "Hybrid + DocLayout-YOLO"
-_ALL_ENGINES = [_ENGINE_SURYA, _ENGINE_HYBRID_ROW, _ENGINE_HYBRID_DOC]
+_ALL_ENGINES = [_ENGINE_SURYA, _ENGINE_SURYA_KIRI, _ENGINE_HYBRID_ROW, _ENGINE_HYBRID_DOC]
 
 _METRICS_COLUMNS = ["Engine", "Pred dims", "Cell_Accuracy", "Cell_Content_Recall", "Table_CER"]
 
@@ -80,6 +82,11 @@ _ENGINE_INFO: dict[str, dict[str, str]] = {
         "Layout": "Surya layout model — detects text/table regions",
         "Structure": "Surya — the recognition VLM emits the table's <td> HTML itself",
         "Recognition": "Surya recognition VLM (surya-ocr, llama.cpp Metal backend)",
+    },
+    _ENGINE_SURYA_KIRI: {
+        "Layout": "Surya layout on the raw page — table regions (fragments merged via table_stitch)",
+        "Structure": "Surya TableRecPredictor — per-cell polygons + row/col ids",
+        "Recognition": "KiriOCR (vendored, CTC 'fast' path) reads each cell, with per-cell Otsu binarization",
     },
     _ENGINE_HYBRID_ROW: {
         "Layout": "Surya layout + geometric merge of fragmented table boxes (table_stitch)",
@@ -204,6 +211,9 @@ def _run_engine(
     if engine_name == _ENGINE_SURYA:
         with _engine_env(None, None):
             return run_surya(pre, on_page=on_page)
+    elif engine_name == _ENGINE_SURYA_KIRI:
+        with _engine_env(None, None):
+            return run_surya_kiri(pre, on_page=on_page)
     elif engine_name == _ENGINE_HYBRID_ROW:
         with _engine_env("rowband", None):
             return run_hybrid(pre, on_page=on_page)
@@ -734,6 +744,11 @@ with tab_inspect:
             "SLANet table-structure analysis applies only to the hybrid engines. "
             "Surya detects and reads table regions directly without a separate "
             "structure step."
+        )
+    elif eng_sel == _ENGINE_SURYA_KIRI:
+        st.caption(
+            "Surya + Kiri uses Surya's TableRecPredictor for cell structure "
+            "(not SLANet); each detected cell is then read by KiriOCR."
         )
     else:
         if not insp_page_result.tables:
