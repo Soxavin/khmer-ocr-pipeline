@@ -38,6 +38,12 @@ Out of scope for now: fine-tuning, broad multi-source generalization, production
 
   $$\text{Cell\_Accuracy}=\frac{\displaystyle\sum_{(i,j)\in A}\ \sum_{c=1}^{C}\ \mathbb{1}\!\left[\hat g(i,c)=\hat p(j,c)\right]}{R\times C}$$
 
+  ```text
+                   Σ over aligned rows (i,j)  Σ over cols c   1[ ĝ(i,c) == p̂(j,c) ]
+  Cell_Accuracy = ───────────────────────────────────────────────────────────────────
+                                        R × C   (total GT cells)
+  ```
+
   (denominator is the full GT cell count `R·C`; rows with no aligned pred pair contribute 0 to the
   numerator, so missing/extra rows are penalized).
 - *Plain:* `correct_cells / total_GT_cells`, where a cell is correct only if the normalized strings are identical.
@@ -49,6 +55,12 @@ Out of scope for now: fine-tuning, broad multi-source generalization, production
   and `count_X(v)` = occurrences of value `v` in multiset `X`:
 
   $$\text{Recall}=\frac{\displaystyle\sum_{v\,\in\,\text{set}(\mathcal G)}\min\!\big(\text{count}_{\mathcal G}(v),\ \text{count}_{\mathcal P}(v)\big)}{|\mathcal G|}$$
+
+  ```text
+            Σ over distinct GT values v:  min( count_GT(v), count_pred(v) )
+  Recall = ────────────────────────────────────────────────────────────────
+                        |𝒢|   (number of non-empty GT cells)
+  ```
 
   (`|𝒢|` = number of non-empty GT cells; position-independent; duplicates handled by the `min`).
 - *Why:* **separates recognition from placement.** "12,000" read right but one row off fails accuracy yet
@@ -64,6 +76,17 @@ Out of scope for now: fine-tuning, broad multi-source generalization, production
   (min. single-character insertions + deletions + substitutions), defined by the standard recurrence:
 
   $$\text{Lev}(i,j)=\begin{cases}\max(i,j)&\min(i,j)=0\\[2pt]\min\begin{cases}\text{Lev}(i-1,j)+1\\ \text{Lev}(i,j-1)+1\\ \text{Lev}(i-1,j-1)+\mathbb{1}[g_i\neq p_j]\end{cases}&\text{else}\end{cases}$$
+
+  ```text
+         Lev(g, p)            Lev = Levenshtein edit distance (ins + del + subst)
+  CER = ───────────           |g| = length of GT string in Unicode codepoints
+           |g|
+
+  Lev(i,j) = max(i,j)                          if min(i,j) == 0
+           = min( Lev(i-1, j)   + 1,           otherwise  ← delete
+                  Lev(i,   j-1) + 1,                      ← insert
+                  Lev(i-1, j-1) + [ g_i != p_j ] )        ← substitute (0 if chars equal)
+  ```
 
   (edge cases in code: CER = 0 if both empty, 1 if GT empty but pred non-empty.)
 - *Why:* character granularity shows **how close a wrong cell is**. `៛`→`អ` = 1 edit in ~40 chars ⇒ tiny

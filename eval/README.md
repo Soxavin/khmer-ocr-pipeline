@@ -145,6 +145,12 @@ GT / predicted cell strings; `A` = the set of aligned `(i,j)` GT→pred row pair
 
 $$\text{Cell\_Accuracy}=\frac{\displaystyle\sum_{(i,j)\in A}\ \sum_{c=1}^{C}\ \mathbb{1}\!\left[\hat g(i,c)=\hat p(j,c)\right]}{R\times C}$$
 
+```text
+                 Σ over aligned rows (i,j)  Σ over cols c   1[ ĝ(i,c) == p̂(j,c) ]
+Cell_Accuracy = ───────────────────────────────────────────────────────────────────
+                                      R × C   (total GT cells)
+```
+
 - **How:** denominator is the full GT cell count `R·C`; a cell scores 1 only if the normalised strings
   are **identical**. GT rows with no aligned predicted partner contribute 0 to the numerator, so
   missing/extra rows are penalised. One wrong glyph fails the whole cell.
@@ -157,6 +163,12 @@ Let `𝒢` = multiset of non-empty GT cell values, `𝒫` = multiset of all pred
 `count_X(v)` = occurrences of value `v` in multiset `X`:
 
 $$\text{Cell\_Content\_Recall}=\frac{\displaystyle\sum_{v\,\in\,\text{set}(\mathcal G)}\min\!\big(\text{count}_{\mathcal G}(v),\ \text{count}_{\mathcal P}(v)\big)}{|\mathcal G|}$$
+
+```text
+                       Σ over distinct GT values v:  min( count_GT(v), count_pred(v) )
+Cell_Content_Recall = ────────────────────────────────────────────────────────────────
+                                  |𝒢|   (number of non-empty GT cells)
+```
 
 - **How:** whole-table (not per-row) multiset overlap; `|𝒢|` = number of non-empty GT cells; the `min`
   makes duplicated values count only as often as they truly appear. **Position-independent.**
@@ -175,6 +187,17 @@ where `|g|` = GT length in **Unicode codepoints** and `Lev` is Levenshtein edit 
 single-character insertions + deletions + substitutions):
 
 $$\operatorname{Lev}(i,j)=\begin{cases}\max(i,j)&\min(i,j)=0\\[2pt]\min\begin{cases}\operatorname{Lev}(i-1,j)+1\\ \operatorname{Lev}(i,j-1)+1\\ \operatorname{Lev}(i-1,j-1)+\mathbb{1}[g_i\neq p_j]\end{cases}&\text{otherwise}\end{cases}$$
+
+```text
+       Lev(g, p)            Lev = Levenshtein edit distance (ins + del + subst)
+CER = ───────────           |g| = length of GT string in Unicode codepoints
+         |g|
+
+Lev(i,j) = max(i,j)                          if min(i,j) == 0
+         = min( Lev(i-1, j)   + 1,           otherwise  ← delete
+                Lev(i,   j-1) + 1,                      ← insert
+                Lev(i-1, j-1) + [ g_i != p_j ] )        ← substitute (0 if chars equal)
+```
 
 - **How:** codepoint-level; edge cases in `cer()` — 0 if both empty, 1 if GT empty but pred non-empty.
   (Codepoint-level is slightly stricter than grapheme-level for Khmer, where one glyph spans several
