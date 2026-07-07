@@ -16,7 +16,7 @@ from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.engines.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
-from khmer_pipeline.engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
+from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export, grid_to_csv, tables_to_xlsx
 from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
 from khmer_pipeline.utils.memory import clear_device_cache  # NEW: Memory management import
@@ -158,6 +158,19 @@ with st.sidebar:
         )
 
         st.header("Extraction")
+        _ENGINE_LABELS = {
+            "Surya (fast — default)": "surya",
+            "Surya + Kiri (better Khmer + numeral recognition, slower)": "surya_kiri",
+        }
+        ocr_engine_label = st.radio(
+            "OCR engine",
+            list(_ENGINE_LABELS),
+            help="Surya + Kiri recognizes each table cell with KiriOCR — better on "
+                 "mixed Khmer/number cells, but ~30–45 s per page.",
+        )
+        ocr_engine_key = _ENGINE_LABELS[ocr_engine_label]
+        if ocr_engine_key == "surya_kiri":
+            st.caption("⚠️ Surya + Kiri is slower (~30–45 s/page).")
         extraction_mode = st.radio(
             "Extraction mode",
             ["Full extraction (text + tables)", "Tables only"],
@@ -223,7 +236,7 @@ else:
     else:
         page_sel_part = "all"
     
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}"
+    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}_{ocr_engine_key}"
 
     # Reset run state when a different file is uploaded
     if uploaded.name != st.session_state.get("last_uploaded_name"):
@@ -373,7 +386,7 @@ else:
                 def _on_page(idx: int, total: int) -> None:
                     ocr_progress.progress((idx + 1) / total, text=f"OCR: Page {idx + 1} of {total}")
 
-                surya_result = ACTIVE_OCR_ENGINE(preprocess_result, on_page=_on_page)
+                surya_result = get_ocr_engine(ocr_engine_key)(preprocess_result, on_page=_on_page)
                 ocr_progress.progress(1.0, text="OCR Complete!")
                 if surya_result.warnings:
                     st.warning(

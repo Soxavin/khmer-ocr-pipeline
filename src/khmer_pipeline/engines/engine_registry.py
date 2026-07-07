@@ -18,3 +18,8 @@ ACTIVE_OCR_ENGINE: OCREngine = _OCR_ENGINES.get(
 )
 ACTIVE_CORRECTION_ENGINE: CorrectionEngine = postprocess
 
+
+def get_ocr_engine(name: str) -> OCREngine:
+    """Return the OCR engine registered under *name*, or run_surya if unknown."""
+    return _OCR_ENGINES.get(name, run_surya)
+
