@@ -25,7 +25,10 @@ from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from ..utils.memory import clear_device_cache
 from .surya import run_surya, get_manager, _get_predictors, _build_table_from_grid
 from .table_stitch import merge_table_regions
-from .kiri_recognizer import recognize_cells
+from .kiri_recognizer import recognize_cells_conf
+
+# Cells below this per-cell recognizer confidence trigger a page-level warning.
+_LOW_CONF_THRESHOLD = 0.80
 
 
 def run_surya_kiri(
@@ -61,9 +64,11 @@ def run_surya_kiri(
     raw_imgs = result.recognition_page_images if result.recognition_page_images is not None else result.page_images
 
     pages: list[SuryaPageResult] = []
+    extra_warnings: list[str] = []
     for idx, page in enumerate(base.pages):
         img = raw_imgs[idx]
         h, w = img.shape[:2]
+        page_low_conf_count = 0
 
         # Detect table regions on the raw page (own layout pass, not base.tables).
         layout = layout_pred([Image.fromarray(img)])[0]
@@ -95,10 +100,12 @@ def run_surya_kiri(
             if not cells:
                 continue
 
-            # Build a (row, col) → text grid from TableRecPredictor cells.
+            # Build a (row, col) → text grid from TableRecPredictor cells, plus a
+            # parallel confidence grid.
             # Pass 1: compute axis-aligned crops, applying the size guard directly
             # so tiny cells get "" without ever reaching the batched recognizer.
             grid: dict[tuple[int, int], str] = {}
+            conf_grid: dict[tuple[int, int], float] = {}
             pending_keys: list[tuple[int, int]] = []
             pending_crops: list[np.ndarray] = []
             for cell in cells:
@@ -111,15 +118,18 @@ def run_surya_kiri(
 
                 key = (cell.row_id, cell.col_id)
                 if cx1 - cx0 < 3 or cy1 - cy0 < 3:
+                    # Intentionally blank (too small to hold text), not low-confidence.
                     grid[key] = ""
+                    conf_grid[key] = 1.0
                 else:
                     pending_keys.append(key)
                     pending_crops.append(crop[cy0:cy1, cx0:cx1])
 
             # Pass 2: recognize all qualifying cells for this table in one batch.
-            texts = recognize_cells(pending_crops)
-            for key, text in zip(pending_keys, texts):
+            texts_confs = recognize_cells_conf(pending_crops)
+            for key, (text, conf) in zip(pending_keys, texts_confs):
                 grid[key] = text
+                conf_grid[key] = conf
 
             if not grid:
                 continue
@@ -132,9 +142,20 @@ def run_surya_kiri(
             # layout overlay in app.py reads t["bbox"]. _build_table_from_grid only
             # sets "image_bbox", so mirror run_surya and set "bbox" here too.
             table["bbox"] = [float(x0), float(y0), float(x1), float(y1)]
+            for tcell in table["cells"]:
+                conf = conf_grid.get((tcell["row_id"], tcell["col_id"]), 1.0)
+                tcell["confidence"] = conf
+                if conf < _LOW_CONF_THRESHOLD:
+                    page_low_conf_count += 1
             new_tables.append(table)
 
         clear_device_cache()
+
+        if page_low_conf_count:
+            extra_warnings.append(
+                f"Surya+Kiri page {page.page_index + 1}: {page_low_conf_count} table "
+                f"cell(s) below {_LOW_CONF_THRESHOLD:.0%} confidence — verify those cells."
+            )
 
         if not new_tables:
             pages.append(page)
@@ -150,5 +171,5 @@ def run_surya_kiri(
     return SuryaResult(
         source_name=base.source_name,
         pages=pages,
-        warnings=base.warnings,
+        warnings=base.warnings + extra_warnings,
     )

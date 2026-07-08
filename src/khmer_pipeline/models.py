@@ -27,6 +27,7 @@ class Cell(TypedDict, total=False):
     bbox: list[float]
     polygon: list[list[float]]
     text_lines: list[TextLine]
+    confidence: float  # per-cell recognizer confidence (0..1), set by surya_kiri; absent for other engines
 
 
 class RowSpec(TypedDict):

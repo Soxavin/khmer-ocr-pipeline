@@ -1,11 +1,12 @@
 """Kiri OCR recognizer wrapper — per-cell Otsu binarization + CTC recognition.
 
 Provides the thin integration layer between the vendored Kiri model and the
-surya_kiri hybrid engine. Exposes three public functions:
+surya_kiri hybrid engine. Exposes four public functions:
 
-  otsu_cell(rgb)             — Otsu-threshold a cell crop, auto-inverting dark backgrounds
-  recognize_cell(crop_rgb)   — Full pipeline for a single crop: Otsu → Kiri CTC decode → clean text
-  recognize_cells(crops_rgb) — Batched equivalent of recognize_cell over a list of crops
+  otsu_cell(rgb)                  — Otsu-threshold a cell crop, auto-inverting dark backgrounds
+  recognize_cell(crop_rgb)        — Full pipeline for a single crop: Otsu → Kiri CTC decode → clean text
+  recognize_cells(crops_rgb)      — Batched equivalent of recognize_cell over a list of crops
+  recognize_cells_conf(crops_rgb) — Same as recognize_cells, also returning per-cell confidence
 
 Model weights are lazy-loaded on first call and cached for the process lifetime.
 """
@@ -17,6 +18,7 @@ from typing import Optional
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 
 from .kiri_vendor.loader import load_kiri_model
@@ -95,6 +97,19 @@ def recognize_cells(crops_rgb: list[np.ndarray]) -> list[str]:
     per cell. Returns one string per input crop, in order. Any failure warns
     and falls back to `""` for the affected crops rather than raising.
     """
+    return [t for t, _ in recognize_cells_conf(crops_rgb)]
+
+
+def recognize_cells_conf(crops_rgb: list[np.ndarray]) -> list[tuple[str, float]]:
+    """Recognize text + confidence for a batch of table-cell crops.
+
+    Same batched pipeline as `recognize_cells` (Otsu → Kiri CTC decode → clean
+    text), but each result is paired with a confidence score: the mean of the
+    max softmax probability over the non-blank predicted timesteps for that
+    cell (0.0 if every timestep predicted blank). Returns one (text, conf) pair
+    per input crop, in order. Any failure warns and falls back to ("", 0.0) for
+    the affected crops rather than raising.
+    """
     if not crops_rgb:
         return []
 
@@ -102,9 +117,9 @@ def recognize_cells(crops_rgb: list[np.ndarray]) -> list[str]:
         model, cfg, tokenizer = _get_kiri()
     except Exception as exc:
         warnings.warn(f"Kiri recognition failed: {exc}")
-        return [""] * len(crops_rgb)
+        return [("", 0.0)] * len(crops_rgb)
 
-    results: list[str] = [""] * len(crops_rgb)
+    results: list[tuple[str, float]] = [("", 0.0)] * len(crops_rgb)
     for start in range(0, len(crops_rgb), _BATCH_SIZE):
         chunk = crops_rgb[start:start + _BATCH_SIZE]
         try:
@@ -119,15 +134,25 @@ def recognize_cells(crops_rgb: list[np.ndarray]) -> list[str]:
                 logits = model.ctc_head(mem)
                 pred_ids = logits.argmax(dim=-1)
 
+            probs = F.softmax(logits, dim=-1).cpu()
+            maxp = probs.max(dim=-1).values          # (N, T)
+            ids = pred_ids.cpu()
+
             for i in range(len(chunk)):
-                text = tokenizer.decode_ctc(pred_ids[i].tolist())
+                row = ids[i].tolist()
+                text = tokenizer.decode_ctc(row)
                 if cfg.COLLAPSE_WHITESPACE:
                     text = " ".join(text.split())
                 # Post-processing: strip whitespace, trailing dots (Kiri often
                 # emits a '.' after numbers).
-                results[start + i] = text.strip().rstrip(".").strip()
+                text = text.strip().rstrip(".").strip()
+
+                nb = [maxp[i, t].item() for t, pid in enumerate(row) if pid != tokenizer.blank_id]
+                conf = float(sum(nb) / len(nb)) if nb else 0.0
+
+                results[start + i] = (text, conf)
         except Exception as exc:
             warnings.warn(f"Kiri recognition failed: {exc}")
-            # Affected chunk falls back to "" (already the default in results).
+            # Affected chunk falls back to ("", 0.0) (already the default in results).
 
     return results

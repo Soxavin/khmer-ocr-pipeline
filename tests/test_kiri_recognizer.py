@@ -8,7 +8,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from khmer_pipeline.engines.kiri_recognizer import otsu_cell, recognize_cell, recognize_cells
+from khmer_pipeline.engines.kiri_recognizer import (
+    otsu_cell,
+    recognize_cell,
+    recognize_cells,
+    recognize_cells_conf,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +89,10 @@ def test_recognize_cells_empty_list_returns_empty():
     assert recognize_cells([]) == []
 
 
+def test_recognize_cells_conf_empty_returns_empty():
+    assert recognize_cells_conf([]) == []
+
+
 # ---------------------------------------------------------------------------
 # Recognition integration test (skipped unless model is cached)
 # ---------------------------------------------------------------------------
@@ -128,3 +137,24 @@ class TestRecognizeCellIntegration:
         assert len(batched) == 2
         assert all(isinstance(t, str) for t in batched)
         assert batched == [recognize_cell(img_a), recognize_cell(img_b)]
+
+    def test_recognize_cells_conf_returns_text_and_confidence(self):
+        """recognize_cells_conf returns (str, float) pairs with conf in [0, 1]."""
+        img = np.full((40, 120, 3), 255, dtype=np.uint8)
+        result = recognize_cells_conf([img])
+        assert isinstance(result, list)
+        assert len(result) == 1
+        text, conf = result[0]
+        assert isinstance(text, str)
+        assert isinstance(conf, float)
+        assert 0.0 <= conf <= 1.0
+
+    def test_recognize_cells_conf_text_matches_recognize_cells(self):
+        """Text half of recognize_cells_conf must equal recognize_cells' output."""
+        img_a = np.full((40, 120, 3), 255, dtype=np.uint8)
+        img_b = np.full((48, 200, 3), 255, dtype=np.uint8)
+        img_b[10:38, 20:180] = 0  # dark bar
+
+        conf_pairs = recognize_cells_conf([img_a, img_b])
+        texts = [t for t, _ in conf_pairs]
+        assert texts == recognize_cells([img_a, img_b])

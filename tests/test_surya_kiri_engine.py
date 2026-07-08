@@ -12,7 +12,7 @@ import numpy as np
 
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
 from khmer_pipeline.engines.engine_registry import _OCR_ENGINES
-from khmer_pipeline.engines.surya_kiri_engine import run_surya_kiri
+from khmer_pipeline.engines.surya_kiri_engine import run_surya_kiri, _LOW_CONF_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +77,13 @@ def _fake_table_rec_cells(n_rows: int = 2, n_cols: int = 2):
 
 
 def _run(base=None, *, with_table=True, cells=None, recognize="42",
-         preprocess=None):
-    """Run the engine with all model-loading dependencies stubbed."""
+         confidence=1.0, preprocess=None):
+    """Run the engine with all model-loading dependencies stubbed.
+
+    `recognize` and `confidence` are either a scalar (applied to every pending
+    cell) or a list (one entry per pending cell, in TableRecPredictor cell
+    order) — mirroring what `recognize_cells_conf` returns as (text, conf) pairs.
+    """
     base = base or _base_result()
     cells = _fake_table_rec_cells(2, 2) if cells is None else cells
     with ExitStack() as stack:
@@ -87,9 +92,11 @@ def _run(base=None, *, with_table=True, cells=None, recognize="42",
         p("get_manager")
         p("_get_predictors", return_value=(_fake_layout_pred(with_table), None))
         if isinstance(recognize, list):
-            p("recognize_cells", return_value=recognize)
+            confs = confidence if isinstance(confidence, list) else [confidence] * len(recognize)
+            p("recognize_cells_conf", return_value=list(zip(recognize, confs)))
         else:
-            p("recognize_cells", side_effect=lambda crops: [recognize] * len(crops))
+            p("recognize_cells_conf",
+              side_effect=lambda crops: [(recognize, confidence)] * len(crops))
         mock_tbl = MagicMock()
         mock_result = MagicMock()
         mock_result.cells = cells
@@ -174,3 +181,26 @@ def test_table_has_top_level_bbox_for_layout_overlay():
     table = _run().pages[0].tables[0]
     assert "bbox" in table
     assert len(table["bbox"]) == 4
+
+
+# ---------------------------------------------------------------------------
+# Confidence
+# ---------------------------------------------------------------------------
+
+def test_cells_carry_confidence():
+    """Every table cell gets a `confidence` key sourced from recognize_cells_conf."""
+    table = _run(recognize=["A", "B", "C", "D"], confidence=0.95).pages[0].tables[0]
+    assert len(table["cells"]) == 4
+    assert all(cell["confidence"] == 0.95 for cell in table["cells"])
+
+
+def test_low_confidence_cells_trigger_warning():
+    """When confidences are below _LOW_CONF_THRESHOLD, a page-level warning is added."""
+    r = _run(recognize=["A", "B", "C", "D"], confidence=_LOW_CONF_THRESHOLD - 0.1)
+    assert any("below" in w and "confidence" in w for w in r.warnings)
+
+
+def test_high_confidence_cells_no_warning():
+    """When all confidences are above _LOW_CONF_THRESHOLD, no confidence warning is added."""
+    r = _run(recognize=["A", "B", "C", "D"], confidence=_LOW_CONF_THRESHOLD + 0.1)
+    assert not any("confidence" in w for w in r.warnings)
