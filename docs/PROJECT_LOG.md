@@ -911,6 +911,43 @@ weight download. Equivalence-tested against the upstream git-main package: **12/
 
 ---
 
+### 2.31 `surya_kiri` productionised — UI-selectable, ~2.4× faster, skew-robust, confidence-aware (2026-07-08)
+
+Took the validated `surya_kiri` engine from "works in a script" to a first-class, integrated pipeline engine.
+Every change is data-driven; several *rejected* options are recorded because the measurement is the finding.
+
+- **UI integration.** `get_ocr_engine(name)` helper on the registry + a sidebar **"OCR engine"** picker in
+  `app.py` (Surya default / Surya+Kiri opt-in, wired into `settings_key`); same engine added to the `lab.py`
+  comparison tool. No `OCR_ENGINE` env var needed. CLI/eval keep the env-var default via `ACTIVE_OCR_ENGINE`.
+- **Speed: ~42s → ~17.5s/page (~2.4×), output byte-identical.** (1) `run_surya(skip_tables=True)` drops Table
+  regions before recognition so Surya's expensive table-HTML VLM never runs (base OCR pass 32s → 1.2s) — the
+  hybrid rebuilds tables itself anyway. (2) Batched Kiri recognition (`recognize_cells`, `_BATCH_SIZE=64`)
+  replaces 240 per-cell forwards + temp-PNG round-trips.
+- **REJECTED — Kiri on MPS.** Measured ~1s gain (17.5→16.5s, within noise) → reverted. Finding: after batching,
+  **Surya's models (2 layout passes + TableRecPredictor), not Kiri, are the floor.** MPS also risks GPU-memory
+  contention + output drift. **REJECTED — eliminate the 2nd layout pass** (~3s): a core-path refactor of shared
+  Surya code for a small gain + a text-from-raw tradeoff; not worth it.
+- **Geometric-only preprocessing (the skew fix).** The engine previously recognised from *fully-raw* pixels
+  (photometric steps hurt per-cell Otsu) — but that also skipped **deskew**, leaving it catastrophically
+  fragile: a **4° tilt dropped it 0.79 → 0.03** (silent garbage; TableRec collapses). A 4-way experiment
+  (straight/skewed × raw/geometric) settled it: recognise from a **geometric-only** image (crop + deskew, NO
+  photometric) via new `_geometric_preprocess` + `PreprocessResult.recognition_page_images` (renamed from
+  `raw_page_images`). Result: skew recovers **0.03 → 0.58**, AND the clean-eval mean *rose* **0.580 → 0.586**
+  (p3 structure fixed to 24×9). This also makes the app's `deskew` toggle — previously a silent no-op for the
+  hybrid — actually work, bringing it to parity with Surya-alone on geometric robustness.
+- **Per-cell confidence.** `recognize_cells_conf` returns `(text, conf)` (mean max-softmax over non-blank CTC
+  timesteps — the value we were discarding); every table cell now carries `cell["confidence"]`, and a per-page
+  warning flags cells below 80% ("verify those cells"). Confidence lives on the cells → a visual heatmap is a
+  clean UI-only add later.
+- **REJECTED — `៛`/digit normalization toggle.** Blanket digit conversion already exists (`convert_numerals`,
+  export.py); the only surgical add (fix mixed-script `០.00%` slips while preserving the *legitimately-Khmer*
+  row-index column `២៣`) is niche + overlapping. The real fix for the `៛`-glyph systematic error is
+  **fine-tuning Kiri**, not a postprocess band-aid.
+- Commits `1849e0f`, `8270dcf`, `75f0258`, `1371938`, `9ba748a`, `1ccce04`; 409 tests green. NEXT (optional):
+  fine-tune Kiri on the `៛` glyph; visual confidence heatmap (data already on the cells).
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
