@@ -27,7 +27,7 @@ def _preprocess(n_pages: int = 1, with_raw: bool = True) -> PreprocessResult:
         page_images=pages,
         dpi=200,
         page_count=n_pages,
-        raw_page_images=[p.copy() for p in pages] if with_raw else None,
+        recognition_page_images=[p.copy() for p in pages] if with_raw else None,
     )
 
 
@@ -149,7 +149,7 @@ def test_empty_cells_skips_table():
 # ---------------------------------------------------------------------------
 
 def test_falls_back_to_page_images_without_raw():
-    """When raw_page_images is None, the engine still runs (uses page_images)."""
+    """When recognition_page_images is None, the engine still runs (uses page_images)."""
     r = _run(preprocess=_preprocess(with_raw=False))
     assert isinstance(r, SuryaResult)
     assert len(r.pages[0].tables) == 1

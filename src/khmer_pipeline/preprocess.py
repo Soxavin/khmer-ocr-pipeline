@@ -25,9 +25,10 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
         page_images=processed,
         dpi=result.dpi,
         page_count=result.page_count,
-        # Keep the raw pages so the surya_kiri engine can recognise cells from
-        # un-preprocessed pixels (preprocessing degrades Kiri — see the engine).
-        raw_page_images=[img.copy() for img in result.page_images],
+        # Geometric-only pages (crop + deskew, no photometric changes) so the
+        # surya_kiri engine can recognise cells with deskew applied without the
+        # photometric normalisation that degrades Kiri — see the engine.
+        recognition_page_images=[_geometric_preprocess(img, config) for img in result.page_images],
     )
 
 
@@ -74,6 +75,20 @@ def _preprocess_image(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
         bgr = _sharpen(bgr)
     if cfg.normalise:
         bgr = _normalise(bgr)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return np.ascontiguousarray(rgb)
+
+
+def _geometric_preprocess(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
+    """Geometric-only preprocessing: crop + resolution cap + optional deskew, with
+    NO photometric changes (CLAHE / desaturation / sharpen / stamp removal). Used
+    by per-cell-binarizing recognizers (surya_kiri) that need geometric correction
+    (deskew) but are degraded by photometric normalization."""
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    bgr = _crop_margins(bgr)
+    bgr = _cap_resolution(bgr)
+    if cfg.deskew:
+        bgr = _deskew(bgr)
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     return np.ascontiguousarray(rgb)
 

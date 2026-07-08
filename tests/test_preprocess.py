@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 from khmer_pipeline.models import IngestResult, PreprocessResult
-from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds, _crop_margins, _cap_resolution
+from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds, _crop_margins, _cap_resolution, _geometric_preprocess
 
 
 def _make_ingest_result(n_pages: int = 1, h: int = 100, w: int = 100) -> IngestResult:
@@ -241,3 +241,29 @@ def test_cap_resolution_preserves_dtype():
     img = np.zeros((4000, 3000, 3), dtype=np.uint8)
     result = _cap_resolution(img, max_dim=2048)
     assert result.dtype == np.uint8
+
+
+# --- recognition_page_images / _geometric_preprocess ---
+
+def test_preprocess_populates_recognition_page_images():
+    r = preprocess(_make_ingest_result(3), PreprocessConfig(remove_stamps=False, sharpen=False, normalise=False, deskew=False, normalise_table_backgrounds=False))
+    assert r.recognition_page_images is not None
+    assert len(r.recognition_page_images) == 3
+
+
+def test_geometric_preprocess_skips_photometric_changes():
+    """_geometric_preprocess must not apply photometric changes (normalise/sharpen/
+    remove_stamps/normalise_table_backgrounds) even when those flags are on —
+    only crop + resolution cap + optional deskew run."""
+    ingest_r = _make_colored_bg_image()
+    img = ingest_r.page_images[0]
+    cfg = PreprocessConfig(remove_stamps=True, sharpen=True, normalise=True, deskew=False, normalise_table_backgrounds=True)
+    geo = _geometric_preprocess(img, cfg)
+
+    # Manually compute the crop+cap-only baseline (deskew off here, no photometric steps).
+    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    bgr = _crop_margins(bgr)
+    bgr = _cap_resolution(bgr)
+    expected = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    assert np.array_equal(geo, expected)

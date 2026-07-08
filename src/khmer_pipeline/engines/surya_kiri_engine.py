@@ -52,11 +52,13 @@ def run_surya_kiri(
     from surya.table_rec import TableRecPredictor
     _tbl_pred = TableRecPredictor(manager=manager)
 
-    # Recognise from RAW pixels: preprocessing (CLAHE/desaturation) helps Surya's
-    # structure but degrades Kiri recognition. Because preprocessing also deskews/
-    # crops, preprocessed-space bboxes don't map onto raw pixels — so the WHOLE
-    # table pipeline (layout → TableRec → crop) runs on the raw page here.
-    raw_imgs = result.raw_page_images if result.raw_page_images is not None else result.page_images
+    # Recognise from the geometric-only image: deskew/crop are applied (deskew is
+    # needed for skewed scans) but photometric normalization (CLAHE/desaturation)
+    # is skipped, since it degrades Kiri's per-cell Otsu binarization. Because the
+    # fully-preprocessed image also differs geometrically, its bboxes don't map
+    # onto this image — so the WHOLE table pipeline (layout → TableRec → crop)
+    # runs on the geometric-only page here.
+    raw_imgs = result.recognition_page_images if result.recognition_page_images is not None else result.page_images
 
     pages: list[SuryaPageResult] = []
     for idx, page in enumerate(base.pages):
