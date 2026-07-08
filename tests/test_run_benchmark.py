@@ -16,6 +16,7 @@ from khmer_pipeline.evaluation.run_benchmark import (
     _tool_versions,
     _write_manifest,
     _DEFAULT_DATASETS,
+    _RUNS_ROOT,
 )
 from khmer_pipeline.models import IngestResult, PreprocessResult
 from khmer_pipeline.evaluation.analyze_benchmark import summarize
@@ -39,7 +40,9 @@ def test_engine_name_fallback(monkeypatch):
 
 def test_default_run_dir():
     result = _default_run_dir("run_surya", datetime(2026, 6, 19, 13, 5, 9))
-    assert result == Path("eval/runs/20260619_130509_run_surya")
+    # _RUNS_ROOT is now anchored to the repo root, not CWD-relative.
+    assert result == _RUNS_ROOT / "20260619_130509_run_surya"
+    assert result.name == "20260619_130509_run_surya"
 
 
 def test_done_keys_missing_file(tmp_path):
@@ -141,8 +144,9 @@ def test_argparse_data_dir_default():
     parser.add_argument("--resume", action="store_true", default=False)
     args = parser.parse_args([])
     assert args.data_dir == _DEFAULT_DATASETS
-    assert args.data_dir[0] == Path("eval/datasets/synthetic_tables")
-    assert args.data_dir[1] == Path("eval/datasets/synthetic_documents")
+    # Anchored to the repo root now; assert by leaf name rather than a CWD-relative path.
+    assert args.data_dir[0].name == "synthetic_tables"
+    assert args.data_dir[1].name == "synthetic_documents"
 
 
 def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
@@ -247,6 +251,103 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     dump_text = pred_file.read_text(encoding="utf-8")
     assert "--- GROUND TRUTH (pooled) ---" in dump_text
     assert "--- OCR PREDICTION (pooled) ---" in dump_text
+
+
+def _minimal_png_bytes() -> bytes:
+    import struct, zlib
+    sig = b'\x89PNG\r\n\x1a\n'
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0))
+    idat = chunk(b'IDAT', zlib.compress(b'\x00\xff\xff\xff'))
+    iend = chunk(b'IEND', b'')
+    return sig + ihdr + idat + iend
+
+
+def _patch_benchmark_fakes(monkeypatch, cell_accs):
+    """Stub ingest + OCR + metric evaluators; cell_accuracy is drawn in order
+    from `cell_accs` (one value consumed per processed image)."""
+    accs = iter(cell_accs)
+
+    def fake_ingest(img_bytes, name, dpi):
+        return IngestResult(source_name=name, page_images=[np.zeros((10, 10, 3), dtype=np.uint8)],
+                            dpi=dpi, page_count=1)
+
+    fake_page = type("FakePage", (), {"tables": [], "ocr_text": "hello"})()
+    canned_ocr = type("FakeOCR", (), {"pages": [fake_page]})()
+
+    def fake_ocr_engine(pre):
+        return canned_ocr
+    fake_ocr_engine.__name__ = "run_fake"
+
+    def fake_eval_table(pred, gt_grid):
+        return {"tables_found": 0, "gt_rows": 2, "gt_cols": 1, "pred_rows": 0,
+                "pred_cols": 0, "cell_accuracy": next(accs),
+                "cell_content_recall": 0.0, "table_cer": 1.0}
+
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ingest", fake_ingest)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr_engine)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_table", fake_eval_table)
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_text",
+                        lambda text, pred, gt: {"text_cer": 0.5, "paragraph_recall": 0.0, "paragraph_leak": 0})
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.evaluate_document",
+                        lambda text, pred, gt: {"document_cer": 0.1})
+    monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.clear_device_cache", lambda: None)
+
+
+def _write_gt_pair(data_dir, stem, gt_obj):
+    (data_dir / f"{stem}_ground_truth.json").write_text(
+        gt_obj if isinstance(gt_obj, str) else json.dumps(gt_obj), encoding="utf-8")
+    (data_dir / f"{stem}.png").write_bytes(_minimal_png_bytes())
+
+
+def test_resume_recomputes_aggregates_over_full_csv(tmp_path, monkeypatch):
+    """B3: after --resume the manifest aggregates + image_count must reflect ALL
+    rows in results.csv, not just the resumed session's images."""
+    from khmer_pipeline.evaluation.run_benchmark import run_benchmark
+    data_dir = tmp_path / "synthetic_data"
+    data_dir.mkdir()
+    run_dir = tmp_path / "run"
+
+    gt = {"font_family": "Battambang", "template": "t", "data": [["h"], ["r"]]}
+    _write_gt_pair(data_dir, "aaa", gt)
+
+    _patch_benchmark_fakes(monkeypatch, cell_accs=[0.2, 0.8])
+
+    run_benchmark([data_dir], run_dir=run_dir)               # processes aaa (0.2)
+    _write_gt_pair(data_dir, "bbb", gt)
+    run_benchmark([data_dir], run_dir=run_dir, resume=True)  # resumes → bbb (0.8)
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["image_count"] == 2
+    # avg over BOTH rows (0.2, 0.8) = 0.5 — not just the resumed image
+    assert manifest["aggregates"]["avg_cell_accuracy"] == 0.5
+
+    with (run_dir / "results.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+
+
+def test_malformed_gt_produces_error_row_and_continues(tmp_path, monkeypatch):
+    """B3: a malformed GT file must yield an Error row, not abort the whole run."""
+    from khmer_pipeline.evaluation.run_benchmark import run_benchmark
+    data_dir = tmp_path / "synthetic_data"
+    data_dir.mkdir()
+    run_dir = tmp_path / "run"
+
+    _write_gt_pair(data_dir, "aaa_bad", "{ this is not valid json")
+    _write_gt_pair(data_dir, "bbb_good", {"font_family": "Hanuman", "template": "t", "data": [["h"]]})
+
+    _patch_benchmark_fakes(monkeypatch, cell_accs=[0.9])  # only the good image scores
+
+    run_benchmark([data_dir], run_dir=run_dir)
+
+    with (run_dir / "results.csv").open(encoding="utf-8") as f:
+        rows = {r["Image_File"]: r for r in csv.DictReader(f)}
+    assert len(rows) == 2
+    assert rows["aaa_bad.png"]["Error"] != ""       # malformed GT → Error row
+    assert rows["aaa_bad.png"]["Font"] == ""         # blank font/template default
+    assert rows["bbb_good.png"]["Error"] == ""       # good image still processed
 
 
 def test_summarize_empty():

@@ -280,6 +280,33 @@ def test_multiple_tables_built_from_html():
     assert len(r.pages[0].tables) == 2
 
 
+def test_duplicate_html_block_assignment_warns():
+    """One recognition-HTML block matched to two layout tables emits a warning
+    (duplicated-rows risk); the assignment algorithm itself is unchanged."""
+    b1 = _make_layout_bbox_mock("Table")
+    b1.bbox = [10.0, 60.0, 200.0, 150.0]
+    b2 = _make_layout_bbox_mock("Table")
+    b2.bbox = [12.0, 61.0, 201.0, 151.0]  # within tolerance of the same HTML key
+    layout_result = MagicMock()
+    layout_result.error = False
+    layout_result.bboxes = [b1, b2]
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    table_block = _make_block_mock(0, label="Table")
+    table_block.bbox = [10.0, 60.0, 200.0, 150.0]
+    table_block.html = "<table><tr><td>x</td></tr></table>"
+    page_ocr = MagicMock()
+    page_ocr.blocks = [table_block]
+    rec_pred = MagicMock(return_value=[page_ocr])
+
+    with patch("khmer_pipeline.engines.surya._get_predictors",
+               return_value=(layout_pred, rec_pred)), \
+         patch("khmer_pipeline.engines.surya._stitch_enabled", return_value=False):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    assert any("reused" in w for w in r.warnings)
+
+
 def test_run_surya_warnings_empty_when_no_issues():
     with patch("khmer_pipeline.engines.surya._get_predictors", return_value=_make_predictors()):
         r = run_surya(_make_preprocess_result(n_pages=1))

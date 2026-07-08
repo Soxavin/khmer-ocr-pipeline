@@ -16,7 +16,10 @@ from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, ev
 from ..utils.memory import clear_device_cache
 from .analyze_benchmark import summarize
 
-_EVAL_ROOT = Path("eval")
+# Anchor eval/ to the repo root (…/src/khmer_pipeline/evaluation/run_benchmark.py
+# → parents[3]) so runs land in the repo's eval/ regardless of the CWD the
+# benchmark is launched from.
+_EVAL_ROOT = Path(__file__).resolve().parents[3] / "eval"
 _DATASETS_ROOT = _EVAL_ROOT / "datasets"
 _RUNS_ROOT = _EVAL_ROOT / "runs"
 _DEFAULT_DATASETS = [_DATASETS_ROOT / "synthetic_tables", _DATASETS_ROOT / "synthetic_documents"]
@@ -56,6 +59,15 @@ def _done_keys(csv_path: Path) -> set[tuple[str, str]]:
     with csv_path.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         return {(r["Dataset"], r["Image_File"]) for r in reader}
+
+
+def _read_all_rows(csv_path: Path) -> list[dict]:
+    """Read every data row from results.csv (empty list if missing). Used after
+    the loop to recompute aggregates/summary over the FULL run, incl. --resume."""
+    if not csv_path.exists():
+        return []
+    with csv_path.open(encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
 
 
 def _raw_preprocess_result(ingest_result) -> PreprocessResult:
@@ -166,16 +178,6 @@ def run_benchmark(
 
     # per-dataset image counts: name -> (path, count)
     ds_counts: dict[str, tuple[Path, int]] = {}
-    # metric accumulator for aggregates
-    metric_vals: dict[str, list[float]] = {
-        "cell_accuracy": [],
-        "cell_content_recall": [],
-        "table_cer": [],
-        "text_cer": [],
-        "document_cer": [],
-    }
-
-    all_rows: list[dict] = []
 
     with results_csv.open(file_mode, newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
@@ -203,17 +205,20 @@ def run_benchmark(
                     print(f"[RESUME SKIP] {img_path.name}")
                     continue
 
-                gt = json.loads(gt_path.read_text(encoding="utf-8"))
-                font = gt.get("font_family", "")
-                template = gt.get("template", "")
-
-                # tables_expected: docs schema has a list; isolated has one table
-                if "tables" in gt:
-                    tables_expected = len(gt["tables"])
-                else:
-                    tables_expected = 1
+                # Defaults so a malformed GT file yields an Error row (with blank
+                # font/template) instead of aborting the whole run — the GT parse
+                # now happens inside the per-image try below.
+                font = ""
+                template = ""
+                tables_expected = 1
 
                 try:
+                    gt = json.loads(gt_path.read_text(encoding="utf-8"))
+                    font = gt.get("font_family", "")
+                    template = gt.get("template", "")
+                    # tables_expected: docs schema has a list; isolated has one table
+                    tables_expected = len(gt["tables"]) if "tables" in gt else 1
+
                     img_bytes = img_path.read_bytes()
                     ingest_result = ingest(img_bytes, img_path.name, dpi=200)
                     pre = (preprocess(ingest_result, PreprocessConfig())
@@ -271,17 +276,6 @@ def run_benchmark(
                     except Exception as exc:
                         print(f"[WARN] Could not write prediction dump for {img_path.name}: {exc}")
 
-                    # accumulate metrics for aggregates (skip blank)
-                    for csv_key, acc_key in [
-                        ("Cell_Accuracy", "cell_accuracy"),
-                        ("Cell_Content_Recall", "cell_content_recall"),
-                        ("Table_CER", "table_cer"),
-                        ("Text_CER", "text_cer"),
-                        ("Document_CER", "document_cer"),
-                    ]:
-                        if row[csv_key]:
-                            metric_vals[acc_key].append(float(row[csv_key]))
-
                 except Exception as exc:
                     print(f"[ERROR] {img_path.name}: {exc}")
                     row = {
@@ -302,7 +296,6 @@ def run_benchmark(
                 writer.writerow(row)
                 f.flush()
                 processed += 1
-                all_rows.append(row)
                 # increment per-dataset count
                 ds_counts[dataset_name] = (ds_counts[dataset_name][0], ds_counts[dataset_name][1] + 1)
                 clear_device_cache()
@@ -311,26 +304,36 @@ def run_benchmark(
         print("No images processed.")
         return
 
-    def _avg_metric(key: str) -> float:
-        vals = metric_vals[key]
+    # Recompute aggregates, per-dataset counts, and the summary from the FULL
+    # results.csv (every row, not just this session's), so --resume writes correct
+    # manifest.json / summary.txt instead of numbers for only the resumed images.
+    full_rows = _read_all_rows(results_csv)
+
+    def _avg_metric(csv_key: str) -> float:
+        vals = [float(r[csv_key]) for r in full_rows if r.get(csv_key)]
         return round(sum(vals) / len(vals), 3) if vals else 0.0
 
     aggregates = {
-        "avg_cell_accuracy": _avg_metric("cell_accuracy"),
-        "avg_cell_content_recall": _avg_metric("cell_content_recall"),
-        "avg_table_cer": _avg_metric("table_cer"),
-        "avg_text_cer": _avg_metric("text_cer"),
-        "avg_document_cer": _avg_metric("document_cer"),
+        "avg_cell_accuracy": _avg_metric("Cell_Accuracy"),
+        "avg_cell_content_recall": _avg_metric("Cell_Content_Recall"),
+        "avg_table_cer": _avg_metric("Table_CER"),
+        "avg_text_cer": _avg_metric("Text_CER"),
+        "avg_document_cer": _avg_metric("Document_CER"),
     }
 
+    full_counts: dict[str, int] = {}
+    for r in full_rows:
+        ds = r.get("Dataset", "")
+        full_counts[ds] = full_counts.get(ds, 0) + 1
     dataset_counts = [
-        (name, path, count) for name, (path, count) in ds_counts.items()
+        (name, path, full_counts.get(name, count))
+        for name, (path, count) in ds_counts.items()
     ]
 
     _write_manifest(run_dir, engine, with_correction, dataset_counts, aggregates, with_preprocess)
 
-    # write summary.txt from analyze_benchmark.summarize
-    summary_text = summarize(all_rows)
+    # write summary.txt from analyze_benchmark.summarize (over the full CSV)
+    summary_text = summarize(full_rows)
     (run_dir / "summary.txt").write_text(summary_text, encoding="utf-8")
 
     print(

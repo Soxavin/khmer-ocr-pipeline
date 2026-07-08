@@ -4,7 +4,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-_RUNS_ROOT = Path("eval/runs")
+# Anchor to the repo's eval/runs (…/src/khmer_pipeline/evaluation/analyze_benchmark.py
+# → parents[3]) so analysis works regardless of the CWD it is launched from.
+_RUNS_ROOT = Path(__file__).resolve().parents[3] / "eval" / "runs"
 
 
 def _load_rows(paths) -> list[dict]:

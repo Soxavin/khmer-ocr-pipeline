@@ -1,5 +1,7 @@
 from __future__ import annotations
 import datetime
+import hashlib
+import importlib.metadata
 import io
 import json
 import time
@@ -12,7 +14,6 @@ import streamlit as st
 from pathlib import Path
 from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.models import IngestResult
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.engines.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
@@ -236,12 +237,26 @@ else:
     else:
         page_sel_part = "all"
     
-    settings_key = f"{uploaded.name}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}_{ocr_engine_key}"
+    # Per-upload identity token so a re-uploaded, MODIFIED file with the same
+    # name never serves stale results (settings_key/reset check keyed on name
+    # alone would collide). Streamlit's file_id is stable across reruns of one
+    # upload but new per upload event (1.58); fall back to a session-cached
+    # content hash keyed by (name, size) on older Streamlit lacking file_id.
+    _file_id = getattr(uploaded, "file_id", None)
+    if _file_id is None:
+        _hash_key = (uploaded.name, uploaded.size)
+        if st.session_state.get("_upload_hash_key") != _hash_key:
+            st.session_state["_upload_hash"] = hashlib.md5(uploaded.getvalue()).hexdigest()[:8]
+            st.session_state["_upload_hash_key"] = _hash_key
+        _file_id = st.session_state["_upload_hash"]
 
-    # Reset run state when a different file is uploaded
-    if uploaded.name != st.session_state.get("last_uploaded_name"):
+    settings_key = f"{uploaded.name}_{_file_id}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}_{ocr_engine_key}"
+
+    # Reset run state when a different upload arrives (new file OR same name with
+    # new bytes → new _file_id).
+    if _file_id != st.session_state.get("last_uploaded_id"):
         st.session_state["run_triggered"] = False
-        st.session_state["last_uploaded_name"] = uploaded.name
+        st.session_state["last_uploaded_id"] = _file_id
         st.session_state.pop("last_key", None)
         st.session_state.pop("current_page_idx", None)  # NEW: Reset pagination index
         st.session_state.pop("stage_times", None)
@@ -322,10 +337,41 @@ else:
         stage_times: dict[str, float] = {}
         with st.status("Running pipeline...", expanded=True) as status:
             st.write("Reading the document…")
+            # Select pages BEFORE ingest so only the wanted pages are rasterized
+            # (a 50-page scan with "Single page" no longer renders all 50). page_index
+            # stays 0-based WITHIN the selection. doc_page_count was probed above via
+            # fitz; images are always a single page (page_indices ignored downstream).
+            _is_pdf = Path(uploaded.name).suffix.lower() == ".pdf"
+            if page_selection == "Single page":
+                if doc_page_count == 0:
+                    st.warning("Document has no pages.")
+                    st.stop()
+                idx = max(0, min(int(page_num) - 1, doc_page_count - 1))
+                selected_indices = [idx]
+            elif page_selection == "Page range":
+                if doc_page_count == 0:
+                    st.warning("Document has no pages.")
+                    st.stop()
+                start = max(0, int(page_start) - 1)
+                if start >= doc_page_count:
+                    st.warning(
+                        f"Start page {page_start} exceeds document length ({doc_page_count} page(s))."
+                    )
+                    st.stop()
+                end = min(int(page_end), doc_page_count)
+                selected_indices = list(range(start, max(start + 1, end)))
+            else:
+                selected_indices = None  # all pages
+
             _t0 = time.perf_counter()
             try:
                 uploaded.seek(0)
-                ingest_result = ingest(uploaded.read(), uploaded.name, dpi=dpi)
+                # ingest returns ONLY the selected pages, so it is already the
+                # filtered result — no separate full-document copy is kept.
+                filtered_ingest = ingest(
+                    uploaded.read(), uploaded.name, dpi=dpi,
+                    page_indices=selected_indices if _is_pdf else None,
+                )
             except Exception as e:
                 status.update(label="Stage 1 failed", state="error")
                 st.error(f"Stage 1 failed: {str(e)}")
@@ -333,41 +379,15 @@ else:
                 st.stop()
             stage_times["Stage 1 — Ingest"] = time.perf_counter() - _t0
 
-            total_pages = ingest_result.page_count
-            if page_selection == "Single page":
-                if total_pages == 0:
-                    st.warning("Document has no pages.")
-                    st.stop()
-                idx = max(0, min(int(page_num) - 1, total_pages - 1))
-                selected_indices = [idx]
-            elif page_selection == "Page range":
-                if total_pages == 0:
-                    st.warning("Document has no pages.")
-                    st.stop()
-                start = max(0, int(page_start) - 1)
-                if start >= total_pages:
-                    st.warning(
-                        f"Start page {page_start} exceeds document length ({total_pages} page(s))."
-                    )
-                    st.stop()
-                end = min(int(page_end), total_pages)
-                selected_indices = list(range(start, max(start + 1, end)))
-            else:
-                selected_indices = list(range(total_pages))
-            filtered_ingest = IngestResult(
-                source_name=ingest_result.source_name,
-                page_images=[ingest_result.page_images[i] for i in selected_indices],
-                dpi=ingest_result.dpi,
-                page_count=len(selected_indices),
-            )
-            st.session_state["ingest_result"] = ingest_result
             st.session_state["filtered_ingest"] = filtered_ingest
             clear_device_cache()  # NEW: Free memory after ingest
 
             st.write("Cleaning the pages…")
             _t0 = time.perf_counter()
             try:
-                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
+                # Only surya_kiri reads recognition_page_images; skip the second
+                # (geometric-only) preprocessing pass for every other engine.
+                config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds, with_recognition_images=(ocr_engine_key == "surya_kiri"))
                 preprocess_result = preprocess(filtered_ingest, config)
                 st.session_state["preprocess_result"] = preprocess_result
                 clear_device_cache()  # NEW: Free memory after preprocessing
@@ -424,7 +444,26 @@ else:
             st.write("Preparing your files…")
             _t0 = time.perf_counter()
             try:
-                export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables, stitch_pages=stitch_pages)
+                try:
+                    _surya_ver = importlib.metadata.version("surya-ocr")
+                except Exception:
+                    _surya_ver = "unknown"
+                provenance = {
+                    "engine": ocr_engine_key,
+                    "surya_ocr_version": _surya_ver,
+                    "dpi": dpi,
+                    "preprocess": {
+                        "remove_stamps": remove_stamps,
+                        "sharpen": sharpen,
+                        "normalise": normalise,
+                        "deskew": deskew,
+                        "normalise_table_backgrounds": normalise_table_backgrounds,
+                    },
+                    "stitch_pages": stitch_pages,
+                    "convert_numerals": convert_numerals,
+                    "repair_tables": repair_tables,
+                }
+                export_result = export(postprocess_result, convert_numerals=convert_numerals, repair_tables=repair_tables, stitch_pages=stitch_pages, provenance=provenance)
                 st.session_state["export_result"] = export_result
                 clear_device_cache()  # NEW: Final memory cleanup
             except Exception as e:
@@ -438,21 +477,20 @@ else:
             st.session_state["last_key"] = settings_key
 
             status.update(
-                label=f"Stages 1–5 complete — {filtered_ingest.page_count} page(s) from {ingest_result.source_name}",
+                label=f"Stages 1–5 complete — {filtered_ingest.page_count} page(s) from {filtered_ingest.source_name}",
                 state="complete",
             )
             
     if not (st.session_state.get("run_triggered") and "export_result" in st.session_state):
         st.stop()
 
-    ingest_result = st.session_state["ingest_result"]
     filtered_ingest = st.session_state["filtered_ingest"]
     preprocess_result = st.session_state["preprocess_result"]
     surya_result = st.session_state["surya_result"]
     postprocess_result = st.session_state["postprocess_result"]
     export_result = st.session_state["export_result"]
 
-    st.subheader(f"{filtered_ingest.page_count} page(s) from `{ingest_result.source_name}`")
+    st.subheader(f"{filtered_ingest.page_count} page(s) from `{filtered_ingest.source_name}`")
 
     # Results overview — document-level summary for at-a-glance review / demo
     total_tables = sum(len(p.tables) for p in surya_result.pages)

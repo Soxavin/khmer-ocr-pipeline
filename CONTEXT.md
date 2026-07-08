@@ -49,8 +49,10 @@ unexpected failure (layout/OCR/our own code) is caught, logs a
 `CorrectionEngine` (Stage 4: `(SuryaResult, skip_qwen=..., anomaly_threshold=...)
 -> PostprocessResult`). `src/khmer_pipeline/engines/engine_registry.py` is the single
 source of truth for which implementation is active: it maps the `OCR_ENGINE` env var
-(`surya` (default) / `tesseract` / `hybrid`) to the OCR engine and binds the correction
-engine, exposing them as `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`. (`hybrid` =
+(`surya` (default) / `surya_kiri` / `tesseract` / `hybrid`) to the OCR engine and binds the
+correction engine, exposing them as `ACTIVE_OCR_ENGINE` / `ACTIVE_CORRECTION_ENGINE`.
+(`surya_kiri` = Surya layout + TableRec structure + vendored Kiri CTC per-cell recognition;
+`hybrid` =
 SLANet table grid + Surya row-strip recognition, for dense fragmented tables.)
 The `hybrid` engine has two further env knobs: `KHMER_HYBRID_MODE` (`rowband` (default)
 / `cell`) and `KHMER_LAYOUT_DETECTOR` (`surya` (default) / `doclayout`) which chooses the

@@ -2,6 +2,7 @@ from __future__ import annotations
 import html as _html_mod
 import os
 import time
+import traceback
 import warnings
 from html.parser import HTMLParser
 from typing import Callable, Optional
@@ -176,21 +177,31 @@ def _parse_html_table(html: str) -> dict[tuple[int, int], str]:
     return parser.grid()
 
 
-def _find_matching_html(layout_bbox: list[float], table_html_map: dict[tuple, str]) -> str:
+def _closest_html_key(layout_bbox: list[float],
+                      table_html_map: dict[tuple, str]) -> tuple[tuple | None, str]:
     # Layout and recognition are separate passes; bboxes for the same region differ
     # slightly. Match by closest bbox within tolerance rather than exact key.
+    # Returns (matched_key, html); (None, "") when nothing qualifies. The key is
+    # exposed so callers can detect one block being claimed by two tables.
     if not table_html_map:
-        return ""
+        return None, ""
     lx0, ly0, lx1, ly1 = layout_bbox
-    best_html = ""
+    best_key = None
     min_diff = float("inf")
-    for key, html in table_html_map.items():
+    for key in table_html_map:
         kx0, ky0, kx1, ky1 = key
         diff = abs(lx0 - kx0) + abs(ly0 - ky0) + abs(lx1 - kx1) + abs(ly1 - ky1)
         if diff < min_diff:
             min_diff = diff
-            best_html = html
-    return best_html if min_diff < _BBOX_MATCH_TOLERANCE else ""
+            best_key = key
+    if best_key is not None and min_diff < _BBOX_MATCH_TOLERANCE:
+        return best_key, table_html_map[best_key]
+    return None, ""
+
+
+def _find_matching_html(layout_bbox: list[float], table_html_map: dict[tuple, str]) -> str:
+    # Thin wrapper: same closest-within-tolerance match, html-only return.
+    return _closest_html_key(layout_bbox, table_html_map)[1]
 
 
 def _build_table_from_grid(grid: dict[tuple[int, int], str], html: str,
@@ -302,8 +313,21 @@ def _process_page(
 
         table_bboxes = [b for b in layout_result.bboxes if b.label == "Table"]
         tables: list[Table] = []
+        matched_html_keys: set[tuple] = set()
         for b in table_bboxes:
-            table_html = _find_matching_html(b.bbox, table_html_map)
+            matched_key, table_html = _closest_html_key(b.bbox, table_html_map)
+            # If two layout tables claim the same recognition-HTML block, the block's
+            # content is duplicated into both — which stitch_pages then concatenates
+            # into repeated rows. Flag it; the assignment itself is unchanged.
+            if matched_key is not None:
+                if matched_key in matched_html_keys:
+                    warnings.warn(
+                        f"Page {page_index + 1}: recognition-HTML block reused for table "
+                        f"{len(tables) + 1} (already assigned to an earlier table); rows "
+                        f"may be duplicated in the export — verify this page."
+                    )
+                else:
+                    matched_html_keys.add(matched_key)
             if not table_html:
                 warnings.warn(
                     f"Page {page_index + 1}: no OCR HTML for table {len(tables) + 1}; cells will be empty."
@@ -339,6 +363,9 @@ def _process_page(
 
     except Exception as e:
         warnings.warn(f"Critical failure processing page {page_index + 1}: {e}")
+        # Full traceback to the developer console only (not the analyst warning) —
+        # otherwise reproducing a one-page failure means guessing where it threw.
+        _log(f"Critical failure processing page {page_index + 1}:\n{traceback.format_exc()}")
         return SuryaPageResult(
             page_index=page_index,
             text_blocks=[],

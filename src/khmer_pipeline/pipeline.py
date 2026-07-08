@@ -8,15 +8,24 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import importlib.metadata
 import json
+import os
 from pathlib import Path
 
 from .ingest import ingest
 from .preprocess import preprocess, PreprocessConfig
 from .engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
-from .export import export
+from .export import export, _CSV_BOM
 from .model_config import ANOMALY_THRESHOLD
 from .utils.memory import clear_device_cache
+
+
+def _surya_version() -> str:
+    try:
+        return importlib.metadata.version("surya-ocr")
+    except Exception:
+        return "unknown"
 
 def run(
     source_path: str | Path,
@@ -43,7 +52,13 @@ def run(
     ingest_result = ingest(data, source_path.name, dpi=dpi)
     print(f"  Ingested {ingest_result.page_count} page(s)")
 
-    config = PreprocessConfig(remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise, deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds)
+    # Only surya_kiri reads recognition_page_images; skip the second
+    # (geometric-only) preprocessing pass for every other engine.
+    config = PreprocessConfig(
+        remove_stamps=remove_stamps, sharpen=sharpen, normalise=normalise,
+        deskew=deskew, normalise_table_backgrounds=normalise_table_backgrounds,
+        with_recognition_images=(os.environ.get("OCR_ENGINE", "surya") == "surya_kiri"),
+    )
     preprocess_result = preprocess(ingest_result, config)
     print(f"  Preprocessing complete")
     clear_device_cache()
@@ -59,8 +74,24 @@ def run(
     print(f"  Post-processing complete")
     clear_device_cache()
 
+    provenance = {
+        "engine": getattr(ACTIVE_OCR_ENGINE, "__name__", "ocr"),
+        "surya_ocr_version": _surya_version(),
+        "dpi": dpi,
+        "preprocess": {
+            "remove_stamps": remove_stamps,
+            "sharpen": sharpen,
+            "normalise": normalise,
+            "deskew": deskew,
+            "normalise_table_backgrounds": normalise_table_backgrounds,
+        },
+        "stitch_pages": stitch_pages,
+        "convert_numerals": convert_numerals,
+        "repair_tables": repair_tables,
+    }
     export_result = export(postprocess_result, convert_numerals=convert_numerals,
-                           repair_tables=repair_tables, stitch_pages=stitch_pages)
+                           repair_tables=repair_tables, stitch_pages=stitch_pages,
+                           provenance=provenance)
 
     json_path = output_dir / f"{source_path.stem}_extracted.json"
     json_path.write_text(
@@ -70,7 +101,7 @@ def run(
     print(f"  JSON written to {json_path}")
 
     for table_id, csv_string in export_result.tables_csv:
-        if csv_string.strip().strip("﻿"):
+        if csv_string.strip().strip(_CSV_BOM):
             csv_path = output_dir / f"{table_id}.csv"
             csv_path.write_text(csv_string, encoding="utf-8-sig")
             print(f"  CSV written to {csv_path}")

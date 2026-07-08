@@ -3,7 +3,7 @@ import codecs
 import csv
 import io
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import openpyxl
 from .models import PostprocessResult, ExportResult, Table, Cell
@@ -76,17 +76,23 @@ def _validate_and_repair_table(table: Table) -> tuple[Table, bool]:
 
 
 def export(result: PostprocessResult, convert_numerals: bool = False, repair_tables: bool = False,
-           stitch_pages: bool = False) -> ExportResult:
+           stitch_pages: bool = False, provenance: dict | None = None) -> ExportResult:
     """Build the final export payload from a `PostprocessResult`: the document JSON plus
     one CSV per table (optionally repairing ragged rows and/or stitching continuation
-    tables across pages first). Returns an `ExportResult`."""
+    tables across pages first). Returns an `ExportResult`.
+
+    `provenance`, when given (engine/version/settings from the orchestrator), is
+    embedded as `document_json["provenance"]`; None keeps today's JSON shape."""
     # Repair tables in place before building the JSON, so was_repaired and
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
     # final pipeline stage, so nothing reads the pre-repair state afterward.
-    # (This also relies on CorrectedPageResult.tables being the same list
-    # object as SuryaPageResult.tables, per postprocess.py's _correct_page,
-    # so app.py's was_repaired badge sees the repair too.)
+    # Ownership note: since A6, postprocess._correct_page hands us copy-on-write
+    # tables (new dicts, normalized cell text) — NOT the same objects as
+    # SuryaPageResult.tables — so this in-place repair touches only the
+    # PostprocessResult, never the upstream SuryaResult. The was_repaired badge
+    # reaches the UI via document_json (app.py reads it from the JSON, not
+    # through SuryaResult), so breaking the old aliasing is safe.
     # Repair is opt-in: analysts must explicitly request it, since it
     # rewrites the detected cell grid.
     if repair_tables:
@@ -95,6 +101,8 @@ def export(result: PostprocessResult, convert_numerals: bool = False, repair_tab
                 page.tables[t_idx], _ = _validate_and_repair_table(table)
 
     document_json = _build_document_json(result)
+    if provenance is not None:
+        document_json["provenance"] = provenance
 
     if stitch_pages:
         # Join continuation tables across pages into one logical table per section;
@@ -121,6 +129,22 @@ def _make_doc_table_id(source_name: str, n: int) -> str:
     return f"{Path(source_name).stem}_table{n + 1}"
 
 
+def _json_cell(c: Cell) -> dict:
+    """Build one exported JSON cell object (row/col/text). Carries the per-cell
+    `confidence` through only when the engine set it (surya_kiri) — omitted for
+    engines that don't, so their JSON shape is unchanged."""
+    cell: dict = {
+        "row": c.get("row_id", 0),
+        "col": c.get("col_id") or 0,
+        "text": " ".join(
+            t["text"] for t in (c.get("text_lines") or []) if t.get("text")
+        ).strip(),
+    }
+    if "confidence" in c:
+        cell["confidence"] = c["confidence"]
+    return cell
+
+
 def _build_merged_tables_json(source_name: str, merged: list[Table]) -> list[dict]:
     out = []
     for i, table in enumerate(merged):
@@ -129,16 +153,7 @@ def _build_merged_tables_json(source_name: str, merged: list[Table]) -> list[dic
             "source_pages": table.get("source_pages", []),
             "rows": table["rows"],
             "cols": table["cols"],
-            "cells": [
-                {
-                    "row": c.get("row_id", 0),
-                    "col": c.get("col_id") or 0,
-                    "text": " ".join(
-                        t["text"] for t in (c.get("text_lines") or []) if t.get("text")
-                    ).strip(),
-                }
-                for c in table.get("cells", [])
-            ],
+            "cells": [_json_cell(c) for c in table.get("cells", [])],
         })
     return out
 
@@ -224,7 +239,9 @@ def _table_to_csv(table: Table, convert_numerals: bool = False) -> str:
 def _build_document_json(result: PostprocessResult) -> dict:
     return {
         "source_name": result.source_name,
-        "extracted_at": datetime.utcnow().isoformat() + "Z",
+        # tz-aware UTC (utcnow() is deprecated in 3.12+); drop the tzinfo before
+        # isoformat() so the output stays the same naive-ISO + "Z" (no double offset).
+        "extracted_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
         "page_count": len(result.pages),
         "pages": [
             {
@@ -238,16 +255,7 @@ def _build_document_json(result: PostprocessResult) -> dict:
                         "was_repaired": table.get("was_repaired", False),
                         "rows": table["rows"],
                         "cols": table["cols"],
-                        "cells": [
-                            {
-                                "row": c.get("row_id", 0),
-                                "col": c.get("col_id") or 0,
-                                "text": " ".join(
-                                    t["text"] for t in (c.get("text_lines") or []) if t.get("text")
-                                ).strip(),
-                            }
-                            for c in table.get("cells", [])
-                        ],
+                        "cells": [_json_cell(c) for c in table.get("cells", [])],
                     }
                     for t_idx, table in enumerate(page.tables)
                 ],

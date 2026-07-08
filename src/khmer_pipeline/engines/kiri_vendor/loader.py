@@ -14,6 +14,12 @@ import torch
 from .model import CFG, CharTokenizer, KiriOCR
 
 _HF_REPO = "mrrtmob/kiri-ocr"
+# Pin the known-good snapshot (dim-384 checkpoint, PROJECT_LOG §2.30). Without a
+# pinned revision, an upstream re-push of model.safetensors would silently change
+# production OCR output on a fresh machine / cleared cache. Model AND vocab are
+# fetched from the SAME snapshot so `_find_vocab`'s "vocab sits beside the model"
+# assumption holds.
+_HF_REVISION = "3a3819874ad67a3a9624d5d994c46649060d7dc9"
 _MODEL_CACHE: dict[tuple, dict] = {}  # (model_path, device) → {model, cfg, tokenizer}
 
 
@@ -32,14 +38,14 @@ def _download_from_hf(repo_id: str, verbose: bool = False) -> str:
 
     for filename in ["vocab.json", "vocab_auto.json"]:
         try:
-            hf_hub_download(repo_id=repo_id, filename=filename)
+            hf_hub_download(repo_id=repo_id, filename=filename, revision=_HF_REVISION)
         except Exception:
             pass
 
     # Model weights (prefer safetensors)
     for model_name in ["model.safetensors", "model.pt"]:
         try:
-            return hf_hub_download(repo_id=repo_id, filename=model_name)
+            return hf_hub_download(repo_id=repo_id, filename=model_name, revision=_HF_REVISION)
         except Exception:
             pass
 

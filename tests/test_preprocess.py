@@ -251,6 +251,20 @@ def test_preprocess_populates_recognition_page_images():
     assert len(r.recognition_page_images) == 3
 
 
+def test_preprocess_recognition_images_gated_off():
+    """B5: with_recognition_images=False skips the second pass entirely."""
+    r = preprocess(_make_ingest_result(3), PreprocessConfig(with_recognition_images=False))
+    assert r.recognition_page_images is None
+
+
+def test_preprocess_recognition_images_shapes_match_page_images():
+    """B5: each recognition image shares its page image's H×W (geometry-compatible)."""
+    r = preprocess(_make_ingest_result(2), PreprocessConfig(deskew=True))
+    assert r.recognition_page_images is not None
+    for full, geo in zip(r.page_images, r.recognition_page_images):
+        assert full.shape[:2] == geo.shape[:2]
+
+
 def test_geometric_preprocess_skips_photometric_changes():
     """_geometric_preprocess must not apply photometric changes (normalise/sharpen/
     remove_stamps/normalise_table_backgrounds) even when those flags are on —

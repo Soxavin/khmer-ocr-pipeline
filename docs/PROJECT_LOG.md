@@ -946,6 +946,67 @@ Every change is data-driven; several *rejected* options are recorded because the
 - Commits `1849e0f`, `8270dcf`, `75f0258`, `1371938`, `9ba748a`, `1ccce04`; 409 tests green. NEXT (optional):
   fine-tune Kiri on the `៛` glyph; visual confidence heatmap (data already on the cells).
 
+### 2.32 Hardening pass from the architecture audit — fail-loud, metric-neutral (2026-07-08)
+
+Implemented the Phase 1 + Phase 2 fixes from the architecture/code-quality audit
+(`docs/` audit plan, 2026-07-08). Every change is additive or fail-loud and
+**metric-neutral**: the full unit suite went 409 → 447 green and
+`OCR_ENGINE=surya_kiri scripts/eval_document.py --preprocess` reproduces the §2.31
+baseline exactly (Cell_Accuracy 0.173 / Recall 0.762 / Table_CER 0.086 on the
+local real doc; the eval bypasses postprocess, so A6 cannot move it). Phase 3
+(A4 wide-cell splitting, A2's Surya-table fallback, B6 stitch heuristics, B8 stamp
+mask) is deliberately out of scope — each is an A/B-gated experiment.
+
+- **Correctness / fail-loud.**
+  - **A1** — the app's `settings_key` and new-file reset now key on Streamlit's
+    per-upload `file_id` (fallback: session-cached content hash), so re-uploading a
+    *modified* file with the same name can no longer serve stale results.
+  - **A5** — pinned the Kiri HF download to `revision=3a3819874…` (model + vocab,
+    same snapshot) so an upstream re-push can't silently swap the weights.
+  - **A2 / A7 / A3** — silent table drops (`surya_kiri`), one recognition-HTML block
+    claimed by two tables (`surya`), and Kiri recognizer failures now all surface
+    through `SuryaResult.warnings` instead of vanishing. Kiri failures route through
+    a per-run `warning_sink`; the load-failure latch is reset once per run
+    (`reset_kiri_failure()`), so a transient first-run blip no longer disables Kiri
+    for the whole Streamlit process.
+  - **B2** — an unknown `OCR_ENGINE`/`get_ocr_engine` name now raises `ValueError`
+    (was a silent fallback to Surya — a typo'd benchmark tested the wrong engine).
+  - **B3** — `--resume` benchmarks recompute aggregates/summary from the FULL
+    `results.csv`; a malformed GT file yields an Error row instead of aborting.
+  - **B7** — multi-frame TIFFs are fully ingested (was frame-0 only).
+
+- **Invariant decisions (Phase 2).**
+  - **A6 ends the tables aliasing.** Stage 4 (`postprocess`) now normalizes table
+    cell text (NFC / ZWSP-BOM strip / dup-diacritic collapse) copy-on-write: new
+    table + cell dicts, so `SuryaPageResult.tables` stay byte-identical. `export`'s
+    in-place table repair therefore touches only the `PostprocessResult`; the
+    `was_repaired` badge reaches the UI via the JSON (app.py never read it through
+    `SuryaResult`). `run_benchmark.py`'s "tables unchanged by correction" assumption
+    still holds by construction (it reads `ocr_result.pages`, not the corrected copy).
+    This is the cheapest accuracy-hygiene win: the CSV/JSON cells finally get the
+    same normalization the page text already had.
+  - **B5 gates the second preprocessing pass.** New INTERNAL
+    `PreprocessConfig.with_recognition_images` (default True; **exempt** from the
+    4-point sidebar/CLI pattern by design) — orchestrators set it False for every
+    engine except `surya_kiri`, halving preprocessing work on the default path. The
+    `recognition_page_images is None` fallback in `surya_kiri` now **warns** (it is a
+    measured 0.79→0.675 loss, §2.30), and `preprocess()` asserts each recognition
+    frame shares its page frame's H×W (geometric steps must precede photometric ones,
+    or bboxes desynchronize).
+  - **B4 page-selective ingest.** `ingest(page_indices=…)` renders only the requested
+    PDF pages (`doc.load_page(i)`); the `MAX_PAGES` cap applies to rendered pages, so
+    a long PDF is fine when few pages are selected. `app.py` computes the selection
+    *before* ingest and no longer keeps the full-document `IngestResult` in
+    session_state. Page-index semantics are preserved (0-based within the selection).
+
+- **Polish (D).** BOM literal → `_CSV_BOM` constant; `traceback` added to the
+  critical-failure console log (not the analyst warning); `datetime.utcnow()` →
+  `datetime.now(timezone.utc)`; `_anomaly_score` divides by non-whitespace count;
+  `playwright`/`openai` moved to an `eval-extras` optional group; `eval/` paths
+  anchored to the repo root; provenance block (engine/version/settings) added to the
+  exported JSON (C6); per-cell `confidence` carried into the exported JSON (C3); docs
+  drift fixed (CONTEXT engine list, eval/README preprocessing field).
+
 ---
 
 ## 3. Results Snapshot

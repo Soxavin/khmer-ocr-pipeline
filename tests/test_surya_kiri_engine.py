@@ -77,12 +77,14 @@ def _fake_table_rec_cells(n_rows: int = 2, n_cols: int = 2):
 
 
 def _run(base=None, *, with_table=True, cells=None, recognize="42",
-         confidence=1.0, preprocess=None):
+         confidence=1.0, preprocess=None, table_raises=False):
     """Run the engine with all model-loading dependencies stubbed.
 
     `recognize` and `confidence` are either a scalar (applied to every pending
     cell) or a list (one entry per pending cell, in TableRecPredictor cell
     order) — mirroring what `recognize_cells_conf` returns as (text, conf) pairs.
+    `table_raises=True` makes the stubbed TableRecPredictor raise, exercising
+    the structure-prediction failure path.
     """
     base = base or _base_result()
     cells = _fake_table_rec_cells(2, 2) if cells is None else cells
@@ -93,14 +95,18 @@ def _run(base=None, *, with_table=True, cells=None, recognize="42",
         p("_get_predictors", return_value=(_fake_layout_pred(with_table), None))
         if isinstance(recognize, list):
             confs = confidence if isinstance(confidence, list) else [confidence] * len(recognize)
-            p("recognize_cells_conf", return_value=list(zip(recognize, confs)))
+            p("recognize_cells_conf",
+              side_effect=lambda crops, warning_sink=None: list(zip(recognize, confs)))
         else:
             p("recognize_cells_conf",
-              side_effect=lambda crops: [(recognize, confidence)] * len(crops))
+              side_effect=lambda crops, warning_sink=None: [(recognize, confidence)] * len(crops))
         mock_tbl = MagicMock()
-        mock_result = MagicMock()
-        mock_result.cells = cells
-        mock_tbl.return_value = [mock_result]
+        if table_raises:
+            mock_tbl.side_effect = RuntimeError("tablerec boom")
+        else:
+            mock_result = MagicMock()
+            mock_result.cells = cells
+            mock_tbl.return_value = [mock_result]
         stack.enter_context(patch("surya.table_rec.TableRecPredictor", return_value=mock_tbl))
         return run_surya_kiri(preprocess or _preprocess())
 
@@ -152,6 +158,23 @@ def test_empty_cells_skips_table():
 
 
 # ---------------------------------------------------------------------------
+# A2 (warning half): dropping a table region must surface a warning, never be
+# silent — the analyst otherwise sees "no table" on a page that has one.
+# ---------------------------------------------------------------------------
+
+def test_table_structure_failure_warns():
+    """A TableRecPredictor exception drops the region but adds a warning."""
+    r = _run(table_raises=True)
+    assert any("table omitted" in w and "region" in w for w in r.warnings)
+
+
+def test_empty_cells_warns():
+    """Zero cells for a region drops it but adds a warning (not silent)."""
+    r = _run(cells=[])
+    assert any("table omitted" in w and "region" in w for w in r.warnings)
+
+
+# ---------------------------------------------------------------------------
 # Raw-image usage
 # ---------------------------------------------------------------------------
 
@@ -160,6 +183,17 @@ def test_falls_back_to_page_images_without_raw():
     r = _run(preprocess=_preprocess(with_raw=False))
     assert isinstance(r, SuryaResult)
     assert len(r.pages[0].tables) == 1
+
+
+def test_recognition_images_none_adds_fallback_warning():
+    """B5: the geometric-image fallback is a measured accuracy loss — it must warn."""
+    r = _run(preprocess=_preprocess(with_raw=False))
+    assert any("recognition images unavailable" in w for w in r.warnings)
+
+
+def test_recognition_images_present_no_fallback_warning():
+    r = _run(preprocess=_preprocess(with_raw=True))
+    assert not any("recognition images unavailable" in w for w in r.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -204,3 +238,41 @@ def test_high_confidence_cells_no_warning():
     """When all confidences are above _LOW_CONF_THRESHOLD, no confidence warning is added."""
     r = _run(recognize=["A", "B", "C", "D"], confidence=_LOW_CONF_THRESHOLD + 0.1)
     assert not any("confidence" in w for w in r.warnings)
+
+
+# ---------------------------------------------------------------------------
+# A3: Kiri recognizer failure visibility + per-run latch reset
+# ---------------------------------------------------------------------------
+
+def test_run_surya_kiri_resets_failure_latch():
+    """Each run clears the within-run load-failure latch so a transient first
+    failure doesn't disable Kiri for the whole (long-lived) process."""
+    with patch("khmer_pipeline.engines.surya_kiri_engine.reset_kiri_failure") as mock_reset:
+        _run()
+    mock_reset.assert_called_once()
+
+
+def test_kiri_unavailable_warning_reaches_result():
+    """When the recognizer is unavailable it appends to the sink; the engine must
+    merge that into SuryaResult.warnings (deduped)."""
+    def _fail(crops, warning_sink=None):
+        if warning_sink is not None:
+            warning_sink.append("Kiri recognizer unavailable: boom — table cells left empty")
+        return [("", 0.0)] * len(crops)
+
+    base = _base_result()
+    with ExitStack() as stack:
+        p = lambda tgt, **kw: stack.enter_context(patch(f"khmer_pipeline.engines.surya_kiri_engine.{tgt}", **kw))
+        p("run_surya", return_value=base)
+        p("get_manager")
+        p("_get_predictors", return_value=(_fake_layout_pred(True), None))
+        p("recognize_cells_conf", side_effect=_fail)
+        mock_tbl = MagicMock()
+        mock_result = MagicMock()
+        mock_result.cells = _fake_table_rec_cells(2, 2)
+        mock_tbl.return_value = [mock_result]
+        stack.enter_context(patch("surya.table_rec.TableRecPredictor", return_value=mock_tbl))
+        r = run_surya_kiri(_preprocess())
+
+    unavailable = [w for w in r.warnings if "unavailable" in w]
+    assert len(unavailable) == 1  # merged/deduped to a single warning

@@ -71,13 +71,14 @@ def _is_foreign_script(ch: str) -> bool:
 
 def _anomaly_score(text: str) -> float:
     """Returns a score from 0.0 (clean) to 1.0 (highly anomalous).
-    Score is the proportion of characters from wrong scripts.
+    Score is the proportion of foreign-script characters among the
+    NON-WHITESPACE characters (whitespace would otherwise dilute the ratio).
     ANOMALY_THRESHOLD = 0.15 is tunable."""
-    if not text.strip():
+    non_ws = sum(1 for ch in text if not ch.isspace())
+    if non_ws == 0:
         return 0.0
-    total = len(text)
     foreign_count = sum(1 for ch in text if _is_foreign_script(ch))
-    return foreign_count / total
+    return foreign_count / non_ws
 
 def _detect_errors(text: str) -> bool:
     """Thin wrapper kept for backward compatibility with existing tests."""
@@ -138,6 +139,30 @@ def _qwen_correct_batch(texts: list[str]) -> list[str]:
         warnings.warn(f"Qwen batch correction failed: {e}")
         return texts
 
+def _normalize_table(table: dict) -> dict:
+    """Return a NEW table dict (with NEW cell/text_line dicts) whose cell texts
+    are Khmer-normalized (NFC, ZWSP/BOM strip, dup-diacritic collapse). The input
+    table — and the SuryaPageResult it belongs to — is never mutated, so export's
+    in-place table repair operates only on these Stage-4-owned copies.
+
+    This is the primary deliverable (the CSV/JSON cells) finally getting the same
+    normalization page narrative text already received."""
+    new_cells = []
+    for cell in table.get("cells", []):
+        new_cell = dict(cell)
+        text_lines = cell.get("text_lines")
+        if text_lines:
+            new_cell["text_lines"] = [
+                ({**tl, "text": normalize_khmer(tl["text"])}
+                 if tl.get("text") is not None else dict(tl))
+                for tl in text_lines
+            ]
+        new_cells.append(new_cell)
+    new_table = dict(table)
+    new_table["cells"] = new_cells
+    return new_table
+
+
 def _build_diff(raw: str, corrected: str) -> str:
     diff = difflib.ndiff(raw.splitlines(), corrected.splitlines())
     return "\n".join(diff)
@@ -185,7 +210,9 @@ def _correct_page(
     return CorrectedPageResult(
         page_index=page.page_index,
         text_blocks=page.text_blocks,  # unchanged
-        tables=page.tables,
+        # Copy-on-write: normalized cell text in NEW dicts so the input
+        # SuryaPageResult.tables stay byte-identical (no aliasing).
+        tables=[_normalize_table(t) for t in page.tables],
         raw_ocr_text=raw,
         corrected_text=corrected_text,
         correction_diff=diff,

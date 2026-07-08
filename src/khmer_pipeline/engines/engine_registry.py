@@ -13,13 +13,23 @@ _OCR_ENGINES: dict[str, OCREngine] = {
     "hybrid": run_hybrid,
     "surya_kiri": run_surya_kiri,
 }
-ACTIVE_OCR_ENGINE: OCREngine = _OCR_ENGINES.get(
-    os.environ.get("OCR_ENGINE", "surya"), run_surya
-)
-ACTIVE_CORRECTION_ENGINE: CorrectionEngine = postprocess
 
 
 def get_ocr_engine(name: str) -> OCREngine:
-    """Return the OCR engine registered under *name*, or run_surya if unknown."""
-    return _OCR_ENGINES.get(name, run_surya)
+    """Return the OCR engine registered under *name*.
+
+    Raises ValueError (listing the valid names) on an unknown name — a typo must
+    never silently fall back to Surya and benchmark the wrong engine."""
+    try:
+        return _OCR_ENGINES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown OCR engine {name!r}. Valid engines: {sorted(_OCR_ENGINES)}."
+        ) from None
+
+
+# Resolve the active engine from OCR_ENGINE at import — an unknown value raises
+# here (fail loudly) rather than silently running Surya.
+ACTIVE_OCR_ENGINE: OCREngine = get_ocr_engine(os.environ.get("OCR_ENGINE", "surya"))
+ACTIVE_CORRECTION_ENGINE: CorrectionEngine = postprocess
 

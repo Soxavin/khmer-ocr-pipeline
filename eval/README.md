@@ -60,6 +60,7 @@ Options:
 | `--run-dir PATH` | Use a specific run directory instead of the auto-named one |
 | `--with-correction` | Run Stage 4 Qwen correction and use corrected text for `Text_CER` |
 | `--resume` | Skip images already present in `results.csv` (safe to re-run after a crash) |
+| `--preprocess` | Apply the full `PreprocessConfig` stack (deskew/denoise/contrast/etc.) instead of the default raw render, matching the live pipeline (`app.py`/`pipeline.py`) |
 
 ---
 
@@ -73,7 +74,7 @@ Every run folder contains `manifest.json` answering "what / on what / using what
 | `timestamp_utc` | string | ISO-8601 UTC timestamp when the run finished writing the manifest |
 | `engine` | string | `ACTIVE_OCR_ENGINE.__name__` (e.g. `run_surya`) |
 | `correction` | bool | Whether `--with-correction` was passed |
-| `preprocessing` | string | Always `"none (raw render)"` — raw PNG fed directly to OCR |
+| `preprocessing` | string | `"none (raw render)"` by default (raw PNG fed directly to OCR), or `"full PreprocessConfig"` when the run used `--preprocess` |
 | `git_commit` | string | Short git SHA of the repo at run time (`"unknown"` if not a git repo) |
 | `git_dirty` | bool | `true` if the working tree had uncommitted changes |
 | `versions` | object | `{"surya_ocr": "0.20.x", "python": "3.11.x"}` |

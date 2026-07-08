@@ -14,21 +14,44 @@ class PreprocessConfig:
     normalise: bool = True
     deskew: bool = True
     normalise_table_backgrounds: bool = True
+    # INTERNAL flag (NOT a user-facing knob): orchestrators set this False for
+    # engines that never read recognition_page_images, so the second
+    # (geometric-only) preprocessing pass — a full deskew Otsu+minAreaRect per
+    # page — is skipped. Deliberately EXEMPT from the 4-point sidebar/CLI pattern:
+    # do NOT add a checkbox or --flag for it. Default True preserves prior behavior.
+    with_recognition_images: bool = True
 
 
 def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> PreprocessResult:
     if config is None:
         config = PreprocessConfig()
     processed = [_preprocess_image(img, config) for img in result.page_images]
+
+    # Geometric-only pages (crop + deskew, no photometric changes) so the
+    # surya_kiri engine can recognise cells with deskew applied without the
+    # photometric normalisation that degrades Kiri — see the engine. Gated so the
+    # default `surya` engine (which never reads them) doesn't pay for a second pass.
+    recognition_page_images = None
+    if config.with_recognition_images:
+        recognition_page_images = [_geometric_preprocess(img, config) for img in result.page_images]
+        # The two frame sets are coordinate-compatible ONLY because the geometric
+        # steps (_crop_margins, _cap_resolution, _deskew) run BEFORE all photometric
+        # steps in _preprocess_image: both frames therefore share identical geometry
+        # (same H×W, same deskew) and differ only photometrically. Reordering those
+        # steps would silently desynchronise table bboxes from text bboxes, so pin
+        # the invariant with a per-page shape check.
+        for full, geo in zip(processed, recognition_page_images):
+            assert full.shape[:2] == geo.shape[:2], (
+                "recognition image geometry diverged from the page image — geometric "
+                "preprocessing must precede all photometric steps in _preprocess_image"
+            )
+
     return PreprocessResult(
         source_name=result.source_name,
         page_images=processed,
         dpi=result.dpi,
         page_count=result.page_count,
-        # Geometric-only pages (crop + deskew, no photometric changes) so the
-        # surya_kiri engine can recognise cells with deskew applied without the
-        # photometric normalisation that degrades Kiri — see the engine.
-        recognition_page_images=[_geometric_preprocess(img, config) for img in result.page_images],
+        recognition_page_images=recognition_page_images,
     )
 
 

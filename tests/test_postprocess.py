@@ -77,6 +77,19 @@ def test_anomaly_score_low_for_latin():
     assert pp._anomaly_score("CP ARDB 03-06-26 12,000 0.00%") < pp.ANOMALY_THRESHOLD
 
 
+def test_anomaly_score_denominator_excludes_whitespace():
+    # 1 foreign char among 3 non-whitespace chars ("<sinhala>ok") = 1/3, and the
+    # surrounding whitespace must NOT dilute that ratio (new denominator).
+    text = _SINHALA_KA + "        " + "ok"
+    assert abs(pp._anomaly_score(text) - 1 / 3) < 1e-9
+
+
+def test_anomaly_score_ignores_whitespace_padding():
+    dense = _SINHALA_KA + "ok"            # 1 / 3
+    padded = _SINHALA_KA + "   \n  " + "ok"  # same 3 non-ws chars → same score
+    assert pp._anomaly_score(dense) == pp._anomaly_score(padded)
+
+
 def test_mixed_khmer_arabic_numerals_not_anomalous():
     # Khmer row numbers + Arabic prices — normal in financial docs, must not trigger
     mixed = "៩ សាច់ជ្រូករស់ 12,000 13,000 8.33%"
@@ -138,6 +151,59 @@ def test_qwen_failure_falls_back_gracefully():
     assert r.pages[0].corrected_text == pp._apply_rules(sinhala_text)
     # Qwen was attempted but failed and changed nothing, so it was not "applied"
     assert r.pages[0].qwen_used is False
+
+
+# --- A6: Stage 4 normalizes table cell text, copy-on-write ---
+
+def _table_with_cell_text(text: str) -> dict:
+    cell = {"row_id": 0, "col_id": 0,
+            "text_lines": [{"text": text, "bbox": [0, 0, 10, 10]}], "bbox": [0, 0, 10, 10]}
+    return {"rows": [{"row_id": 0}], "cols": [{"col_id": 0}], "cells": [cell],
+            "image_bbox": [0, 0, 100, 100]}
+
+
+def _cell_text_of(page_result, t=0, c=0) -> str:
+    return page_result.tables[t]["cells"][c]["text_lines"][0]["text"]
+
+
+def test_postprocess_strips_zwsp_in_table_cell():
+    zwsp = chr(0x200B)
+    table = _table_with_cell_text("12" + zwsp + "000")
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[table], ocr_text="")
+    with _mock_qwen():
+        r = pp.postprocess(SuryaResult(source_name="t.pdf", pages=[page]))
+    out = _cell_text_of(r.pages[0])
+    assert zwsp not in out
+    assert out == "12000"
+
+
+def test_postprocess_collapses_duplicate_diacritic_in_cell():
+    base = chr(0x1780)   # Khmer KA
+    mark = chr(0x17B6)   # dependent vowel (combining)
+    table = _table_with_cell_text(base + mark + mark)
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[table], ocr_text="")
+    with _mock_qwen():
+        r = pp.postprocess(SuryaResult(source_name="t.pdf", pages=[page]))
+    assert _cell_text_of(r.pages[0]) == base + mark  # duplicate mark collapsed
+
+
+def test_postprocess_does_not_mutate_surya_tables():
+    """CRITICAL INVARIANT: the input SuryaResult.tables must stay byte-identical
+    (postprocess owns copies; no aliasing)."""
+    import copy
+    zwsp = chr(0x200B)
+    table = _table_with_cell_text("a" + zwsp + "b")
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[table], ocr_text="")
+    surya = SuryaResult(source_name="t.pdf", pages=[page])
+    before = copy.deepcopy(surya.pages[0].tables)
+    with _mock_qwen():
+        r = pp.postprocess(surya)
+    # original untouched (still contains the ZWSP), corrected copy normalized
+    assert surya.pages[0].tables == before
+    assert zwsp in _cell_text_of(surya.pages[0])
+    assert r.pages[0].tables is not surya.pages[0].tables
+    assert r.pages[0].tables[0]["cells"] is not surya.pages[0].tables[0]["cells"]
+    assert zwsp not in _cell_text_of(r.pages[0])
 
 
 def test_correction_diff_populated():

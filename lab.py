@@ -172,6 +172,8 @@ def _overlay_for_engine(
 # ---------------------------------------------------------------------------
 # Engine env-var context manager
 # ---------------------------------------------------------------------------
+# NOTE: this mutates process-global os.environ; two simultaneous lab sessions in
+# one process would race on these vars. Fine for this single-user local tool.
 @contextlib.contextmanager
 def _engine_env(hybrid_mode: Optional[str], layout_detector: Optional[str]) -> Generator:
     """Snapshot, set, then restore KHMER_HYBRID_MODE and KHMER_LAYOUT_DETECTOR.

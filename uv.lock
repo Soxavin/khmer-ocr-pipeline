@@ -1189,12 +1189,10 @@ dependencies = [
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "numpy" },
-    { name = "openai" },
     { name = "opencv-python-headless" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pillow" },
-    { name = "playwright" },
     { name = "pymupdf" },
     { name = "pytesseract" },
     { name = "rapid-layout" },
@@ -1210,6 +1208,10 @@ dev = [
     { name = "matplotlib" },
     { name = "pytest" },
 ]
+eval-extras = [
+    { name = "openai" },
+    { name = "playwright" },
+]
 experiments = [
     { name = "datasets" },
     { name = "psutil" },
@@ -1224,12 +1226,12 @@ requires-dist = [
     { name = "mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.31.2,<0.32" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.21" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "openai", specifier = ">=1.0,<2.0" },
+    { name = "openai", marker = "extra == 'eval-extras'", specifier = ">=1.0,<2.0" },
     { name = "opencv-python-headless", specifier = ">=4.8" },
     { name = "openpyxl", specifier = ">=3.1,<4.0" },
     { name = "pandas", specifier = ">=2.0,<4.0" },
     { name = "pillow", specifier = ">=10.0" },
-    { name = "playwright", specifier = ">=1.44,<2.0" },
+    { name = "playwright", marker = "extra == 'eval-extras'", specifier = ">=1.44,<2.0" },
     { name = "psutil", marker = "extra == 'experiments'", specifier = ">=7.2,<8.0" },
     { name = "pymupdf", specifier = ">=1.24" },
     { name = "pytesseract", specifier = ">=0.3,<0.4" },
@@ -1242,7 +1244,7 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'experiments'", specifier = ">=0.27,<0.28" },
     { name = "transformers", specifier = ">=4.56.1,<5.0" },
 ]
-provides-extras = ["dev", "experiments"]
+provides-extras = ["dev", "eval-extras", "experiments"]
 
 [[package]]
 name = "kiwisolver"

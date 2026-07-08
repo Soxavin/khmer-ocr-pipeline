@@ -38,6 +38,17 @@ def test_document_json_has_required_keys():
         assert key in doc
 
 
+def test_provenance_absent_by_default():
+    doc = export(_make_result(pages=[_make_page(0)])).document_json
+    assert "provenance" not in doc
+
+
+def test_provenance_included_when_passed():
+    prov = {"engine": "surya_kiri", "dpi": 200}
+    doc = export(_make_result(pages=[_make_page(0)]), provenance=prov).document_json
+    assert doc["provenance"] == prov
+
+
 def test_document_json_page_count_matches():
     doc = export(_make_result(pages=[_make_page(0), _make_page(1)])).document_json
     assert doc["page_count"] == 2
@@ -171,6 +182,30 @@ def test_cell_missing_row_id_defaults_to_zero():
 
     doc = result.document_json
     assert doc["pages"][0]["tables"][0]["cells"][0]["row"] == 0
+
+
+def test_cell_confidence_exported_when_present():
+    cell = {"row_id": 0, "col_id": 0, "confidence": 0.87,
+            "text_lines": [{"text": "x"}], "bbox": []}
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    doc = export(_make_result(pages=[_make_page(0, tables=[table])])).document_json
+    assert doc["pages"][0]["tables"][0]["cells"][0]["confidence"] == 0.87
+
+
+def test_cell_confidence_omitted_when_absent():
+    cell = {"row_id": 0, "col_id": 0, "text_lines": [{"text": "x"}], "bbox": []}
+    table = {"rows": [{}], "cols": [{}], "cells": [cell], "image_bbox": [0, 0, 100, 100]}
+    doc = export(_make_result(pages=[_make_page(0, tables=[table])])).document_json
+    assert "confidence" not in doc["pages"][0]["tables"][0]["cells"][0]
+
+
+def test_cell_confidence_exported_in_stitched_tables():
+    cell = {"row_id": 0, "col_id": 0, "confidence": 0.42,
+            "text_lines": [{"text": "x"}], "bbox": []}
+    table = {"rows": [{"row_id": 0}], "cols": [{"col_id": 0}], "cells": [cell]}
+    doc = export(_make_result(pages=[_make_page(0, tables=[table])]),
+                 stitch_pages=True).document_json
+    assert doc["document_tables"][0]["cells"][0]["confidence"] == 0.42
 
 
 def test_consistent_table_not_repaired():

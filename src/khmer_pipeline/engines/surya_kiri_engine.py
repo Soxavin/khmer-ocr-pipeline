@@ -25,7 +25,7 @@ from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from ..utils.memory import clear_device_cache
 from .surya import run_surya, get_manager, _get_predictors, _build_table_from_grid
 from .table_stitch import merge_table_regions
-from .kiri_recognizer import recognize_cells_conf
+from .kiri_recognizer import recognize_cells_conf, reset_kiri_failure
 
 # Cells below this per-cell recognizer confidence trigger a page-level warning.
 _LOW_CONF_THRESHOLD = 0.80
@@ -44,6 +44,12 @@ def run_surya_kiri(
     # below. The only remaining minor redundancy is the second layout pass on
     # the raw page (below) to locate table regions for TableRecPredictor.
 
+    # Retry the Kiri load once per run: clear a prior within-run failure latch so
+    # a transient first-run HF blip doesn't leave Kiri disabled for the whole
+    # (long-lived Streamlit) process. The latch still guards against ~240 repeated
+    # download attempts within this run.
+    reset_kiri_failure()
+
     # 1. Reuse Surya for page-level text blocks + ocr_text; skip_tables=True
     #    drops Table regions before recognition (we rebuild tables from
     #    raw-image structure below, so Surya's table VLM would be wasted work).
@@ -55,16 +61,32 @@ def run_surya_kiri(
     from surya.table_rec import TableRecPredictor
     _tbl_pred = TableRecPredictor(manager=manager)
 
-    # Recognise from the geometric-only image: deskew/crop are applied (deskew is
-    # needed for skewed scans) but photometric normalization (CLAHE/desaturation)
-    # is skipped, since it degrades Kiri's per-cell Otsu binarization. Because the
-    # fully-preprocessed image also differs geometrically, its bboxes don't map
-    # onto this image — so the WHOLE table pipeline (layout → TableRec → crop)
-    # runs on the geometric-only page here.
-    raw_imgs = result.recognition_page_images if result.recognition_page_images is not None else result.page_images
-
     pages: list[SuryaPageResult] = []
     extra_warnings: list[str] = []
+    # Per-run sink for Kiri recognizer failures (unavailable / per-batch), so they
+    # reach SuryaResult.warnings instead of being lost to warnings.warn after
+    # run_surya's capture window has closed.
+    kiri_warnings: list[str] = []
+
+    # Recognise from the geometric-only image: deskew/crop are applied (deskew is
+    # needed for skewed scans) but photometric normalization (CLAHE/desaturation)
+    # is skipped, since it degrades Kiri's per-cell Otsu binarization. The
+    # geometric-only and fully-preprocessed frames share IDENTICAL geometry (same
+    # crop+cap+deskew, run before any photometric step — asserted in preprocess()),
+    # so table bboxes map 1:1 between them; they differ only photometrically. We
+    # still run the whole table pipeline (layout → TableRec → crop) on the
+    # geometric-only page so the per-cell crops keep their un-normalized pixels.
+    if result.recognition_page_images is not None:
+        raw_imgs = result.recognition_page_images
+    else:
+        # Falling back to the photometrically-preprocessed pages is a MEASURED
+        # accuracy loss (0.79→0.675, PROJECT_LOG §2.30) — surface it, never silent.
+        raw_imgs = result.page_images
+        extra_warnings.append(
+            "Surya+Kiri: recognition images unavailable — falling back to "
+            "photometrically-preprocessed pages; accuracy may be reduced."
+        )
+
     for idx, page in enumerate(base.pages):
         img = raw_imgs[idx]
         h, w = img.shape[:2]
@@ -83,7 +105,7 @@ def run_surya_kiri(
             continue
 
         new_tables: list[dict] = []
-        for mb in merged:
+        for m_idx, mb in enumerate(merged, start=1):
             x0, y0, x1, y1 = (
                 max(0, int(mb[0])), max(0, int(mb[1])),
                 min(w, int(mb[2])), min(h, int(mb[3])),
@@ -94,10 +116,22 @@ def run_surya_kiri(
             crop = img[y0:y1, x0:x1]
             try:
                 cells = _tbl_pred([Image.fromarray(crop)])[0].cells
-            except Exception:
+            except Exception as exc:
+                # Never drop a table silently: the analyst would see "no table" on
+                # a page that visibly has one. Surface it via the warnings channel.
+                extra_warnings.append(
+                    f"Surya+Kiri page {page.page_index + 1}: table structure prediction "
+                    f"failed for region {m_idx} ({exc}) — table omitted; try the Surya "
+                    f"engine for this page."
+                )
                 continue
 
             if not cells:
+                extra_warnings.append(
+                    f"Surya+Kiri page {page.page_index + 1}: table structure prediction "
+                    f"returned no cells for region {m_idx} — table omitted; try the Surya "
+                    f"engine for this page."
+                )
                 continue
 
             # Build a (row, col) → text grid from TableRecPredictor cells, plus a
@@ -126,7 +160,7 @@ def run_surya_kiri(
                     pending_crops.append(crop[cy0:cy1, cx0:cx1])
 
             # Pass 2: recognize all qualifying cells for this table in one batch.
-            texts_confs = recognize_cells_conf(pending_crops)
+            texts_confs = recognize_cells_conf(pending_crops, warning_sink=kiri_warnings)
             for key, (text, conf) in zip(pending_keys, texts_confs):
                 grid[key] = text
                 conf_grid[key] = conf
@@ -167,6 +201,9 @@ def run_surya_kiri(
             tables=new_tables,
             ocr_text=page.ocr_text,
         ))
+
+    # Merge unique Kiri warnings once (a load failure repeats per table crop).
+    extra_warnings.extend(dict.fromkeys(kiri_warnings))
 
     return SuryaResult(
         source_name=base.source_name,
