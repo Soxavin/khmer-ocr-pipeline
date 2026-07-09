@@ -1193,6 +1193,52 @@ runs) before fixing, and the fixes are deterministic + benchmark-gated like §2.
 
 ---
 
+### 2.36 surya_kiri worst-case — number-heavy wide table: Surya wins decisively (2026-07-09)
+
+User reported that surya_kiri (vs plain surya) puts content in wrong cells and mangles numbers.
+Verified with a head-to-head on a genuinely different layout — `CambodiaBudgetExecutioninApr-2024.pdf`
+page 3, a **17-column** born-digital budget-execution table (label + annual + % + cumulative + 12
+months; number-dominated, many empty cells, mixed 2- and 5-decimal values). No GT (its text layer is
+legacy-corrupt, §2.21) — judged against the page image + structural signals. Both engines via the
+production path (ingest → preprocess → engine).
+
+- **Result — plain Surya is near-perfect; surya_kiri is badly broken on this doc.**
+
+  | row (page truth) | Surya | Surya + Kiri |
+  |---|---|---|
+  | `29,199.60 \| 31.16% \| 9,099.14 \| 1,859.82 \| …` | reproduced exactly | `2219960 \| 311ខេ \| -90991 \| -185922 \| …` (commas/decimals gone, Khmer glyph in `31.16%`, phantom `\|[]` in empty cols) |
+  | `263.13 \| 26.84% \| 70.63 \| 27.39622 \| 9.39058 \| …` | reproduced exactly incl. 5-decimals | `26313 \| 2684 \| 7063 \| 2739622 \| 939058 \| …` (**every decimal point dropped → values 100–1000× wrong**) |
+
+  Structural: Surya = clean 8-filled-cols/row (correct); surya_kiri = 10–15 filled/row, ragged —
+  content bleeding across columns + phantom cells. Surya's grid is 18 cols consistent; surya_kiri 16
+  cols, mangled header.
+- **Why.** (1) Structure/recognition split: Surya's VLM reads structure+text jointly with page
+  context; surya_kiri makes TableRecPredictor segment a 17-col grid first (far harder than ARDB's 9),
+  then Kiri reads each tiny crop blind → segmentation slips scatter content. (2) Kiri is a
+  Khmer-optimized recognizer fed pure-number cells → drops decimals, injects Khmer glyphs into numbers.
+- **Benchmark blind spot (the honest correction to §2.30).** Our entire eval is the ARDB bulletin =
+  Kiri's BEST case (Khmer-heavy, narrow, riel units). This budget table is Kiri's WORST case
+  (wide, number-dominated). So §2.30's "surya_kiri modest win" holds **only for ARDB-like docs**; it is
+  actively harmful on number-heavy/wide tables. surya_kiri is a **specialist**, not a general upgrade.
+  Directly vindicates the user's "don't overfit to ARDB" concern — a second real layout flipped the
+  verdict, exactly as eval/README §5's "raw ranking can invert" warning predicts.
+- **Actions.** (a) app.py engine picker relabelled ("specialist: Khmer-text-heavy tables") + guidance
+  captions steering number-heavy/wide docs to Surya (Surya stays default). (b) This entry. (c) Design
+  sketch below.
+- **Design sketch — "Surya-structure + Kiri-text" variant (DEFERRED, not built).** The root fault is
+  handing structure to TableRecPredictor. Alternative: take the cell GRID from Surya's VLM HTML (its
+  placement is reliable — §2.36 shows it perfect here), then replace only the TEXT of cells that are
+  *predominantly Khmer* with Kiri's read; leave numeric/Latin cells as Surya read them. Needs: run
+  Surya normally (structure+text), classify each cell (Khmer-ratio threshold), re-OCR only Khmer cells
+  with Kiri by cropping the cell's Surya bbox. Open risks: Surya's HTML cells carry bboxes? (verify);
+  extra Kiri passes cost; a cell-classification threshold to gate. Only pursue after the eval set has
+  ≥1 number-heavy doc with GT so the variant is measurable — otherwise we repeat the ARDB overfit.
+- **Reinforces:** Kiri fine-tune (§2.29) must include number cells + decimal points; and the eval set
+  urgently needs a non-ARDB layout with table GT (this budget doc is the obvious candidate — hand-label
+  one dense page).
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

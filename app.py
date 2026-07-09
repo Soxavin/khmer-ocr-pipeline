@@ -162,18 +162,32 @@ with st.sidebar:
 
         st.header("Extraction")
         _ENGINE_LABELS = {
-            "Surya (fast — default)": "surya",
-            "Surya + Kiri (better Khmer + numeral recognition, slower)": "surya_kiri",
+            "Surya (fast — best all-round, default)": "surya",
+            "Surya + Kiri (specialist: Khmer-text-heavy tables, slower)": "surya_kiri",
         }
         ocr_engine_label = st.radio(
             "OCR engine",
             list(_ENGINE_LABELS),
-            help="Surya + Kiri recognizes each table cell with KiriOCR — better on "
-                 "mixed Khmer/number cells, but ~30–45 s per page.",
+            help="Surya reads structure + text together and is best for most "
+                 "documents, especially number-heavy or wide tables. Surya + Kiri "
+                 "recognizes each cell with KiriOCR — stronger on dense Khmer text, "
+                 "but weaker on numbers and wide grids (see caption below).",
         )
         ocr_engine_key = _ENGINE_LABELS[ocr_engine_label]
+        # Guidance regardless of selection: which engine fits which document
+        # (PROJECT_LOG §2.36 — Surya wins decisively on number-heavy/wide tables).
+        st.caption(
+            "**Which engine?** Use **Surya** for number-heavy or wide tables (prices, "
+            "budgets, many columns) — it keeps values aligned and reads decimals "
+            "accurately. Use **Surya + Kiri** only when cells are mostly Khmer text "
+            "and the table is narrow."
+        )
         if ocr_engine_key == "surya_kiri":
             st.caption("⚠️ Surya + Kiri is slower (~30–45 s/page).")
+            st.caption(
+                "⚠️ On number-heavy or wide tables, Surya + Kiri can drop decimal "
+                "points and misplace values across columns — prefer plain Surya there."
+            )
             st.caption(
                 "ℹ️ Surya + Kiri automatically reads table cells from an internal "
                 "deskew-only image — the preprocessing options above only affect "
