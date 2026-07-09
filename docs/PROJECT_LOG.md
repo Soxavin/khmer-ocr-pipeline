@@ -1007,6 +1007,83 @@ mask) is deliberately out of scope — each is an A/B-gated experiment.
   exported JSON (C6); per-cell `confidence` carried into the exported JSON (C3); docs
   drift fixed (CONTEXT engine list, eval/README preprocessing field).
 
+### 2.33 Kiri-era numeric/failure measurement — the "fusion" premises fail their own data (2026-07-08)
+
+- **Why.** A proposed `surya_kiri_fusion` engine rested on three premises: Kiri is weak on
+  Arabic numerals, Kiri drifts columns, and a per-cell Surya second opinion helps. Two are
+  already refuted architecturally (§2.15 per-cell Surya failed; Kiri emits no bbox so it *cannot*
+  drift — all structure is Surya's, §2.30). This entry replaces the numeric premise with
+  measurement: **where do `surya_kiri`'s errors actually live, how accurate are numeric cells,
+  and is per-cell confidence calibrated?**
+- **Method.** `scripts/recall_taxonomy.py` (OCR_ENGINE=surya_kiri, `--preprocess`) on the two
+  verified 75×9 document GTs (09.06.26 + 15.06.26; `needs_review_rows==[]` for both, so neither is
+  provisional). Added a new value-accuracy metric `Numeric_Cell_Accuracy` (+ `Numeric_Khmer_Digit_Slips`)
+  to `evaluation/evaluate_structure.py`, threaded through `run_benchmark.py`/`analyze_benchmark.py`
+  (TDD, +19 tests), and a **per-cell confidence-calibration hook** to `recall_taxonomy.py`.
+- **Alignment caveat (important, honest).** Both docs predict **76×9 vs GT 75×9** — the known p1
+  two-physical-line header split (§2.30) adds one leading pred row. `recall_taxonomy.py`'s difflib
+  row-pairing collapses this into one giant `replace` block and mislabels **all** misses as `SPLIT`
+  (its printed mode table + a naïve calibration are therefore *artifacts*). The document's numeric
+  row-index column proves a **clean constant +1 offset** (`GT[i] ↔ pred[i+1]`, 71/75 anchor hits),
+  so the multiset recall, by-column and by-section distributions (all alignment-independent) are
+  trustworthy, and the corrected 1:1 taxonomy/calibration below use the detected offset.
+- **Failure taxonomy (offset-corrected, non-empty GT cells, pooled 1152 cells over both docs).**
+  **RECOGNITION-attributable: 100%** — `WRONG-TEXT 24.0%`, `CELL-BLANK 0%`, `ROW-DROPPED/MERGED/SPLIT 0`.
+  Rows are correctly segmented and 1:1; every miss is a legible cell read as different text (confirms
+  §2.27's Surya-era conclusion: the residual gap is glyph-level recognition, not layout).
+- **Where misses cluster (by column, 09.06 / 15.06 multiset-miss share).** Unit `ឯកតា`
+  **52.6% / 51.4%** — every unit cell wrong. Then retail-%chg **17.5% / 15.7%**, wholesale-%chg
+  **7.3% / 8.6%**, `08-06 retail` **3.6% / 5.0%**; the other three numeric price columns are near-perfect
+  (0.7–2.1%). By section, grains (`គ`) is worst (46.8%) — matches §2.27 exactly.
+- **The dominant error is ONE non-numeric glyph, at HIGH confidence.** The Riel sign `៛`: pooled **142**
+  confusions, overwhelmingly `៛/គ.ក → អគ.ក` (58× + 57×), plus `→ #គ.ក` (5×+5×), `អគៈក`/`អគ:ក`. This alone
+  is ~52% of all misses, and it is emitted at **0.94–0.99 confidence** — so a confidence gate never flags it.
+  This reproduces §2.27's Surya-era `៛` finding on a *different* recognizer → the `៛` glyph is hard for
+  both models, not a Kiri-specific numeric weakness. Item-name misses (5–6%) are subscript-consonant
+  substitutions (`សាច់ជ្រូក→សាច់ជ្រក`, dropped `ូ`).
+- **Numeric-cell accuracy — the premise-killer.**
+
+  | doc | numeric GT cells | value-correct (folded) | Numeric_Cell_Accuracy | Khmer-digit slips |
+  |---|---|---|---|---|
+  | 09.06.26 | 422 | 402 | **0.953** | 100 |
+  | 15.06.26 | 422 | 399 | **0.946** | 99 |
+  | **pooled** | **844** | **801** | **0.949** | **199** |
+
+  Numbers are read **94.9% correct by value**. Of the 199 "Khmer-digit slips", ~71/doc are the
+  **legitimately-Khmer row-index column** (GT is `១,២,៣…`; correct AND flagged); the only true Arabic→Khmer
+  slip is the leading `0` in zero-change cells (`0.00% → ០.00%`, ~25/doc) which folds back to the right value.
+  Genuine value errors are rare: digit-duplication (`8.33%→8333%`, `-13.33%→-13333%`) appeared **3× in 09.06,
+  0× in 15.06**, plus a few `%`-cell mis-crops (`7,000→7,000ក`, `2,500→2;500`).
+- **Confidence calibration (offset-corrected, non-empty GT, strict match).**
+
+  | conf bucket | 09.06 cells / match-frac | 15.06 cells / match-frac |
+  |---|---|---|
+  | `<0.50` | 1 / 0.000 | 1 / 0.000 |
+  | `0.50–0.80` | 19 / 0.368 | 14 / 0.357 |
+  | `0.80–0.95` | 239 / 0.665 | 234 / 0.671 |
+  | `≥0.95` | 317 / 0.861 | 327 / 0.838 |
+  | **< 0.80 (warns)** | **20 / 0.350** | **15 / 0.333** |
+  | **≥ 0.80 (no warn)** | **556 / 0.777** | **561 / 0.768** |
+
+  Monotonic → confidence **is** calibrated; the `_LOW_CONF_THRESHOLD = 0.80` edge is reasonable (below-0.80
+  cells are ~2.3× likelier wrong). But the top bucket is still only ~85% correct **because the systematic `៛`
+  misread is confident** — the threshold cannot catch the single biggest error class.
+- **Conclusion.** (a) **The "Kiri numeric weakness" premise is false**: numeric cells are **94.9% value-correct**;
+  the numeral-blindness that motivated fusion does not exist in production. The real error is the **non-numeric
+  `៛` unit glyph** (~52% of misses) plus mixed-script `0→០` cosmetics — neither is what a Surya numeric second
+  opinion would fix, and both models miss `៛` identically. (b) **Step 2 rule-based corrections** should target the
+  measured, deterministic patterns: normalize the Riel prefix `អ/គ.ក`, `#/គ.ក`, `អគៈក`, `អគ:ក` → `៛/គ.ក` (and
+  `អគ្រាប់→៛/គ្រាប់`, `#ផ្លែ→៛/ផ្លែ`) on the near-constant unit column, and fold leading `០→0` in `%`-pattern cells;
+  **never** auto-rewrite the digits themselves — instead cap confidence + warn on the digit-duplication /
+  malformed-number pattern (`\d,\d{4}`, `\d+%` with 4+ fractional digits) so it routes to analyst review.
+  (c) The **0.80 threshold is calibrated** as a general error-likelihood signal but is **blind to the confident `៛`
+  error**, so routing/verification must pair it with the deterministic `៛` rule (or Kiri fine-tuning, §2.29/Step 3),
+  not rely on confidence alone. **Net: build the deterministic corrections + fine-tune; do NOT build the fusion engine.**
+- Modules: `evaluation/evaluate_structure.py` (`Numeric_Cell_Accuracy`, `_is_numeric`/`_fold_numeric`/`_has_khmer_digit`),
+  `evaluation/run_benchmark.py` + `analyze_benchmark.py` (CSV col + `avg_numeric_cell_accuracy` + summary col),
+  `scripts/recall_taxonomy.py` (confidence-calibration hook, offset-robust alignment, conf-grid dump);
+  `tests/test_{evaluate_structure,run_benchmark}.py` (+19). Measurement-only: no engine/pipeline behavior changed.
+
 ---
 
 ## 3. Results Snapshot

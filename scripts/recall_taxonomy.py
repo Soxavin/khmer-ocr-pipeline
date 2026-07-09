@@ -46,6 +46,8 @@ from khmer_pipeline.evaluation.evaluate_structure import (
     _strip_title_row,
     _norm,
     _grid_cols,
+    _fold_numeric,
+    _is_numeric,
 )
 
 _REAL_DIR = Path("eval/datasets/real")
@@ -72,6 +74,59 @@ def _load_pages(stem: str, do_preprocess: bool) -> PreprocessResult:
         ing = IngestResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
         return preprocess(ing, PreprocessConfig())
     return PreprocessResult(source_name=stem, page_images=images, dpi=200, page_count=len(images))
+
+
+def _pred_conf_grid(table: dict) -> list[list[float | None]]:
+    # Parallel to evaluate_structure.pred_table_grid, but fills each (row,col) with
+    # the cell's recognizer confidence (surya_kiri sets cell["confidence"]) instead
+    # of its text — identical shape, so it aligns cell-for-cell with the text grid.
+    cells = table.get("cells", [])
+    if not cells:
+        return []
+    max_row = max(c.get("row_id", 0) for c in cells) + 1
+    max_col = max(c.get("col_id", 0) for c in cells) + 1
+    grid: list[list[float | None]] = [[None] * max_col for _ in range(max_row)]
+    for c in cells:
+        r = c.get("row_id", 0)
+        col = c.get("col_id", 0)
+        if 0 <= r < max_row and 0 <= col < max_col:
+            grid[r][col] = c.get("confidence")
+    return grid
+
+
+def _best_leading_offset(gt_grid: list[list[str]], pred_grid: list[list[str]],
+                         max_offset: int = 3) -> tuple[int, int]:
+    # Find the constant leading pred-row offset `o` (pred has `o` extra rows at the
+    # top, e.g. a split multi-line header) that best aligns GT[i] ↔ pred[i+o],
+    # scored by agreement on the numeric row-index column (col 0). Returns
+    # (offset, n_anchor_hits). o=0 ⇒ plain positional (no leading skew).
+    best_o, best_hits = 0, -1
+    for o in range(max_offset + 1):
+        hits = 0
+        for i in range(len(gt_grid)):
+            j = i + o
+            if j >= len(pred_grid):
+                break
+            g0 = _fold_numeric(gt_grid[i][0]) if gt_grid[i] else ""
+            if not g0.isdigit():  # only anchor on rows whose col0 is a row index
+                continue
+            p0 = _fold_numeric(pred_grid[j][0]) if pred_grid[j] else ""
+            if g0 == p0:
+                hits += 1
+        if hits > best_hits:
+            best_hits, best_o = hits, o
+    return best_o, best_hits
+
+
+# Confidence buckets for the calibration table (Task 3). The 0.80 edge is the
+# engine's _LOW_CONF_THRESHOLD (surya_kiri_engine.py) — the warning trigger we
+# are validating.
+_CONF_BUCKETS = [
+    ("<0.50", 0.0, 0.50),
+    ("0.50-0.80", 0.50, 0.80),
+    ("0.80-0.95", 0.80, 0.95),
+    (">=0.95", 0.95, 1.0001),
+]
 
 
 def _section_for_row(gi: int, section_rows: list[tuple[int, str]]) -> str:
@@ -113,6 +168,10 @@ def main() -> int:
     merged = merge_document_tables(result.pages)
     combined = [row for t in merged for row in pred_table_grid(t)]
     pred_grid = _strip_title_row(combined)
+    # Parallel confidence grid (same iteration order → row-aligned with `combined`);
+    # strip the same title row if one was dropped from the text grid.
+    combined_conf = [row for t in merged for row in _pred_conf_grid(t)]
+    conf_grid = combined_conf[1:] if len(pred_grid) < len(combined) else combined_conf
 
     gt_path = _REAL_DIR / f"{stem}_document_gt.json"
     gt = json.loads(gt_path.read_text(encoding="utf-8"))
@@ -338,6 +397,68 @@ def main() -> int:
     for m in blank[:20]:
         print(f"  row{m['gt_row']:>3} {m['col_name']:<25} GT={m['gt_val']!r}")
 
+    # --- Task 3: per-cell confidence calibration (surya_kiri only) ---
+    # Bucket every aligned predicted cell that carries a recognizer confidence and
+    # measure the fraction that EXACTLY matches GT (strict _norm equality, same
+    # notion as Cell_Accuracy). Validates whether low confidence predicts errors
+    # and whether the engine's 0.80 warning edge is well-placed.
+    # NOTE: this uses an offset-corrected row alignment (GT[i] ↔ pred[i+offset]),
+    # NOT the difflib `pairs` above — a split multi-line header gives pred one extra
+    # leading row, which collapses the difflib alignment (and would invert this
+    # table). The offset is detected from the numeric row-index column.
+    has_conf = any(v is not None for row in conf_grid for v in row)
+    calibration: dict | None = None
+    conf_offset, conf_anchor_hits = _best_leading_offset(gt_grid, pred_grid)
+    if has_conf:
+        # Restrict to NON-EMPTY GT cells: empty-GT cells are trivially "correct"
+        # when pred is also blank and would swamp the low-confidence bucket with
+        # meaningless matches, masking the real recognition-vs-confidence signal.
+        bucket_stats = {label: {"n": 0, "match": 0} for label, _, _ in _CONF_BUCKETS}
+        for gi in range(gt_rows):
+            pj = gi + conf_offset
+            gt_row = gt_grid[gi]
+            pred_row = pred_grid[pj] if pj < len(pred_grid) else []
+            conf_row = conf_grid[pj] if pj < len(conf_grid) else []
+            for c in range(gt_cols):
+                conf = conf_row[c] if c < len(conf_row) else None
+                if conf is None:
+                    continue
+                gt_val = _norm(gt_row[c]) if c < len(gt_row) else ""
+                if gt_val == "":
+                    continue
+                pred_val = _norm(pred_row[c]) if c < len(pred_row) else ""
+                is_match = pred_val == gt_val
+                for label, lo, hi in _CONF_BUCKETS:
+                    if lo <= conf < hi:
+                        bucket_stats[label]["n"] += 1
+                        if is_match:
+                            bucket_stats[label]["match"] += 1
+                        break
+
+        print(f"\n=== Confidence calibration (offset={conf_offset}, "
+              f"anchor_hits={conf_anchor_hits}; non-empty GT, strict match) ===")
+        print(f"  {'bucket':<12}{'cells':>8}{'exact-match':>13}{'match-frac':>12}")
+        for label, _, _ in _CONF_BUCKETS:
+            n = bucket_stats[label]["n"]
+            mt = bucket_stats[label]["match"]
+            frac = mt / n if n else 0.0
+            print(f"  {label:<12}{n:>8}{mt:>13}{frac:>11.3f}")
+
+        # 0.80 threshold validation: below-vs-above the engine's warning edge.
+        below = sum(bucket_stats[l]["n"] for l in ("<0.50", "0.50-0.80"))
+        below_m = sum(bucket_stats[l]["match"] for l in ("<0.50", "0.50-0.80"))
+        above = sum(bucket_stats[l]["n"] for l in ("0.80-0.95", ">=0.95"))
+        above_m = sum(bucket_stats[l]["match"] for l in ("0.80-0.95", ">=0.95"))
+        print(f"\n  conf < 0.80 : {below:>5} cells, {below_m/below if below else 0.0:.3f} exact-match "
+              f"(warning fires) ")
+        print(f"  conf >= 0.80: {above:>5} cells, {above_m/above if above else 0.0:.3f} exact-match "
+              f"(no warning)")
+        calibration = {
+            "buckets": {label: bucket_stats[label] for label, _, _ in _CONF_BUCKETS},
+            "below_0.80": {"n": below, "match": below_m},
+            "above_0.80": {"n": above, "match": above_m},
+        }
+
     out = {
         "stem": stem,
         "engine": engine,
@@ -349,9 +470,12 @@ def main() -> int:
         "n_matched": n_matched,
         "n_missed": n_miss,
         "mode_counts": dict(mode_counts),
+        "calibration": calibration,
+        "calibration_offset": conf_offset,
         "misses": misses,
         "gt_grid": gt_grid,
         "pred_grid": pred_grid,
+        "conf_grid": conf_grid,
     }
     out_path = Path("scripts/_recall_taxonomy_output.json")
     out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")

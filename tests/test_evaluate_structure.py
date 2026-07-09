@@ -7,6 +7,9 @@ from khmer_pipeline.evaluation.evaluate_structure import (
     _strip_title_row,
     _align_rows,
     _levenshtein,
+    _fold_numeric,
+    _is_numeric,
+    _has_khmer_digit,
     cer,
     gt_table_grid,
     gt_paragraph_lines,
@@ -582,3 +585,134 @@ def test_evaluate_recognition_flat_external_pred():
 def test_evaluate_recognition_wrong_prediction():
     gt = {"paragraphs": ["hello world"], "tables": [], "footer": ""}
     assert evaluate_recognition("zzzzzzzzzzz", [], gt)["recognition_cer"] > 0.5
+
+# --- numeric-cell detection (_fold_numeric / _is_numeric / _has_khmer_digit) ---
+
+def test_fold_numeric_folds_khmer_digits():
+    assert _fold_numeric("១២៣") == "123"
+
+def test_fold_numeric_strips_internal_spaces():
+    # a split number "7 800" folds to the joined form for comparison
+    assert _fold_numeric("7 800") == "7800"
+    assert _fold_numeric(" -3.85 % ") == "-3.85%"
+
+def test_is_numeric_plain_integer():
+    assert _is_numeric("12") is True
+
+def test_is_numeric_thousands_comma():
+    assert _is_numeric("7,800") is True
+    assert _is_numeric("1,234,567.89") is True
+
+def test_is_numeric_negative_percent():
+    assert _is_numeric("-3.85%") is True
+
+def test_is_numeric_positive_sign():
+    assert _is_numeric("+5") is True
+
+def test_is_numeric_khmer_digits():
+    # Khmer numerals fold to Arabic → numeric
+    assert _is_numeric("១២៣") is True
+    assert _is_numeric("០.00%") is True
+    assert _is_numeric("២៣") is True  # row-index column style
+
+def test_is_numeric_decimal_and_percent():
+    assert _is_numeric("12.5") is True
+    assert _is_numeric("0.00%") is True
+
+def test_is_numeric_space_separated_number():
+    # internal space stripped before matching
+    assert _is_numeric("7 800") is True
+
+def test_is_numeric_riel_unit_not_numeric():
+    # unit strings must NOT count as numeric cells
+    assert _is_numeric("៛/គ.ក") is False
+    assert _is_numeric("៛/គ្រាប់") is False
+
+def test_is_numeric_rejects_non_numbers():
+    assert _is_numeric("") is False
+    assert _is_numeric("abc") is False
+    assert _is_numeric("N/A") is False
+    assert _is_numeric("-") is False
+    assert _is_numeric("ចេក") is False
+
+def test_is_numeric_rejects_digit_duplication_artifact():
+    # "7,800" -> "7,8000" is the known Kiri duplication artifact; the malformed
+    # thousands grouping means it is NOT a well-formed number
+    assert _is_numeric("7,8000") is False
+
+def test_has_khmer_digit():
+    assert _has_khmer_digit("១") is True
+    assert _has_khmer_digit("៧,៨០០") is True
+    assert _has_khmer_digit("7,800") is False
+    assert _has_khmer_digit("៛/គ.ក") is False  # Riel sign is not a digit
+
+# --- Numeric_Cell_Accuracy scoring in evaluate_table ---
+
+# 4 numeric GT cells ("1", "7,800", "2", "-3.85%"); 2 non-numeric ("ចេក", "៛/គ.ក")
+_NUMERIC_GT = [
+    ["1", "ចេក", "7,800"],
+    ["2", "៛/គ.ក", "-3.85%"],
+]
+
+def test_numeric_cells_exact_match():
+    pred_table = _make_table_from_grid(_NUMERIC_GT)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["numeric_cells_total"] == 4
+    assert result["numeric_cells_correct"] == 4
+    assert result["numeric_cell_accuracy"] == pytest.approx(1.0)
+    assert result["numeric_cells_khmer_digit_slips"] == 0
+
+def test_numeric_cells_khmer_digit_rendering_still_value_correct():
+    # pred renders the SAME values in Khmer digits → value-correct after folding,
+    # but flagged as khmer-digit slips; plain cell_accuracy would MISS these.
+    pred_grid = [
+        ["១", "ចេក", "៧,៨០០"],
+        ["២", "៛/គ.ក", "-៣.៨៥%"],
+    ]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["numeric_cells_total"] == 4
+    assert result["numeric_cells_correct"] == 4
+    assert result["numeric_cell_accuracy"] == pytest.approx(1.0)
+    assert result["numeric_cells_khmer_digit_slips"] == 4
+    # plain exact-match cell_accuracy does NOT credit the Khmer-digit numerics
+    assert result["cell_accuracy"] < 1.0
+
+def test_numeric_cells_wrong_value():
+    pred_grid = [
+        ["1", "ចេក", "7,900"],   # 7,900 != 7,800
+        ["2", "៛/គ.ក", "-3.85%"],
+    ]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["numeric_cells_total"] == 4
+    assert result["numeric_cells_correct"] == 3
+    assert result["numeric_cell_accuracy"] == pytest.approx(0.75)
+    assert result["numeric_cells_khmer_digit_slips"] == 0
+
+def test_numeric_cells_dropped_row_counts_against_denominator():
+    # GT row ["2","៛/គ.ក","-3.85%"] has no pred pair → its 2 numeric cells miss
+    pred_grid = [["1", "ចេក", "7,800"]]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["numeric_cells_total"] == 4       # all numeric GT cells
+    assert result["numeric_cells_correct"] == 2      # only the aligned row's
+    assert result["numeric_cell_accuracy"] == pytest.approx(0.5)
+
+def test_numeric_cells_none_gt_grid():
+    result = evaluate_table([], None)
+    assert result["numeric_cells_total"] == 0
+    assert result["numeric_cells_correct"] == 0
+    assert result["numeric_cell_accuracy"] == 0.0
+    assert result["numeric_cells_khmer_digit_slips"] == 0
+
+def test_numeric_additions_do_not_perturb_existing_metrics():
+    # PIN: adding the numeric metric must not change cell_accuracy / recall /
+    # table_cer / cells_correct on a fixture that contains numeric cells.
+    pred_table = _make_table_from_grid(_NUMERIC_GT)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+    assert result["cell_content_recall"] == pytest.approx(1.0)
+    assert result["table_cer"] == pytest.approx(0.0)
+    assert result["cells_total"] == 6
+    assert result["cells_correct"] == 6

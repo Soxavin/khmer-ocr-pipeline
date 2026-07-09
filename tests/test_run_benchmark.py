@@ -192,6 +192,8 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
         "cell_accuracy": 0.0,
         "cell_content_recall": 0.0,
         "table_cer": 1.0,
+        "numeric_cell_accuracy": 0.0,
+        "numeric_cells_khmer_digit_slips": 0,
     }
     canned_text_metrics = {
         "text_cer": 0.5,
@@ -236,11 +238,19 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     # Document_CER must appear immediately after Text_CER
     text_cer_idx = field_names.index("Text_CER")
     assert field_names[text_cer_idx + 1] == "Document_CER"
+    # numeric-cell columns are present and populated
+    assert "Numeric_Cell_Accuracy" in field_names
+    assert "Numeric_Khmer_Digit_Slips" in field_names
     # one data row for the one image
     assert len(data_rows) == 1
     assert data_rows[0]["Engine"] == "run_fake"
     assert data_rows[0]["Dataset"] == "synthetic_data"
     assert data_rows[0]["Document_CER"] == "0.123"
+    assert data_rows[0]["Numeric_Cell_Accuracy"] == "0.000"
+    assert data_rows[0]["Numeric_Khmer_Digit_Slips"] == "0"
+
+    manifest_agg = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))["aggregates"]
+    assert "avg_numeric_cell_accuracy" in manifest_agg
 
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["image_count"] == 1
@@ -283,7 +293,8 @@ def _patch_benchmark_fakes(monkeypatch, cell_accs):
     def fake_eval_table(pred, gt_grid):
         return {"tables_found": 0, "gt_rows": 2, "gt_cols": 1, "pred_rows": 0,
                 "pred_cols": 0, "cell_accuracy": next(accs),
-                "cell_content_recall": 0.0, "table_cer": 1.0}
+                "cell_content_recall": 0.0, "table_cer": 1.0,
+                "numeric_cell_accuracy": 0.0, "numeric_cells_khmer_digit_slips": 0}
 
     monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ingest", fake_ingest)
     monkeypatch.setattr("khmer_pipeline.evaluation.run_benchmark.ACTIVE_OCR_ENGINE", fake_ocr_engine)
@@ -363,7 +374,8 @@ def test_summarize_with_rows():
             "Tables_Expected": "1", "Tables_Found": "1",
             "GT_Rows": "2", "GT_Cols": "2", "Pred_Rows": "2", "Pred_Cols": "2",
             "Cell_Accuracy": "0.800", "Cell_Content_Recall": "0.900",
-            "Table_CER": "0.100", "Text_CER": "0.150",
+            "Table_CER": "0.100", "Numeric_Cell_Accuracy": "0.850",
+            "Numeric_Khmer_Digit_Slips": "2", "Text_CER": "0.150",
             "Paragraph_Recall": "1.000", "Paragraph_Leak": "0",
             "Error": "",
         },
@@ -374,7 +386,8 @@ def test_summarize_with_rows():
             "Tables_Expected": "1", "Tables_Found": "1",
             "GT_Rows": "3", "GT_Cols": "2", "Pred_Rows": "3", "Pred_Cols": "2",
             "Cell_Accuracy": "0.600", "Cell_Content_Recall": "0.700",
-            "Table_CER": "0.200", "Text_CER": "0.250",
+            "Table_CER": "0.200", "Numeric_Cell_Accuracy": "0.650",
+            "Numeric_Khmer_Digit_Slips": "0", "Text_CER": "0.250",
             "Paragraph_Recall": "0.800", "Paragraph_Leak": "0",
             "Error": "",
         },
@@ -385,6 +398,7 @@ def test_summarize_with_rows():
     assert "Per-Font" in result
     assert "Per-Template" in result
     assert "Per-Dataset" in result
+    assert "NumAcc" in result  # numeric-cell accuracy column present
     assert "Best & Worst by Cell_Accuracy" in result
     assert "Lowest Table_CER" in result
 

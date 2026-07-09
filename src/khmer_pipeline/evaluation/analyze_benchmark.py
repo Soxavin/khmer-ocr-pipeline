@@ -67,7 +67,7 @@ def summarize(rows: list[dict]) -> str:
         return sum(found_vals) / denom
 
     header = (
-        f"{'Group':<28} {'CellAcc':>8} {'ContentRec':>10} {'TableCER':>9}"
+        f"{'Group':<28} {'CellAcc':>8} {'ContentRec':>10} {'TableCER':>9} {'NumAcc':>8}"
         f" {'TextCER':>8} {'DocCER':>8} {'TabRatio':>9} {'ParaRec':>8} {'ParaLeak':>9}"
     )
 
@@ -93,6 +93,7 @@ def summarize(rows: list[dict]) -> str:
                 f" {avg(items, 'Cell_Accuracy'):>8.3f}"
                 f" {avg(items, 'Cell_Content_Recall'):>10.3f}"
                 f" {avg(items, 'Table_CER'):>9.3f}"
+                f" {avg(items, 'Numeric_Cell_Accuracy'):>8.3f}"
                 f" {avg(items, 'Text_CER'):>8.3f}"
                 f" {avg(items, 'Document_CER'):>8.3f}"
                 f" {ratio(items, 'Tables_Found', 'Tables_Expected'):>9.3f}"

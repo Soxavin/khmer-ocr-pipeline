@@ -3,11 +3,40 @@ import difflib
 import re
 import unicodedata
 
+# Khmer→Arabic digit fold. Canonical copy lives in export._KHMER_TO_ARABIC;
+# duplicated here (with this note) so the lightweight evaluation module doesn't
+# pull in export.py / openpyxl just for 10 entries.
+_KHMER_TO_ARABIC = {
+    "០": "0", "១": "1", "២": "2", "៣": "3", "៤": "4",
+    "៥": "5", "៦": "6", "៧": "7", "៨": "8", "៩": "9",
+}
+
+# A folded cell is NUMERIC if it is a bare number: optional +/- sign, digits
+# with optional 3-grouped thousands-commas, optional decimal part, optional
+# trailing %. (e.g. "7,800", "-3.85%", "123", "0.00%".)
+_NUMERIC_RE = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?%?$")
+
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFC", s)
     s = re.sub(r"\s+", " ", s)
     return s.strip()
+
+
+def _fold_numeric(s: str) -> str:
+    # NFC-normalize, fold Khmer digits → Arabic, then drop every space so a
+    # split number ("7 800") compares equal to its joined form ("7800").
+    folded = "".join(_KHMER_TO_ARABIC.get(ch, ch) for ch in _norm(s))
+    return folded.replace(" ", "")
+
+
+def _is_numeric(s: str) -> bool:
+    # True iff the cell is a well-formed number after digit-folding + space-strip.
+    return bool(_NUMERIC_RE.match(_fold_numeric(s)))
+
+
+def _has_khmer_digit(s: str) -> bool:
+    return any(ch in _KHMER_TO_ARABIC for ch in s)
 
 
 def _strip_title_row(grid: list[list[str]]) -> list[list[str]]:
@@ -120,6 +149,10 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             "table_cer": 0.0,
             "cells_total": 0,
             "cells_correct": 0,
+            "numeric_cells_total": 0,
+            "numeric_cells_correct": 0,
+            "numeric_cell_accuracy": 0.0,
+            "numeric_cells_khmer_digit_slips": 0,
         }
 
     tables_found = len(pred_tables)
@@ -175,6 +208,38 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     ))
     table_cer = cer(gt_joined, pred_joined)
 
+    # --- Numeric-cell accuracy (financial tables are numeral-dominated) ---
+    # Denominator = every numeric GT cell in the grid (numeric = well-formed
+    # number after digit-folding), so numeric cells in dropped rows count as
+    # misses — mirrors how cell_accuracy uses the full gt_rows*gt_cols total.
+    numeric_cells_total = sum(
+        1
+        for r in range(gt_rows)
+        for c in range(gt_cols)
+        if c < len(gt_stripped[r]) and _is_numeric(gt_stripped[r][c])
+    )
+    # Correctness + Khmer-digit slips are scored on aligned row pairs only.
+    # Both sides are folded before comparison, so a Khmer-digit rendering of the
+    # right value scores correct; khmer_digit_slips separately counts paired pred
+    # cells that carry any Khmer digit (value-right-but-mixed-script vs value-wrong).
+    numeric_cells_correct = 0
+    numeric_cells_khmer_digit_slips = 0
+    for gi, pj in _align_rows(gt_sigs, pred_sigs):
+        gt_row = gt_stripped[gi]
+        pred_row = pred_stripped[pj]
+        for c in range(gt_cols):
+            gt_raw = gt_row[c] if c < len(gt_row) else ""
+            if not _is_numeric(gt_raw):
+                continue
+            pred_raw = pred_row[c] if c < len(pred_row) else ""
+            if _fold_numeric(pred_raw) == _fold_numeric(gt_raw):
+                numeric_cells_correct += 1
+            if _has_khmer_digit(pred_raw):
+                numeric_cells_khmer_digit_slips += 1
+    numeric_cell_accuracy = (
+        numeric_cells_correct / numeric_cells_total if numeric_cells_total > 0 else 0.0
+    )
+
     return {
         "tables_found": tables_found,
         "gt_rows": gt_rows,
@@ -186,6 +251,10 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
         "table_cer": table_cer,
         "cells_total": cells_total,
         "cells_correct": cells_correct,
+        "numeric_cells_total": numeric_cells_total,
+        "numeric_cells_correct": numeric_cells_correct,
+        "numeric_cell_accuracy": numeric_cell_accuracy,
+        "numeric_cells_khmer_digit_slips": numeric_cells_khmer_digit_slips,
     }
 
 
