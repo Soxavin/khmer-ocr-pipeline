@@ -1286,6 +1286,40 @@ corrects the §2.36 variant plan.
 - Artifacts: `eval/datasets/real/CambodiaBudgetExecutioninApr-2024_p3.{png,_ground_truth.json}` (local
   only). NEXT (user-directed): re-scope the structure/recognition combination around this finding.
 
+### 2.38 Final-month plan kickoff + continual-learning survey memo (2026-07-09)
+
+**Plan approved & started.** The 4-week final-month strategy (dataset factory → layout fine-tune
+Track A / Kiri fine-tune Track B / VLM SFT Track C exploratory → report) is approved; full text lives
+outside the repo (planning doc). Confirmed with mentor: **HF dataset repo is PRIVATE-first**;
+**VLM fine-tune target is 4B-class on free Colab T4** (8B needs ~24GB — dropped unless paid compute
+appears). Week-1 artifacts this entry covers: `scripts/collect_documents.py` (batch-download + corpus
+classification vs the ≥40-doc/≥100-page target; adds a `khmer_layer_suspect` flag catching
+Khmer-block-codepoint legacy mojibake like CambodiaBudget that `inspect_pdf` alone misses — legacy
+embedded fonts OR >3% invalid Khmer ordering at token starts) and the memo below.
+
+**Continual-learning survey memo (mentor directive: "look into only" — nothing here is built).**
+What "the pipeline retrains itself monthly" would actually require, and what we deliver instead:
+
+1. **Data versioning & provenance.** Every training example must be traceable to (source PDF, page,
+   generation method, human-corrected-or-not). Minimum viable: HF dataset revisions (git-backed) +
+   the datacard per version — which the Week-2 factory already produces. Full solution (DVC/lakeFS,
+   automated lineage) is infrastructure we do not need at ~100 pages/month.
+2. **Drift detection.** Retraining monthly is pointless without knowing whether the document
+   distribution moved. Cheap proxy signals we already emit: per-cell confidence distributions,
+   Stage-4 warning rates (malformed-number flags, foreign-script scrubs, empty-cell noise), and
+   engine disagreement on sampled docs. A monthly dashboard of these ≈ drift monitoring for free;
+   a real system would add embedding-space drift tests (not built).
+3. **The retrain loop itself.** Pseudo-label new month's PDFs → human correction in Roboflow
+   (~2–4 h/100 pages) → retrain (YOLO-s: 1–2 h T4; Kiri CTC: hours) → **gated A/B on the frozen GT
+   eval set before swap** (the §2.23/2.24 gate pattern — the eval set is the regression contract).
+   This is a *procedure*, not infrastructure, and it is what we deliver: the Week-4
+   **monthly-retrain runbook** IS the mentor's "training every month," human-in-the-loop.
+4. **What true continual learning would add** (and why we say no for now): automated
+   retraining triggers, catastrophic-forgetting mitigation (replay buffers / EWC) when fine-tuning
+   on each month's data, canary deployment with automatic rollback, and label-quality QA at scale.
+   Each is a project on its own; at GDDE's volume the human-gated monthly runbook gives ~all the
+   benefit at ~none of the risk. Revisit only if volume grows 10×+ or labeling moves to a team.
+
 ---
 
 ## 3. Results Snapshot
