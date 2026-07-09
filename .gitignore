@@ -11,6 +11,9 @@ dist/
 # Sensitive inputs — never commit
 sample_data/
 .streamlit/
+# Dataset-factory corpus: PDFs stay local; only the README is tracked
+corpus/*
+!corpus/README.md
 
 # Generated benchmark / synthetic outputs
 eval/datasets/

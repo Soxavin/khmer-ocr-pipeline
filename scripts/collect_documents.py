@@ -98,16 +98,20 @@ def _khmer_layer_suspect(pdf_path: Path) -> bool:
 
 
 def report(folder: Path, output: Path) -> None:
-    """Classify all PDFs in folder, print routing summary + target progress, write JSON."""
-    results = inspect_pdf(folder)
-    if not results:
-        print(f"No PDFs found in {folder}")
+    """Classify all PDFs under folder (recursive), print routing summary + progress, write JSON."""
+    pdfs = sorted(folder.rglob("*.pdf")) if folder.is_dir() else [folder]
+    if not pdfs:
+        print(f"No PDFs found under {folder}")
         return
 
-    for r in results:
+    results: list[dict] = []
+    for pdf in pdfs:
+        (r,) = inspect_pdf(pdf)
+        r["relpath"] = str(pdf.relative_to(folder)) if folder.is_dir() else pdf.name
         if r["classification"] == "born_digital_unicode":
-            r["khmer_layer_suspect"] = _khmer_layer_suspect(folder / r["filename"])
-    suspects = [r["filename"] for r in results if r.get("khmer_layer_suspect")]
+            r["khmer_layer_suspect"] = _khmer_layer_suspect(pdf)
+        results.append(r)
+    suspects = [r["relpath"] for r in results if r.get("khmer_layer_suspect")]
 
     by_class: dict[str, list[dict]] = {}
     for r in results:
