@@ -1239,6 +1239,55 @@ production path (ingest → preprocess → engine).
 
 ---
 
+### 2.37 First non-ARDB table GT + variance-aware head-to-head — a clean structure/recognition split (2026-07-09)
+
+Built the eval set's **first non-ARDB table ground truth** to test the §2.36 finding fairly, then ran a
+multi-run head-to-head. Result decomposes the two engines into mirror-image strengths and, in passing,
+corrects the §2.36 variant plan.
+
+- **The GT (CambodiaBudget p3, 35×16, `eval/datasets/real/`, gitignored → stays local).** Provenance,
+  deliberately unbiased: **numbers + grid structure from the PDF text layer via PyMuPDF
+  `find_tables()`** (Latin digits are clean even though the Khmer is legacy-font mojibake — confirms
+  §2.21, and shows the caveat is "corrupts Khmer GT, not numbers"); **Khmer label column + header +
+  title transcribed from the 300-DPI image** (cross-checked vs Surya, then **user-verified**), NOT from
+  any OCR engine, so the Khmer column can't bias surya-vs-kiri. Empty May–Dec month columns kept to
+  detect phantom cells.
+- **Variance-aware scores (production path; Surya ×4, surya_kiri ×2):**
+
+  | engine | Recall (mean / min–max) | Numeric_Cell_Accuracy | pred cols |
+  |---|---|---|---|
+  | surya | **0.890** / 0.857–0.932 | **bimodal** {0.000, 0.009, 0.982, 1.000} | 14 / 17 / 18 / 19 |
+  | surya_kiri | 0.168 (deterministic) | 0.122 (deterministic) | 16 / 16 |
+
+- **Mirror-image diagnosis.**
+  - **Surya = excellent recognition, unstable structure.** Content Recall ~0.89 EVERY run (it reads the
+    numbers, always), but the VLM emits a different column count each run, so NumAcc is **bimodal**:
+    ~1.0 when the grid aligns (18–19 cols → 16 after title-strip), ~0 when it doesn't — the numbers are
+    read correctly but land in misaligned columns (Recall stays 0.89, proving displacement not
+    misreading). A separate probe saw column counts 14–21 and one run detecting **0 tables** (transient
+    total failure). This is §2.28's "large Surya variance," severe on a wide 16-col table.
+  - **surya_kiri = perfect stable structure, terrible recognition.** Dead-deterministic 34×16
+    (TableRecPredictor nails the column count), but Recall 0.168 / NumAcc 0.122 — Kiri genuinely mangles
+    numbers (drops decimals, injects Khmer glyphs, §2.36). Its content is mostly WRONG, not just
+    misplaced.
+- **User complaint confirmed with numbers.** On number-heavy tables Surya's recognition beats Kiri's
+  decisively (Recall 0.89 vs 0.17; aligned NumAcc up to 1.0 vs 0.12) — even Surya's worst run reads the
+  numbers; Kiri's best run doesn't. BUT "just use Surya" is not a clean win: its structure variance
+  (half the runs misalign) is a real reliability problem our single-doc ARDB eval never exposed.
+- **Corrects the §2.36 variant plan.** §2.36 assumed "Surya-structure + Kiri-text" — but here **Surya's
+  STRUCTURE is the unstable part**, while TableRecPredictor's (what surya_kiri uses) is rock-solid. The
+  genuinely promising combination is closer to the OPPOSITE: **TableRecPredictor structure + Surya
+  recognition** — hard, because Surya recognizes whole tables, not per-cell. Cheap interim idea worth
+  testing: run Surya N× and take the **modal/best column structure** to damp the variance.
+- **Metric lessons (both reinforce earlier notes).** Position-insensitive Recall stayed 0.89 while
+  NumAcc hit 0.0 → Recall completely hid misplacement; and on this sparse table Cell_Accuracy is
+  inflated by empty-cell agreement (~0.53 for surya_kiri despite 0.12 numeric) — **Recall + NumAcc are
+  the honest signals on wide/sparse tables, not Cell_Accuracy.**
+- Artifacts: `eval/datasets/real/CambodiaBudgetExecutioninApr-2024_p3.{png,_ground_truth.json}` (local
+  only). NEXT (user-directed): re-scope the structure/recognition combination around this finding.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
