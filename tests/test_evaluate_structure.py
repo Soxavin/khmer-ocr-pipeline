@@ -716,3 +716,30 @@ def test_numeric_additions_do_not_perturb_existing_metrics():
     assert result["table_cer"] == pytest.approx(0.0)
     assert result["cells_total"] == 6
     assert result["cells_correct"] == 6
+
+
+# --- Empty-cell precision (phantom text in empty GT cells, e.g. Kiri's "|") ---
+
+def test_empty_cell_precision_counts_phantom_text():
+    # First row fully non-empty so _strip_title_row leaves the grid alone.
+    gt_grid = [["h1", "h2"], ["b", ""], ["c", ""]]
+    pred_table = _make_table_from_grid([["h1", "h2"], ["b", "|"], ["c", ""]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["empty_gt_cells_total"] == 2
+    assert m["empty_gt_cells_clean"] == 1
+    assert m["empty_cell_precision"] == 0.5
+
+
+def test_empty_cell_precision_perfect_when_empties_stay_empty():
+    gt_grid = [["h1", "h2"], ["b", ""]]
+    pred_table = _make_table_from_grid([["h1", "h2"], ["b", ""]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["empty_cell_precision"] == 1.0
+
+
+def test_empty_cell_precision_none_when_gt_has_no_empty_cells():
+    gt_grid = [["a", "b"]]
+    pred_table = _make_table_from_grid([["a", "b"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["empty_gt_cells_total"] == 0
+    assert m["empty_cell_precision"] is None

@@ -115,6 +115,9 @@ class CorrectedPageResult:
 class PostprocessResult:
     source_name: str
     pages: list[CorrectedPageResult]
+    # Stage-4 issues (e.g. malformed-number flags) — displayed alongside
+    # SuryaResult.warnings in app.py / printed by pipeline.py.
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass

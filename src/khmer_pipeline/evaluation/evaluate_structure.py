@@ -153,6 +153,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             "numeric_cells_correct": 0,
             "numeric_cell_accuracy": 0.0,
             "numeric_cells_khmer_digit_slips": 0,
+            "empty_gt_cells_total": 0,
+            "empty_gt_cells_clean": 0,
+            "empty_cell_precision": None,
         }
 
     tables_found = len(pred_tables)
@@ -224,20 +227,33 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # cells that carry any Khmer digit (value-right-but-mixed-script vs value-wrong).
     numeric_cells_correct = 0
     numeric_cells_khmer_digit_slips = 0
+    # Empty-cell precision (§2.35): phantom text in empty GT cells (e.g. a cell
+    # border read as "|") pollutes exports but is invisible to Recall — count it.
+    # Scored over aligned row pairs only (pollution is only measurable where a
+    # GT row has a predicted counterpart).
+    empty_gt_cells_total = 0
+    empty_gt_cells_clean = 0
     for gi, pj in _align_rows(gt_sigs, pred_sigs):
         gt_row = gt_stripped[gi]
         pred_row = pred_stripped[pj]
         for c in range(gt_cols):
             gt_raw = gt_row[c] if c < len(gt_row) else ""
+            pred_raw = pred_row[c] if c < len(pred_row) else ""
+            if not _norm(gt_raw):
+                empty_gt_cells_total += 1
+                if not _norm(pred_raw):
+                    empty_gt_cells_clean += 1
             if not _is_numeric(gt_raw):
                 continue
-            pred_raw = pred_row[c] if c < len(pred_row) else ""
             if _fold_numeric(pred_raw) == _fold_numeric(gt_raw):
                 numeric_cells_correct += 1
             if _has_khmer_digit(pred_raw):
                 numeric_cells_khmer_digit_slips += 1
     numeric_cell_accuracy = (
         numeric_cells_correct / numeric_cells_total if numeric_cells_total > 0 else 0.0
+    )
+    empty_cell_precision = (
+        empty_gt_cells_clean / empty_gt_cells_total if empty_gt_cells_total > 0 else None
     )
 
     return {
@@ -255,6 +271,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
         "numeric_cells_correct": numeric_cells_correct,
         "numeric_cell_accuracy": numeric_cell_accuracy,
         "numeric_cells_khmer_digit_slips": numeric_cells_khmer_digit_slips,
+        "empty_gt_cells_total": empty_gt_cells_total,
+        "empty_gt_cells_clean": empty_gt_cells_clean,
+        "empty_cell_precision": empty_cell_precision,
     }
 
 

@@ -1086,6 +1086,113 @@ mask) is deliberately out of scope — each is an A/B-gated experiment.
 
 ---
 
+### 2.34 GDDE-domain cell rules + malformed-number flag + per-cell confidence view (2026-07-09)
+
+Implements §2.33's conclusion (deterministic corrections, no fusion) plus the analyst-facing
+confidence view. Design constraint from the user: the bulletin docs are the TEST SET, not the target
+scope — rules must be provably unable to alter other document types.
+
+- **Domain rules (`postprocess._apply_cell_rules`, applied to table cells in Stage 4).** Kept
+  deliberately separate from the script-level normalizer (`khmer_normalize.py` untouched). Two rules,
+  both full-cell pattern matches on corrupt forms that are not plausible Khmer text: (1) riel-prefix
+  repair — `^[អ#វ]/?(គ.ក|គ្រាប់|ផ្លែ)$` (and the `ៈ`/`:` dot-misread variant) → `៛/<unit>`;
+  (2) percent Khmer-digit fold — percent-shaped cells containing Khmer digits get digits folded to
+  Arabic (`០.00% → 0.00%`). Khmer row-index cells (no `%`) pass through untouched.
+- **Malformed-number FLAG, never a rewrite.** Digit-duplication artifacts (`\d,\d{4}` comma
+  violations; `^[+-]?\d{4,}%$` implausible integer percents) get their confidence capped to 0.4
+  (< CONFIDENCE_LOW → red in the UI) + a warning naming page/table/row/col. Financial digits are
+  never auto-corrected. Carried by a minimal Stage-4 warnings channel: `PostprocessResult.warnings`
+  (new field), shown in app.py's warnings expander and printed by pipeline.py (first slice of the
+  audit's B1).
+- **Generalization gate (single-inference dual-scoring — score the same OCR output with rules
+  monkeypatched off vs on, so Surya run-variance can't confound it):**
+  - **Part A (identity):** all **30/30 synthetic images METRIC-IDENTICAL**, 0 stage-4 warnings —
+    the rules never fire outside the bulletin domain. Anti-overfit contract holds.
+  - **Part B (lift, surya_kiri + full preprocess vs §2.33's raw-OCR baseline):**
+
+    | doc | Cell_Acc | Recall | Table_CER | Numeric_Acc |
+    |---|---|---|---|---|
+    | 09.06.26 before → after | 0.173 → **0.904** | 0.762 → **0.932** | 0.086 → **0.037** | 0.178 → **0.953** |
+    | 15.06.26 before → after | 0.159 → **0.904** | 0.757 → **0.922** | 0.081 → **0.036** | 0.142 → **0.945** |
+
+    The Recall lift (+0.17) matches §2.33's taxonomy arithmetic (riel ≈52% + percent slips ≈18% of
+    misses). **Honest read of the Cell_Acc jump:** 0.17→0.90 is NOT pure recognition gain — with the
+    unit column fixed, whole rows now match GT exactly, so difflib's row alignment snaps into place
+    and the §2.33 +1-header alignment artifact dissolves; the corrected numbers converge on the
+    offset-corrected §2.33 values (NumAcc 0.953/0.945 ≈ §2.33's 0.953/0.946), which cross-validates
+    both measurements. Malformed flag fired on exactly the 2 pattern-matching digit-duplication cells
+    in 09.06 (`8333%`, `-13333%`; §2.33's third case doesn't match the conservative patterns — accepted)
+    and 0 false positives on 15.06.
+- **Per-cell confidence view (app.py).** Each exported table with any per-cell confidence gets a
+  collapsed read-only "🔍 Confidence view": cells tinted red (< `CELL_CONF_LOW` 0.80) / amber
+  (0.80–0.95 `CELL_CONF_MID`) per the §2.33 calibration; legend states the ៛ caveat (systematic glyph
+  errors can be high-confidence — tinting flags likely errors, untinted is not a guarantee). Tables
+  always render without it (never gate display on optional data); the editable grid stays the single
+  export source. Malformed-flagged cells surface red here automatically. Image-space heatmap deferred
+  (needs cell polygons retained through `_build_table_from_grid` — engine change).
+- **UI clarity rider:** engine-picker caption now states that surya_kiri reads cells from an internal
+  deskew-only image (§2.31), so users must not hand-disable photometric preprocessing for it.
+- Modules: `postprocess.py` (rules, flag, warnings sink), `models.py` (`PostprocessResult.warnings`),
+  `model_config.py` (`CELL_CONF_LOW/MID`), `app.py` (confidence view, combined warnings, captions),
+  `pipeline.py` (Stage-4 WARNING lines), `CONTEXT.md`; `tests/test_postprocess.py` (+9; 479 total).
+- **NEXT:** smart preprocessing suggestions on upload (queued, separate plan); Kiri fine-tune (§2.29,
+  now with §2.33/§2.34 defining the training emphasis: ៛, subscripts, digit-duplication).
+
+---
+
+### 2.35 Three user-observed defects closed — pipe noise, dot-drop percents, foreign-script garbage (2026-07-09)
+
+User reported three residual defects; each was verified against the §2.33 taxonomy dumps (no new
+runs) before fixing, and the fixes are deterministic + benchmark-gated like §2.34.
+
+- **Observation 1 — empty-cell noise.** 19/99 (09.06) and 13/99 (15.06) empty GT cells carried junk,
+  **pipe-dominated** (`|` 15×/10× — Kiri reading the cell's border line). Invisible to Recall (which
+  only scores non-empty GT cells). Fix: `_strip_cell_noise` empties a cell whose text is only
+  gridline chars **and contains a `|`** (conservative — a bare `-`/`—` may be a legit "no data"
+  marker elsewhere, so it survives). New eval metric **`Empty_Cell_Precision`** (fraction of empty GT
+  cells left empty, `None` when GT has no empties) makes this visible to the harness henceforth.
+- **Observation 2 — dot-dropped percents.** `-4.76%→-476%`, `2.94%→294%` (15.06): plausible-looking
+  wrong values the §2.34 flag (`\d{4,}%`) missed. Fix: widened `_MALFORMED_PERCENT_RE` to
+  `^[+-]?\d{2,}%$` — any ≥2-digit integer percent (these docs' %-values all carry decimals, so an
+  integer form is a likely dot-drop); `5%` survives. Still a FLAG (confidence cap + warning), digits
+  never rewritten.
+- **Observation 3 — foreign-script garbage in the UI.** 0 in surya_kiri *cells* (Kiri's vocab is
+  Khmer+Latin) — it comes from **Surya's narrative text** (§2.15 hallucinations). The existing
+  `_is_foreign_script` detector only *routed to Qwen* (off by default) → did nothing. Fix:
+  `_strip_foreign_scripts` deterministically removes Sinhala/Lao/Thai/Myanmar/Arabic/CJK/Kana from
+  BOTH cells and page text (product constraint: Khmer/English only), one aggregated warning per
+  page/table. Benefits both engines.
+- **Generalization gate — decomposed (the naive "30/30 identical" bar conflates a global rule with
+  domain rules, so attribute carefully):**
+  - Adding domain rules + noise-strip + malformed-flag alone = **byte-identical on all 30 synthetic
+    images** (proven: with the scrub isolated, the domain-config Table_CERs equal the pre-change
+    baseline exactly). Anti-overfit contract holds — the riel/percent rules never fire off-domain.
+  - The **global foreign-scrub** legitimately fires on 2 decorative-font synthetic images (Hanuman,
+    Moul — the §2.33-worst fonts where Surya hallucinates foreign scripts), moving only Table_CER by
+    ±0.04. That is correct universal garbage-removal (synthetic GT is clean Khmer, so only genuine
+    hallucinations are removed), not overfitting.
+  - **Real docs (surya_kiri, full preprocess) — before→after (§2.34 baseline → §2.35):**
+
+    | doc | Cell_Acc | Recall | Table_CER | Empty_Cell_Prec |
+    |---|---|---|---|---|
+    | 09.06.26 | 0.173 → **0.926** | 0.762 → **0.932** | 0.086 → **0.030** | 0.586 → **0.889** |
+    | 15.06.26 | 0.159 → **0.919** | 0.757 → **0.922** | 0.081 → **0.031** | 0.657 → **0.899** |
+
+    Empty-cell precision +0.30/+0.24 (pipe fix); Table_CER now below §2.34; **all four dot-drop cells
+    flagged** (09.06 `8333%`/`-13333%`, 15.06 `-476%`/`294%` — the exact cells the user reported);
+    foreign scrub fired on p3 of both docs (6 chars, Surya narrative). Cell_Acc edged above §2.34 as
+    the pipe cleanup let more cells match.
+- **Not done (deliberate):** an engine-level ink-ratio guard for empty cells — a thin legit glyph
+  ("1") has ink density near a border line, so the threshold risk outweighs the gain; empty/gridline
+  negatives go to the Kiri fine-tune corpus instead (joining ៛, subscripts, dot-drops as §2.33/§2.35
+  training emphases).
+- Modules: `postprocess.py` (`_strip_cell_noise`, `_strip_foreign_scripts`, widened percent flag,
+  cell + narrative wiring), `evaluation/evaluate_structure.py` (`Empty_Cell_Precision`),
+  `run_benchmark.py` + `analyze_benchmark.py` (CSV col + `avg_empty_cell_precision` + summary),
+  `CONTEXT.md`; `tests/test_{postprocess,evaluate_structure}.py` (+11; 488 total).
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

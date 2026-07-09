@@ -147,8 +147,9 @@ def test_qwen_failure_falls_back_gracefully():
             ), skip_qwen=False)
         assert len(w) == 1
         assert "Qwen batch correction failed" in str(w[0].message)
-    # corrected_text equals rule-applied block text (Qwen failed, returned input unchanged)
-    assert r.pages[0].corrected_text == pp._apply_rules(sinhala_text)
+    # corrected_text equals rule-applied block text (Qwen failed, returned input
+    # unchanged) — after the §2.35 foreign-script scrub, which runs regardless.
+    assert r.pages[0].corrected_text == pp._strip_foreign_scripts(pp._apply_rules(sinhala_text))[0]
     # Qwen was attempted but failed and changed nothing, so it was not "applied"
     assert r.pages[0].qwen_used is False
 
@@ -204,6 +205,134 @@ def test_postprocess_does_not_mutate_surya_tables():
     assert r.pages[0].tables is not surya.pages[0].tables
     assert r.pages[0].tables[0]["cells"] is not surya.pages[0].tables[0]["cells"]
     assert zwsp not in _cell_text_of(r.pages[0])
+
+
+# --- Step 2a: GDDE-domain cell rules (PROJECT_LOG §2.33/§2.34) ---
+
+def test_riel_prefix_rules_fix_measured_confusions():
+    cases = {
+        "អគ.ក": "៛/គ.ក", "#គ.ក": "៛/គ.ក", "វ/គ.ក": "៛/គ.ក", "អ/គ.ក": "៛/គ.ក",
+        "អគៈក": "៛/គ.ក", "អគ:ក": "៛/គ.ក",
+        "អគ្រាប់": "៛/គ្រាប់", "#ផ្លែ": "៛/ផ្លែ", "អផ្លែ": "៛/ផ្លែ",
+    }
+    for corrupt, fixed in cases.items():
+        assert pp._apply_cell_rules(corrupt) == fixed, corrupt
+
+
+def test_cell_rules_identity_on_clean_and_generic_text():
+    # Anti-overfit contract: rules fire ONLY on full-cell corrupt forms.
+    for s in ["៛/គ.ក", "៛/គ្រាប់", "គ.ក", "សាច់ជ្រូក", "អង្ករ", "អគរ",
+              "12,000", "8.33%", "", "ABA", "អគ.ក extra", "x អគ.ក"]:
+        assert pp._apply_cell_rules(s) == s, s
+
+
+def test_percent_khmer_zero_folded():
+    assert pp._apply_cell_rules("០.00%") == "0.00%"
+    assert pp._apply_cell_rules("០.០០%") == "0.00%"
+    assert pp._apply_cell_rules("-០.៥%") == "-0.5%"
+
+
+def test_khmer_row_index_cells_not_folded():
+    # Legitimately-Khmer numerals without % (the row-index column) must pass through.
+    for s in ["១", "២៣", "៩"]:
+        assert pp._apply_cell_rules(s) == s
+
+
+def test_cell_rules_applied_through_postprocess():
+    table = _table_with_cell_text("អគ.ក")
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[table], ocr_text="")
+    with _mock_qwen():
+        r = pp.postprocess(SuryaResult(source_name="t.pdf", pages=[page]))
+    assert _cell_text_of(r.pages[0]) == "៛/គ.ក"
+
+
+# --- Step 2b: malformed-number flag + Stage-4 warnings channel ---
+
+def _postprocess_single_cell(text: str, confidence: float | None = None):
+    table = _table_with_cell_text(text)
+    if confidence is not None:
+        table["cells"][0]["confidence"] = confidence
+    page = SuryaPageResult(page_index=0, text_blocks=[], tables=[table], ocr_text="")
+    with _mock_qwen():
+        return pp.postprocess(SuryaResult(source_name="t.pdf", pages=[page]))
+
+
+def test_malformed_comma_number_flagged_not_rewritten():
+    r = _postprocess_single_cell("7,8000", confidence=0.97)
+    cell = r.pages[0].tables[0]["cells"][0]
+    assert cell["text_lines"][0]["text"] == "7,8000"      # digits NEVER rewritten
+    assert cell["confidence"] < pp.CONFIDENCE_LOW          # capped → red in UI
+    assert any("7,8000" in w for w in r.warnings)
+
+
+def test_malformed_percent_flagged_sets_confidence_when_absent():
+    r = _postprocess_single_cell("8333%")                  # no confidence on input
+    cell = r.pages[0].tables[0]["cells"][0]
+    assert cell["text_lines"][0]["text"] == "8333%"
+    assert cell["confidence"] < pp.CONFIDENCE_LOW
+    assert len(r.warnings) == 1
+
+
+def test_wellformed_numbers_not_flagged():
+    # "150%"-style ≥2-digit integer percents are now deliberately flagged (§2.35).
+    for s in ["4,000", "8.33%", "-13.33%", "5%", "12,000", "0.00%"]:
+        r = _postprocess_single_cell(s, confidence=0.97)
+        cell = r.pages[0].tables[0]["cells"][0]
+        assert r.warnings == [], s
+        assert cell["confidence"] == 0.97, s
+
+
+# --- Step 3-pre: gridline-noise strip, foreign-script scrub, widened % flag ---
+
+def test_pipe_noise_cells_emptied():
+    for noise in ["|", "-|", "|-", "||", "— |"]:
+        r = _postprocess_single_cell(noise)
+        assert _cell_text_of(r.pages[0]) == "", noise
+
+
+def test_bare_dash_placeholder_survives():
+    # Conservative rule: only pipe-bearing junk is stripped; a lone dash may be a
+    # legitimate "no data" marker in other document types.
+    for keep in ["-", "—", "_"]:
+        r = _postprocess_single_cell(keep)
+        assert _cell_text_of(r.pages[0]) == keep, keep
+
+
+def test_foreign_script_scrubbed_from_cell_with_warning():
+    r = _postprocess_single_cell("4,000" + _SINHALA_KA * 2)
+    assert _cell_text_of(r.pages[0]) == "4,000"
+    assert any("foreign-script" in w for w in r.warnings)
+
+
+def test_foreign_script_scrubbed_from_narrative_with_warning():
+    dirty = "តម្លៃ " + _LAO_KO * 3 + " 12,000"
+    with _mock_qwen():
+        r = pp.postprocess(_make_surya_result(text_blocks=[{"text": dirty}]))
+    assert _LAO_KO not in r.pages[0].corrected_text
+    assert "តម្លៃ" in r.pages[0].corrected_text and "12,000" in r.pages[0].corrected_text
+    assert any("foreign-script" in w for w in r.warnings)
+
+
+def test_khmer_english_digits_never_scrubbed():
+    clean = "៩ សាច់ជ្រូក Pork 12,000 ៛/គ.ក 8.33%"
+    assert pp._strip_foreign_scripts(clean) == (clean, 0)
+
+
+def test_integer_percent_flagged_decimal_percent_not():
+    # ≥2-digit integer percents = likely dot-drops (2.94%→294%) → flagged
+    for bad in ["294%", "-476%", "8333%", "25%"]:
+        r = _postprocess_single_cell(bad, confidence=0.97)
+        assert r.pages[0].tables[0]["cells"][0]["confidence"] < pp.CONFIDENCE_LOW, bad
+        assert len(r.warnings) == 1, bad
+    for ok in ["8.33%", "-13.33%", "0.00%", "5%"]:
+        r = _postprocess_single_cell(ok, confidence=0.97)
+        assert r.warnings == [], ok
+
+
+def test_postprocess_warnings_empty_by_default():
+    with _mock_qwen():
+        r = pp.postprocess(_make_surya_result())
+    assert r.warnings == []
 
 
 def test_correction_diff_populated():

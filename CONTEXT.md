@@ -30,7 +30,7 @@ IngestResult -> PreprocessResult -> SuryaResult -> PostprocessResult -> ExportRe
 | 1. Ingest | `ingest.py` | `ingest(bytes, name, dpi) -> IngestResult` | PDF/image -> page images (numpy arrays). `MAX_PAGES = 50`. |
 | 2. Preprocess | `preprocess.py` | `preprocess(IngestResult, PreprocessConfig) -> PreprocessResult` | OpenCV cleanup: deskew, stamp removal, sharpen, contrast, table-background normalisation. All steps are `PreprocessConfig` flags (default on). |
 | 3. Surya OCR | `engines/surya.py` | `run_surya(PreprocessResult, on_page=callback) -> SuryaResult` | Layout detection + OCR + table recognition via lazily-loaded Surya model singletons. Issues (low confidence, phantom cells, OCR/table failures) collected in `SuryaResult.warnings`. |
-| 4. Postprocess | `postprocess.py` | `postprocess(SuryaResult, skip_qwen, anomaly_threshold) -> PostprocessResult` | Rule-based Khmer text correction; falls back to Qwen2.5-VL when the anomaly score (fraction of non-Khmer/non-Latin chars) exceeds `anomaly_threshold`. |
+| 4. Postprocess | `postprocess.py` | `postprocess(SuryaResult, skip_qwen, anomaly_threshold) -> PostprocessResult` | Rule-based Khmer text correction; falls back to Qwen2.5-VL when the anomaly score (fraction of non-Khmer/non-Latin chars) exceeds `anomaly_threshold`. Table cells are copy-on-write normalized + passed through the GDDE-domain cell rules (riel-prefix repair, percent digit fold — see `_apply_cell_rules`); foreign-script characters are scrubbed from cells AND page text (output is Khmer/English only, warned per removal); pipe-only gridline noise in cells is emptied; malformed-number cells (dot-drop/digit-duplication patterns) are flagged (confidence cap + `PostprocessResult.warnings`), never rewritten. |
 | 5. Export | `export.py` | `export(PostprocessResult, convert_numerals, repair_tables, stitch_pages) -> ExportResult` | Produces document JSON + per-table CSV/Excel. Optional Khmer->Arabic numeral conversion, table-grid repair (pads short rows), and `stitch_pages` to join a table that continues across pages into one. |
 
 Model checkpoints and tunable thresholds (Surya checkpoints, Qwen model
@@ -92,7 +92,11 @@ collapsed Advanced expander) -> file upload -> "Run Extraction" button ->
 runs all 5 stages (with `clear_device_cache()` after each, results cached
 into `st.session_state` incrementally per stage) -> paginated
 **side-by-side review** (page image + editable tables) -> downloads
-(patched JSON + per-table CSV / Excel / zip).
+(patched JSON + per-table CSV / Excel / zip). When per-cell confidence
+exists (surya_kiri), each table also gets a collapsed read-only
+**"🔍 Confidence view"** (cells tinted by the `CELL_CONF_LOW`/`CELL_CONF_MID`
+buckets from `model_config.py`); tables always render without it too —
+never gate display on optional data.
 
 Results are cached in `st.session_state` keyed by a `settings_key`
 string so re-renders don't re-run the pipeline. Once results exist, the

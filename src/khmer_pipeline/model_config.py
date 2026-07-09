@@ -21,3 +21,10 @@ STAGE4_MODEL_PATH: str = "mlx-community/Qwen2.5-7B-Instruct-4bit"
 ANOMALY_THRESHOLD: float = 0.15
 CONFIDENCE_LOW: float = 0.5   # below this = low confidence (red in UI)
 CONFIDENCE_MID: float = 0.8   # below this = medium confidence (yellow in UI)
+
+# Per-CELL confidence buckets for the table confidence view (app.py), from the
+# §2.33 calibration on real docs: <0.80 ≈ 35% correct (red), 0.80–0.95 ≈ 67%
+# (amber), ≥0.95 ≈ 85% (untinted). CELL_CONF_LOW matches surya_kiri's
+# _LOW_CONF_THRESHOLD warning cutoff — keep them in sync.
+CELL_CONF_LOW: float = 0.80
+CELL_CONF_MID: float = 0.95

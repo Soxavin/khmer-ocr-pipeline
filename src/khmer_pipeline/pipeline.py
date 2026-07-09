@@ -71,6 +71,8 @@ def run(
     clear_device_cache()
 
     postprocess_result = ACTIVE_CORRECTION_ENGINE(surya_result, skip_qwen=skip_qwen, anomaly_threshold=anomaly_threshold)
+    for w in postprocess_result.warnings:
+        print(f"  WARNING: {w}")
     print(f"  Post-processing complete")
     clear_device_cache()
 

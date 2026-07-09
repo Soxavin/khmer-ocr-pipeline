@@ -19,7 +19,9 @@ from khmer_pipeline.engines.surya import preload_models
 from khmer_pipeline.postprocess import qwen_loaded
 from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export, grid_to_csv, tables_to_xlsx
-from khmer_pipeline.model_config import CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD
+from khmer_pipeline.model_config import (
+    CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD, CELL_CONF_LOW, CELL_CONF_MID,
+)
 from khmer_pipeline.utils.memory import clear_device_cache  # NEW: Memory management import
 from khmer_pipeline.utils.backend_status import llama_server_running
 
@@ -172,6 +174,11 @@ with st.sidebar:
         ocr_engine_key = _ENGINE_LABELS[ocr_engine_label]
         if ocr_engine_key == "surya_kiri":
             st.caption("⚠️ Surya + Kiri is slower (~30–45 s/page).")
+            st.caption(
+                "ℹ️ Surya + Kiri automatically reads table cells from an internal "
+                "deskew-only image — the preprocessing options above only affect "
+                "layout & text detection. No need to disable them for this engine."
+            )
         extraction_mode = st.radio(
             "Extraction mode",
             ["Full extraction (text + tables)", "Tables only"],
@@ -494,7 +501,10 @@ else:
 
     # Results overview — document-level summary for at-a-glance review / demo
     total_tables = sum(len(p.tables) for p in surya_result.pages)
-    n_warnings = len(surya_result.warnings)
+    # Stage-3 + Stage-4 warnings together (getattr: a stale session_state object
+    # from before the warnings field existed must not crash the rerender).
+    _all_warnings = list(surya_result.warnings) + list(getattr(postprocess_result, "warnings", []))
+    n_warnings = len(_all_warnings)
     ov1, ov2, ov3 = st.columns(3)
     ov1.metric("Pages", filtered_ingest.page_count)
     ov2.metric("Tables detected", total_tables)
@@ -510,9 +520,9 @@ else:
         st.success("Extraction complete — review the pages below.")
 
     # Persistent warnings panel (the in-run st.warning vanishes after pagination reruns)
-    if surya_result.warnings:
+    if _all_warnings:
         with st.expander(f"⚠️ Pipeline warnings ({n_warnings})", expanded=False):
-            for w in surya_result.warnings:
+            for w in _all_warnings:
                 st.markdown(f"- {w}")
 
     # ==========================================
@@ -595,11 +605,15 @@ else:
         _max_row = max((c.get("row", 0) for c in _cells), default=0) + (1 if _cells else 0)
         _max_col = max((c.get("col", 0) for c in _cells), default=0) + (1 if _cells else 0)
         _grid = [["" for _ in range(_max_col)] for _ in range(_max_row)]
+        # Parallel per-cell confidence grid (None where the engine set none —
+        # e.g. plain Surya, or repair-padded cells). Drives the confidence view.
+        _conf_grid = [[None for _ in range(_max_col)] for _ in range(_max_row)]
         for c in _cells:
             r, col = c.get("row", 0), c.get("col", 0)
             if 0 <= r < _max_row and 0 <= col < _max_col:
                 _grid[r][col] = c.get("text", "")
-        _export_tables.append((_block["table_id"], _grid))
+                _conf_grid[r][col] = c.get("confidence")
+        _export_tables.append((_block["table_id"], _grid, _conf_grid))
 
     # ==========================================
     # SIDE-BY-SIDE REVIEW: page image (left) + editable tables (right)
@@ -621,10 +635,20 @@ else:
         with st.expander("Original image"):
             st.image(orig, caption="Original", width="stretch")
 
+    def _conf_css(v) -> str:
+        # Cell tint by §2.33-calibrated confidence buckets; None (no data) = untinted.
+        if v is None:
+            return ""
+        if v < CELL_CONF_LOW:
+            return "background-color:#f8d7da;color:#111"   # red — verify
+        if v < CELL_CONF_MID:
+            return "background-color:#fff3cd;color:#111"   # amber
+        return ""
+
     with right:
         if _export_tables:
             st.subheader("✏️ Review & edit tables")
-            for table_id, grid in _export_tables:
+            for table_id, grid, conf_grid in _export_tables:
                 if not grid:
                     continue
                 st.markdown(f"**{table_id}**")
@@ -632,6 +656,28 @@ else:
                 # neutral "Col N" labels — we don't fold the first row into headers.
                 n_cols = max((len(r) for r in grid), default=0)
                 col_labels = [f"Col {c + 1}" for c in range(n_cols)]
+
+                # Read-only confidence view — only when this table has any per-cell
+                # confidence (surya_kiri); tables always render regardless (never
+                # gate display on optional data). Advisory: the editable grid below
+                # remains the single source for all exports.
+                if any(v is not None for row in conf_grid for v in row):
+                    with st.expander("🔍 Confidence view (read-only)", expanded=False):
+                        _css_df = pd.DataFrame(
+                            [[_conf_css(v) for v in row] for row in conf_grid],
+                            columns=col_labels,
+                        )
+                        _styled = (
+                            pd.DataFrame(grid, columns=col_labels)
+                            .style.apply(lambda _df, _c=_css_df: _c, axis=None)
+                        )
+                        st.dataframe(_styled, width="stretch")
+                        st.caption(
+                            f"🔴 below {CELL_CONF_LOW:.0%} recognizer confidence — verify these first · "
+                            f"🟡 {CELL_CONF_LOW:.0%}–{CELL_CONF_MID:.0%} · untinted ≥ {CELL_CONF_MID:.0%}. "
+                            "Note: systematic glyph errors (e.g. ៛) can be HIGH-confidence — "
+                            "tinting flags likely errors, untinted is not a guarantee."
+                        )
                 edited_df = st.data_editor(
                     pd.DataFrame(grid, columns=col_labels),
                     num_rows="dynamic",
@@ -654,7 +700,7 @@ else:
 
     final_tables = [
         (table_id, st.session_state.get(f"edited_table_{table_id}", original_grid))
-        for table_id, original_grid in _export_tables
+        for table_id, original_grid, _conf in _export_tables
     ]
 
     # ==========================================

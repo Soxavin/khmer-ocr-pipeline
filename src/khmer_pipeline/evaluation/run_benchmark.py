@@ -30,7 +30,7 @@ _CSV_FIELDS = [
     "Tables_Expected", "Tables_Found",
     "GT_Rows", "GT_Cols", "Pred_Rows", "Pred_Cols",
     "Cell_Accuracy", "Cell_Content_Recall", "Table_CER",
-    "Numeric_Cell_Accuracy", "Numeric_Khmer_Digit_Slips",
+    "Numeric_Cell_Accuracy", "Numeric_Khmer_Digit_Slips", "Empty_Cell_Precision",
     "Text_CER", "Document_CER", "Paragraph_Recall", "Paragraph_Leak",
     "Error",
 ]
@@ -257,6 +257,7 @@ def run_benchmark(
                         "Table_CER": _fmt(table_metrics["table_cer"]),
                         "Numeric_Cell_Accuracy": _fmt(table_metrics["numeric_cell_accuracy"]),
                         "Numeric_Khmer_Digit_Slips": _fmt(table_metrics["numeric_cells_khmer_digit_slips"]),
+                        "Empty_Cell_Precision": _fmt(table_metrics.get("empty_cell_precision")),
                         "Text_CER": _fmt(text_metrics["text_cer"]),
                         "Document_CER": _fmt(doc_metrics["document_cer"]),
                         "Paragraph_Recall": _fmt(text_metrics["paragraph_recall"]),
@@ -292,7 +293,7 @@ def run_benchmark(
                         "Tables_Found": "",
                         "GT_Rows": "", "GT_Cols": "", "Pred_Rows": "", "Pred_Cols": "",
                         "Cell_Accuracy": "", "Cell_Content_Recall": "", "Table_CER": "",
-                        "Numeric_Cell_Accuracy": "", "Numeric_Khmer_Digit_Slips": "",
+                        "Numeric_Cell_Accuracy": "", "Numeric_Khmer_Digit_Slips": "", "Empty_Cell_Precision": "",
                         "Text_CER": "", "Document_CER": "", "Paragraph_Recall": "", "Paragraph_Leak": "",
                         "Error": str(exc),
                     }
@@ -322,6 +323,7 @@ def run_benchmark(
         "avg_cell_content_recall": _avg_metric("Cell_Content_Recall"),
         "avg_table_cer": _avg_metric("Table_CER"),
         "avg_numeric_cell_accuracy": _avg_metric("Numeric_Cell_Accuracy"),
+        "avg_empty_cell_precision": _avg_metric("Empty_Cell_Precision"),
         "avg_text_cer": _avg_metric("Text_CER"),
         "avg_document_cer": _avg_metric("Document_CER"),
     }
