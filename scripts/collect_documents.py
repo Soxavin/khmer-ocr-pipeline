@@ -16,29 +16,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-import fitz
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from khmer_pipeline.datagen.inspect_pdf import inspect_pdf
+from khmer_pipeline.datagen.inspect_pdf import inspect_pdf, khmer_layer_suspect
 
 _TARGET_DOCS = 40
 _TARGET_PAGES = 100
 _DOWNLOAD_TIMEOUT_S = 60
-
-# Legacy Khmer font-name fragments (Limon, Tacteing, Khek...). inspect_pdf misses docs whose
-# legacy encoding lands IN the Khmer block (CambodiaBudget: Khmer-block codepoints but glyph-order
-# mojibake, §2.21/§2.37) — so we flag by embedded fonts + invalid-ordering rate instead.
-_LEGACY_FONT_RE = re.compile(r"Lmn|Limon|Tacteing|Khek", re.IGNORECASE)
-# Dependent vowel/coeng at token start = invalid Khmer ordering; rare in real Unicode text.
-_BAD_KHMER_START_RE = re.compile(r"(?:^|\s)[ា-ៅ្]")
-_BAD_START_RATIO = 0.03  # 09.06.26 (good) = 0.011, CambodiaBudget (mojibake) = 0.051
 
 # classification -> which dataset products the doc can feed (plan §2: one factory, three products)
 _ROUTING = {
@@ -82,21 +71,6 @@ def download_urls(url_file: Path, dest_dir: Path) -> list[Path]:
     return downloaded
 
 
-def _khmer_layer_suspect(pdf_path: Path) -> bool:
-    """True if the Khmer text layer looks like legacy mojibake despite Khmer-block codepoints."""
-    try:
-        doc = fitz.open(str(pdf_path))
-    except Exception:
-        return False
-    with doc:
-        fonts = {f[3] for page in doc for f in page.get_fonts(full=True)}
-        text = "".join(page.get_text("text") for page in doc)
-    if any(_LEGACY_FONT_RE.search(f) for f in fonts):
-        return True
-    tokens = len(re.findall(r"\S+", text))
-    return tokens > 0 and len(_BAD_KHMER_START_RE.findall(text)) / tokens > _BAD_START_RATIO
-
-
 def report(folder: Path, output: Path) -> None:
     """Classify all PDFs under folder (recursive), print routing summary + progress, write JSON."""
     pdfs = sorted(folder.rglob("*.pdf")) if folder.is_dir() else [folder]
@@ -109,7 +83,7 @@ def report(folder: Path, output: Path) -> None:
         (r,) = inspect_pdf(pdf)
         r["relpath"] = str(pdf.relative_to(folder)) if folder.is_dir() else pdf.name
         if r["classification"] == "born_digital_unicode":
-            r["khmer_layer_suspect"] = _khmer_layer_suspect(pdf)
+            r["khmer_layer_suspect"] = khmer_layer_suspect(pdf)
         results.append(r)
     suspects = [r["relpath"] for r in results if r.get("khmer_layer_suspect")]
 

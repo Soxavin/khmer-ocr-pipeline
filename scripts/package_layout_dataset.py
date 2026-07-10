@@ -29,19 +29,76 @@ _SPLITS = ("train", "valid", "test")
 _DOC_ID_RE = re.compile(r"^(doc_\d+)_p\d+")
 
 
-def _write_hf_metadata(pages: list[PageBoxes], out_path: Path) -> None:
-    """Write an HF imagefolder metadata.jsonl (objects column) so the Dataset Viewer
-    renders images with their boxes; category ids follow CLASS_NAMES order."""
+# HF-viewer split naming: parquet files under data/ named <split>-XXXXX-of-XXXXX.parquet
+_HF_SPLIT_NAME = {"train": "train", "valid": "validation", "test": "test"}
+
+
+def _write_parquet(pages_by_split: dict[str, list[PageBoxes]], out_dir: Path,
+                   hf_dir: Path, doc_source: dict[str, str]) -> None:
+    """Write the HF upload folder (hanuman-100k-style: just data/*.parquet + README):
+    one tabular row per page with the embedded image bytes, provenance columns, and an
+    objects struct carrying all COCO fields (bbox [x,y,w,h], category_id/category in
+    CLASS_NAMES order, area, iscrowd, score) for the Data Viewer."""
+    from datasets import Dataset, Features, Image as HFImage, Sequence, Value
+
     cat_id = {name: i for i, name in enumerate(CLASS_NAMES)}
-    lines = []
-    for page in pages:
-        objects = {
-            "bbox": [[x0, y0, x1 - x0, y1 - y0] for _, (x0, y0, x1, y1), _ in page.boxes],
-            "categories": [cat_id[cls] for cls, _, _ in page.boxes],
-        }
-        lines.append(json.dumps({"file_name": page.image_name, "objects": objects},
-                                ensure_ascii=False))
-    out_path.write_text("\n".join(lines) + "\n")
+    features = Features({
+        "image": HFImage(),
+        "image_id": Value("int64"),
+        "file_name": Value("string"),
+        "doc_id": Value("string"),
+        "source": Value("string"),
+        "width": Value("int64"),
+        "height": Value("int64"),
+        "objects": {
+            "id": Sequence(Value("int64")),
+            "bbox": Sequence(Sequence(Value("float32"), length=4)),
+            "category_id": Sequence(Value("int64")),
+            "category": Sequence(Value("string")),
+            "area": Sequence(Value("float32")),
+            "iscrowd": Sequence(Value("int64")),
+            "score": Sequence(Value("float32")),
+        },
+    })
+    data_dir = hf_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for split, pages in pages_by_split.items():
+        rows = []
+        ann_id = 0
+        for image_id, page in enumerate(pages):
+            doc_match = _DOC_ID_RE.match(page.image_name)
+            doc_id = doc_match.group(1) if doc_match else ""
+            ids, bboxes, category_ids, category, areas, scores = [], [], [], [], [], []
+            for cls, (x0, y0, x1, y1), conf in page.boxes:
+                w, h = x1 - x0, y1 - y0
+                ids.append(ann_id)
+                bboxes.append([x0, y0, w, h])
+                category_ids.append(cat_id[cls])
+                category.append(cls)
+                areas.append(w * h)
+                scores.append(conf)
+                ann_id += 1
+            img_path = out_dir / split / page.image_name
+            rows.append({
+                # embed the JPG bytes so the parquet is self-contained (path-only rows
+                # would upload without the images)
+                "image": {"path": page.image_name, "bytes": img_path.read_bytes()},
+                "image_id": image_id,
+                "file_name": page.image_name,
+                "doc_id": doc_id,
+                "source": doc_source.get(doc_id, ""),
+                "width": page.width,
+                "height": page.height,
+                "objects": {
+                    "id": ids, "bbox": bboxes, "category_id": category_ids,
+                    "category": category, "area": areas,
+                    "iscrowd": [0] * len(ids), "score": scores,
+                },
+            })
+        ds = Dataset.from_list(rows, features=features)
+        hf_split = _HF_SPLIT_NAME[split]
+        ds.to_parquet(data_dir / f"{hf_split}-00000-of-00001.parquet")
+        print(f"parquet: {hf_split} ({len(rows)} rows)")
 
 
 def _class_names(data_yaml: Path) -> list[str]:
@@ -68,18 +125,21 @@ def _yolo_to_boxes(label_file: Path, names: list[str],
 
 
 def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
-            sources: list[str] | None) -> dict[str, int]:
+            sources: list[str] | None, hf_dir: Path | None = None) -> dict[str, int]:
     """Convert the YOLOv8 export to per-split COCO folders under out_dir; returns page counts."""
     names = _class_names(export_dir / "data.yaml")
     keep_doc_ids: set[str] | None = None
-    if sources:
-        if manifest_path is None:
-            raise ValueError("--sources requires --manifest to map doc_ids to corpus subfolders")
+    doc_source: dict[str, str] = {}
+    if manifest_path is not None:
         manifest = json.loads(manifest_path.read_text())
-        keep_doc_ids = {d["doc_id"] for d in manifest["documents"]
-                        if d["source"].split("/")[0] in sources}
+        doc_source = {d["doc_id"]: d["source"] for d in manifest["documents"]}
+        if sources:
+            keep_doc_ids = {i for i, src in doc_source.items() if src.split("/")[0] in sources}
+    elif sources:
+        raise ValueError("--sources requires --manifest to map doc_ids to corpus subfolders")
 
     counts: dict[str, int] = {}
+    pages_by_split: dict[str, list[PageBoxes]] = {}
     for split in _SPLITS:
         images_dir = export_dir / split / "images"
         labels_dir = export_dir / split / "labels"
@@ -100,9 +160,13 @@ def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
             shutil.copy2(img_path, split_out / img_path.name)
             pages.append(PageBoxes(img_path.name, width, height, boxes))
         write_coco(pages, split_out / "_annotations.coco.json")
-        _write_hf_metadata(pages, split_out / "metadata.jsonl")
+        # remove any stale imagefolder metadata: parquet is the sole viewer/loader source
+        (split_out / "metadata.jsonl").unlink(missing_ok=True)
         counts[split] = len(pages)
+        pages_by_split[split] = pages
         print(f"{split}: {len(pages)} pages, {sum(len(p.boxes) for p in pages)} boxes")
+    _write_parquet(pages_by_split, out_dir, hf_dir or out_dir.parent / (out_dir.name + "_hf"),
+                   doc_source)
     return counts
 
 
@@ -114,8 +178,10 @@ def main() -> None:
                         help="pseudo_label_layout manifest.json (needed for --sources)")
     parser.add_argument("--sources", nargs="+", default=None,
                         help="Keep only docs from these corpus subfolders (e.g. ardb_daily)")
+    parser.add_argument("--hf-dir", type=Path, default=None,
+                        help="HF upload folder for data/*.parquet (default: <out>_hf)")
     args = parser.parse_args()
-    package(args.export_dir, args.out, args.manifest, args.sources)
+    package(args.export_dir, args.out, args.manifest, args.sources, hf_dir=args.hf_dir)
 
 
 if __name__ == "__main__":

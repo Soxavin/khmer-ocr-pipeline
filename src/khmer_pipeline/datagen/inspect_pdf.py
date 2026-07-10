@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import fitz
@@ -16,6 +17,30 @@ import fitz
 _MIN_TEXT_CHARS = 100          # below this = "no substantial text layer"
 _UNICODE_KHMER_RATIO = 0.5    # khmer_block / alpha_chars >= this → born_digital_unicode
 _LEGACY_KHMER_RATIO = 0.15    # khmer_block / alpha_chars <= this → possibly legacy-encoded
+
+# Legacy Khmer font-name fragments (Limon, Tacteing, Khek...). Some legacy encodings land
+# IN the Khmer block (CambodiaBudget: Khmer codepoints but glyph-order mojibake, PROJECT_LOG
+# §2.21/§2.37), so classification alone misses them — flag by embedded fonts + ordering rate.
+_LEGACY_FONT_RE = re.compile(r"Lmn|Limon|Tacteing|Khek", re.IGNORECASE)
+# Dependent vowel/coeng at token start = invalid Khmer ordering; rare in real Unicode text.
+_BAD_KHMER_START_RE = re.compile(r"(?:^|\s)[ា-ៅ្]")
+_BAD_START_RATIO = 0.03  # measured: 09.06.26 (good) = 0.011, CambodiaBudget (mojibake) = 0.051
+
+
+def khmer_layer_suspect(pdf_path: Path) -> bool:
+    """True if the PDF's Khmer text layer looks like legacy mojibake despite Khmer-block
+    codepoints — such docs' numbers are harvestable but their Khmer is NOT usable as GT."""
+    try:
+        doc = fitz.open(str(pdf_path))
+    except Exception:
+        return False
+    with doc:
+        fonts = {f[3] for page in doc for f in page.get_fonts(full=True)}
+        text = "".join(page.get_text("text") for page in doc)
+    if any(_LEGACY_FONT_RE.search(f) for f in fonts):
+        return True
+    tokens = len(re.findall(r"\S+", text))
+    return tokens > 0 and len(_BAD_KHMER_START_RE.findall(text)) / tokens > _BAD_START_RATIO
 
 
 def _khmer_char_count(text: str) -> int:
