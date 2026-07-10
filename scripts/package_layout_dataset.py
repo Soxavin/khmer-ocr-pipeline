@@ -23,10 +23,25 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from khmer_pipeline.datagen.pseudo_label_layout import PageBoxes, write_coco
+from khmer_pipeline.datagen.pseudo_label_layout import CLASS_NAMES, PageBoxes, write_coco
 
 _SPLITS = ("train", "valid", "test")
 _DOC_ID_RE = re.compile(r"^(doc_\d+)_p\d+")
+
+
+def _write_hf_metadata(pages: list[PageBoxes], out_path: Path) -> None:
+    """Write an HF imagefolder metadata.jsonl (objects column) so the Dataset Viewer
+    renders images with their boxes; category ids follow CLASS_NAMES order."""
+    cat_id = {name: i for i, name in enumerate(CLASS_NAMES)}
+    lines = []
+    for page in pages:
+        objects = {
+            "bbox": [[x0, y0, x1 - x0, y1 - y0] for _, (x0, y0, x1, y1), _ in page.boxes],
+            "categories": [cat_id[cls] for cls, _, _ in page.boxes],
+        }
+        lines.append(json.dumps({"file_name": page.image_name, "objects": objects},
+                                ensure_ascii=False))
+    out_path.write_text("\n".join(lines) + "\n")
 
 
 def _class_names(data_yaml: Path) -> list[str]:
@@ -85,6 +100,7 @@ def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
             shutil.copy2(img_path, split_out / img_path.name)
             pages.append(PageBoxes(img_path.name, width, height, boxes))
         write_coco(pages, split_out / "_annotations.coco.json")
+        _write_hf_metadata(pages, split_out / "metadata.jsonl")
         counts[split] = len(pages)
         print(f"{split}: {len(pages)} pages, {sum(len(p.boxes) for p in pages)} boxes")
     return counts
