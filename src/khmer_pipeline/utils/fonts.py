@@ -6,7 +6,9 @@ from pathlib import Path
 # so synthetic-data generation is fully offline and deterministic — no live
 # fonts.googleapis.com dependency. Works with Playwright's about:blank origin
 # (page.set_content) without any file-access flags.
-_FONTS_DIR = Path(__file__).resolve().parents[2] / "fonts"
+# parents[3] = repo root (this file lives at src/khmer_pipeline/utils/fonts.py;
+# the restructure that added utils/ silently broke the old parents[2])
+_FONTS_DIR = Path(__file__).resolve().parents[3] / "fonts"
 
 # family -> (filename, css font-weight descriptor). Variable fonts cover a range.
 _FONT_FILES: dict[str, tuple[str, str]] = {
