@@ -247,3 +247,34 @@ class TestRecognizeCellIntegration:
         conf_pairs = recognize_cells_conf([img_a, img_b])
         texts = [t for t, _ in conf_pairs]
         assert texts == recognize_cells([img_a, img_b])
+
+
+# --- local fine-tuned weights override (KHMER_KIRI_WEIGHTS, Track B) ---
+
+def test_local_weights_unset_returns_none(monkeypatch):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    monkeypatch.delenv("KHMER_KIRI_WEIGHTS", raising=False)
+    assert loader._local_weights_path() is None
+
+
+def test_local_weights_dir_resolves_to_safetensors(monkeypatch, tmp_path):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    (tmp_path / "model.safetensors").write_bytes(b"x")
+    monkeypatch.setenv("KHMER_KIRI_WEIGHTS", str(tmp_path))
+    assert loader._local_weights_path() == tmp_path / "model.safetensors"
+
+
+def test_local_weights_file_used_directly(monkeypatch, tmp_path):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    f = tmp_path / "finetuned.safetensors"
+    f.write_bytes(b"x")
+    monkeypatch.setenv("KHMER_KIRI_WEIGHTS", str(f))
+    assert loader._local_weights_path() == f
+
+
+def test_local_weights_missing_fails_loud(monkeypatch, tmp_path):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    import pytest
+    monkeypatch.setenv("KHMER_KIRI_WEIGHTS", str(tmp_path / "ghost"))
+    with pytest.raises(FileNotFoundError, match="KHMER_KIRI_WEIGHTS"):
+        loader._local_weights_path()
