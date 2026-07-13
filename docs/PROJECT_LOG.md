@@ -1320,6 +1320,41 @@ What "the pipeline retrains itself monthly" would actually require, and what we 
    Each is a project on its own; at GDDE's volume the human-gated monthly runbook gives ~all the
    benefit at ~none of the risk. Revisit only if volume grows 10×+ or labeling moves to a team.
 
+### 2.39 Track B — Kiri CTC fine-tune: GO on all gates (2026-07-13)
+
+**The month's first fine-tuned model, and it clears both gates emphatically.** Pipeline:
+`experiments/kiri_finetune/build_trainset.py` (35,324 train / 2,467 val = 16.7k real factory cell
+crops referenced in place + 15k `seanghay/khmer-hanuman-100k` + 3k Playwright targeted synthetic
+[riel units / decimal percents / long decimals / Khmer digits, 3 vendored fonts, varied bg] + 800
+gridline-only empty negatives) → `train_kiri.py` (full-model CTC fine-tune from the pinned
+checkpoint; 8 epochs, AdamW 1e-4 cosine, batch 32, ~7 min/epoch **locally on the M4 Pro** with
+`PYTORCH_ENABLE_MPS_FALLBACK=1` — no cloud GPU needed).
+
+- **Gate 1 — per-error-class val (real held-out docs + targeted synthetic):** baseline reproduced
+  the §2.33 taxonomy exactly (riel acc **0.026**, decimal-percent acc **0.055**, overall CER 0.496)
+  → after fine-tune: riel **1.00**, decimal-percent **1.00**, empty **1.00**, overall CER ~0.000.
+  Val saturates by epoch 5 — expected for a single-template domain; treated as necessary-not-
+  sufficient and NOT the headline.
+- **Gate 2 — end-to-end A/B, production path, all 7 verified GT pages** (`gate_ab.py`, stock vs
+  `KHMER_KIRI_WEIGHTS=run1`): **every metric improved on every page, zero regressions.** ARDB
+  pages: Recall 0.72–0.79 → **0.92–0.98**, worst-page NumAcc 0.09/0.21 → **0.97**, CER →
+  **0.005–0.065**. Structure dims identical stock vs tuned (TableRecPredictor untouched — the
+  change is recognition-only, as designed).
+- **Transfer to the never-seen budget table (p3):** Recall 0.168→0.246, NumAcc 0.122→**0.279**,
+  CER 0.353→0.256. Real but partial — fine-tuned surya_kiri is still far below Surya (Recall ~0.89)
+  on wide number-heavy docs, so the §2.36 engine guidance stands unchanged. The gain came from
+  number/decimal reading transferring; the remaining gap is content-domain, not glyph-level.
+- **Consequences:** (a) the ៛-glyph, dot-drop, and pipe-noise defects are now fixed AT THE MODEL —
+  the Stage-4 domain rules become redundant-but-harmless on ARDB docs (kept: they're gated and
+  still guard other engines/docs); (b) surya_kiri with fine-tuned weights is now the strongest
+  engine on ARDB-template docs end-to-end; (c) the recipe is the monthly-retrain runbook's core:
+  harvest new month → rebuild trainset → 1h local train → this gate script.
+- Reproduce: `build_trainset.py --out trainset` → `train_kiri.py --data trainset --out run1
+  --epochs 8` → `gate_ab.py --tag <cfg>` ×2. Artifacts local (gitignored): trainset/, run1/
+  (model.safetensors + vocab.json, loadable via `KHMER_KIRI_WEIGHTS=experiments/kiri_finetune/run1`),
+  gate_{baseline,finetuned}.json. NEXT: decide default-weights policy for the app (env-var opt-in
+  vs bundled), Track A A/B when weights arrive, Track C decision.
+
 ---
 
 ## 3. Results Snapshot

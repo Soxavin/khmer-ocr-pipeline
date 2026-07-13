@@ -26,5 +26,14 @@ predictions.json
 # CRNN training-experiment run artifacts (checkpoints, metrics, plots)
 experiments/khmer_crnn/runs/
 
+# Fine-tuning artifacts (Tracks A/B): trainsets contain real-doc crops — never commit
+experiments/kiri_finetune/trainset*/
+experiments/kiri_finetune/run*/
+experiments/kiri_finetune/*.log
+experiments/layout_yolo/runs/
+experiments/layout_yolo/*.pt
+# derived from real pages (recall_taxonomy output)
+scripts/_recall_taxonomy_output.json
+
 # Presentation materials — kept on disk, not tracked in the repo
 docs/presentations/
