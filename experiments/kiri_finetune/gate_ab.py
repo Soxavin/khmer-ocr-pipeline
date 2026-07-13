@@ -2,11 +2,12 @@
 
 Runs the production path (ingest → preprocess → surya_kiri) on each
 eval/datasets/real/*_p*_ground_truth.json page that has a table grid + PNG, and
-scores with evaluate_table. The Kiri weights are whatever KHMER_KIRI_WEIGHTS
-says (unset = stock pinned checkpoint), so run once per config:
+scores with evaluate_table. The Kiri weights follow the loader's resolution
+order (fine-tuned models/kiri_finetuned/ is the DEFAULT since §2.39), so run
+once per config:
 
-    uv run python experiments/kiri_finetune/gate_ab.py --tag baseline
-    KHMER_KIRI_WEIGHTS=experiments/kiri_finetune/run1 \
+    KHMER_KIRI_WEIGHTS=stock uv run python experiments/kiri_finetune/gate_ab.py --tag baseline
+    KHMER_KIRI_WEIGHTS=<candidate-run-dir> \
         uv run python experiments/kiri_finetune/gate_ab.py --tag finetuned
 
 Writes experiments/kiri_finetune/gate_<tag>.json; compare with gate_compare.py.

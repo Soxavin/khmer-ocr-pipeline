@@ -26,6 +26,8 @@ predictions.json
 # CRNN training-experiment run artifacts (checkpoints, metrics, plots)
 experiments/khmer_crnn/runs/
 
+# Promoted fine-tuned weights (large, regenerable via experiments/kiri_finetune/)
+models/
 # Fine-tuning artifacts (Tracks A/B): trainsets contain real-doc crops — never commit
 experiments/kiri_finetune/trainset*/
 experiments/kiri_finetune/run*/

@@ -251,9 +251,26 @@ class TestRecognizeCellIntegration:
 
 # --- local fine-tuned weights override (KHMER_KIRI_WEIGHTS, Track B) ---
 
-def test_local_weights_unset_returns_none(monkeypatch):
+def test_local_weights_unset_no_default_returns_none(monkeypatch, tmp_path):
     import khmer_pipeline.engines.kiri_vendor.loader as loader
     monkeypatch.delenv("KHMER_KIRI_WEIGHTS", raising=False)
+    monkeypatch.setattr(loader, "_DEFAULT_WEIGHTS_DIR", tmp_path / "absent")
+    assert loader._local_weights_path() is None
+
+
+def test_local_weights_unset_uses_default_dir_when_present(monkeypatch, tmp_path):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    monkeypatch.delenv("KHMER_KIRI_WEIGHTS", raising=False)
+    (tmp_path / "model.safetensors").write_bytes(b"x")
+    monkeypatch.setattr(loader, "_DEFAULT_WEIGHTS_DIR", tmp_path)
+    assert loader._local_weights_path() == tmp_path / "model.safetensors"
+
+
+def test_stock_sentinel_forces_hf_snapshot(monkeypatch, tmp_path):
+    import khmer_pipeline.engines.kiri_vendor.loader as loader
+    (tmp_path / "model.safetensors").write_bytes(b"x")
+    monkeypatch.setattr(loader, "_DEFAULT_WEIGHTS_DIR", tmp_path)
+    monkeypatch.setenv("KHMER_KIRI_WEIGHTS", "stock")
     assert loader._local_weights_path() is None
 
 

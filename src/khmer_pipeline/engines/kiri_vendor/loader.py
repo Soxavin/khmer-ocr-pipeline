@@ -15,9 +15,15 @@ import torch
 from .model import CFG, CharTokenizer, KiriOCR
 
 _HF_REPO = "mrrtmob/kiri-ocr"
-# Local fine-tuned weights override (Track B): a model.safetensors file or a folder
-# holding model.safetensors + vocab.json. Unset → pinned HF snapshot as always.
+# Local fine-tuned weights (Track B, §2.39). Resolution order:
+#   1. KHMER_KIRI_WEIGHTS=<file-or-dir>  → that checkpoint (fail-loud if missing)
+#      KHMER_KIRI_WEIGHTS=stock          → force the pinned HF snapshot (A/B baselines)
+#   2. models/kiri_finetuned/ at repo root, when present → DEFAULT since the §2.39 GO
+#   3. pinned HF snapshot (fresh clones without local weights)
 _LOCAL_WEIGHTS_ENV = "KHMER_KIRI_WEIGHTS"
+_STOCK_SENTINEL = "stock"
+# parents[4] = repo root (src/khmer_pipeline/engines/kiri_vendor/loader.py)
+_DEFAULT_WEIGHTS_DIR = Path(__file__).resolve().parents[4] / "models" / "kiri_finetuned"
 # Pin the known-good snapshot (dim-384 checkpoint, PROJECT_LOG §2.30). Without a
 # pinned revision, an upstream re-push of model.safetensors would silently change
 # production OCR output on a fresh machine / cleared cache. Model AND vocab are
@@ -57,12 +63,15 @@ def _download_from_hf(repo_id: str, verbose: bool = False) -> str:
 
 
 def _local_weights_path() -> Optional[Path]:
-    """Resolve KHMER_KIRI_WEIGHTS to a safetensors file, or None when unset.
-    A directory resolves to <dir>/model.safetensors; missing paths fail loudly
-    (a fine-tune swap must never silently fall back to the stock model)."""
+    """Resolve the weights source: explicit env path (fail-loud if missing; the
+    sentinel 'stock' forces the HF snapshot), else the default fine-tuned dir
+    when present, else None (HF snapshot)."""
     raw = os.environ.get(_LOCAL_WEIGHTS_ENV)
-    if not raw:
+    if raw and raw.strip().lower() == _STOCK_SENTINEL:
         return None
+    if not raw:
+        default = _DEFAULT_WEIGHTS_DIR / "model.safetensors"
+        return default if default.is_file() else None
     path = Path(raw)
     if path.is_dir():
         path = path / "model.safetensors"
