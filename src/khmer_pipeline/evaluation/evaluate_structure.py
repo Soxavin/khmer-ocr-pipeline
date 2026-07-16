@@ -1,5 +1,4 @@
 from __future__ import annotations
-import difflib
 import re
 import unicodedata
 
@@ -121,16 +120,58 @@ def _grid_cols(grid: list[list[str]]) -> int:
     return max((len(row) for row in grid), default=0)
 
 
+# Two rows pair only if they are at least this similar (1 - normalized edit
+# distance over the joined row text). Real OCR rows are garbled but recognisable
+# (§2.42 measured ~0.8 on budget p3); genuinely different rows score far lower.
+_ROW_ALIGN_MIN_SIMILARITY = 0.5
+
+
+def _row_similarity(a: tuple, b: tuple) -> float:
+    # 1 - normalized edit distance over the joined row text. Row *signatures*
+    # (not raw cells) so this matches what the caller scores on.
+    sa, sb = " ".join(a), " ".join(b)
+    longest = max(len(sa), len(sb))
+    if longest == 0:
+        return 1.0
+    return 1.0 - _levenshtein(sa, sb) / longest
+
+
 def _align_rows(gt_sigs: list[tuple], pred_sigs: list[tuple]) -> list[tuple[int, int]]:
-    # Monotonic GT->pred row alignment. equal/replace blocks pair rows by
-    # position within the block; delete (GT-only) and insert (extra pred) unmatched.
+    """Monotonic GT->pred row alignment maximising total row similarity.
+
+    Needleman-Wunsch over `_row_similarity`; rows below `_ROW_ALIGN_MIN_SIMILARITY`
+    are left unmatched. Deliberately NOT exact-match (difflib) based: on real
+    documents OCR garbles every row, so no row compares equal, and exact-match
+    opcodes degrade to one big "replace" that pairs rows *positionally* — a single
+    extra detected row (e.g. a title) then shifts every row and silently collapses
+    the position-sensitive metrics (§2.42).
+    """
+    n, m = len(gt_sigs), len(pred_sigs)
+    if n == 0 or m == 0:
+        return []
+
+    # score[i][j] = best total similarity aligning gt[i:] against pred[j:].
+    score = [[0.0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            best = max(score[i + 1][j], score[i][j + 1])  # skip a gt / pred row
+            sim = _row_similarity(gt_sigs[i], pred_sigs[j])
+            if sim >= _ROW_ALIGN_MIN_SIMILARITY:
+                best = max(best, sim + score[i + 1][j + 1])
+            score[i][j] = best
+
     pairs: list[tuple[int, int]] = []
-    sm = difflib.SequenceMatcher(None, gt_sigs, pred_sigs, autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag in ("equal", "replace"):
-            for k in range(min(i2 - i1, j2 - j1)):
-                pairs.append((i1 + k, j1 + k))
-        # delete / insert -> no pairs
+    i = j = 0
+    while i < n and j < m:
+        sim = _row_similarity(gt_sigs[i], pred_sigs[j])
+        if sim >= _ROW_ALIGN_MIN_SIMILARITY and score[i][j] == sim + score[i + 1][j + 1]:
+            pairs.append((i, j))
+            i += 1
+            j += 1
+        elif score[i][j] == score[i + 1][j]:
+            i += 1
+        else:
+            j += 1
     return pairs
 
 

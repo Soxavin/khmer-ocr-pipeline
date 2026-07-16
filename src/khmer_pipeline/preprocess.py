@@ -57,7 +57,14 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
 
 _CROP_MARGINS_BORDER_THRESH = 240   # pixels above this value are treated as empty border
 _CROP_MARGINS_PAD = 20              # px of content margin kept after crop
-_CAP_RESOLUTION_MAX_DIM = 2048      # longest edge cap before downscaling
+# Longest edge cap before downscaling. 2900 (not 2048) because Kiri scales each
+# cell crop by HEIGHT to CFG.IMG_H=48: at 2048 a large scan (budget p3, 4400px
+# native) is squeezed 0.465x, putting 97% of its cell crops BELOW 48px so Kiri
+# upsamples blur. 2900 keeps those crops at ~55px. Measured §2.42: budget p3
+# numeric_cell_accuracy 0.279→0.550, CER 0.256→0.164; ARDB (2000px native, under
+# both caps) is bit-identical. Raising further mainly costs memory — the 24GB box
+# runs PyTorch + MLX co-resident.
+_CAP_RESOLUTION_MAX_DIM = 2900
 
 
 def _crop_margins(bgr: np.ndarray, border_thresh: int = _CROP_MARGINS_BORDER_THRESH) -> np.ndarray:

@@ -323,6 +323,40 @@ def test_align_rows_deleted_gt_row():
     assert (0, 0) in pairs
     assert (2, 1) in pairs
 
+def test_align_rows_extra_leading_row_with_garbled_rows():
+    # The real-document case (§2.42): OCR garbles every row, so NO row is an
+    # exact match, and a leading title row is detected on top. Exact-match
+    # opcodes see one big "replace" and pair positionally — shifting every row
+    # by one and collapsing position-sensitive metrics. Alignment must key on
+    # row *similarity*, not equality.
+    gt = [("29,199.60", "31.16%"), ("28,836.48", "31.15%"), ("25,759.06", "31.86%")]
+    pred = [("", "ម"),                      # garbled title row, extra
+            ("29,199.6", "31.16%"),              # ~gt[0]
+            ("28.83648", "31.15%"),              # ~gt[1]
+            ("25,752.0%", "31.86%")]             # ~gt[2]
+    pairs = _align_rows(gt, pred)
+    assert (0, 1) in pairs
+    assert (1, 2) in pairs
+    assert (2, 3) in pairs
+
+def test_align_rows_is_monotonic():
+    # Alignment must never cross (a later GT row pairing to an earlier pred row),
+    # otherwise rows could be scored against the wrong table region.
+    gt = [("alpha", "1"), ("beta", "2"), ("gamma", "3")]
+    pred = [("beta", "2"), ("alpha", "1"), ("gamma", "3")]
+    pairs = _align_rows(gt, pred)
+    assert pairs == sorted(pairs)
+    assert [pj for _, pj in pairs] == sorted(pj for _, pj in pairs)
+
+def test_align_rows_dissimilar_rows_unmatched():
+    # A pred row bearing no resemblance to the GT row must NOT be paired — that
+    # would score unrelated content as if it were the analyst's row.
+    gt = [("alpha", "1"), ("beta", "2")]
+    pred = [("alpha", "1"), ("zzzzzzzz", "999999")]
+    pairs = _align_rows(gt, pred)
+    assert (0, 0) in pairs
+    assert 1 not in [gi for gi, _ in pairs]
+
 # --- evaluate_table alignment cases ---
 
 def test_evaluate_table_extra_leading_title_row_accuracy_one():
