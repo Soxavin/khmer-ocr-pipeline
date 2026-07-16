@@ -72,14 +72,16 @@ def test_missing_weights_file_fails_loud(monkeypatch, tmp_path):
         ld.detect_table_boxes(_img())
 
 
-def test_weights_env_routes_to_yolo_backend(monkeypatch):
-    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.pt")
+def test_weights_env_routes_to_yolo_backend(monkeypatch, tmp_path):
+    pt = tmp_path / "best.pt"
+    pt.write_bytes(b"")  # the existence guard in detect_table_boxes runs before routing
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(pt))
     sentinel_model = object()
     with patch.object(ld, "_get_yolo", return_value=sentinel_model) as gy, \
          patch.object(ld, "_yolo_table_boxes", return_value=[[1.0, 2.0, 3.0, 4.0]]) as yb:
         out = ld.detect_table_boxes(_img())
     assert out == [[1.0, 2.0, 3.0, 4.0]]
-    gy.assert_called_once_with("/some/best.pt")
+    gy.assert_called_once_with(str(pt))
     yb.assert_called_once()
 
 
@@ -87,3 +89,49 @@ def test_no_env_keeps_stock_backend(monkeypatch):
     monkeypatch.delenv("KHMER_LAYOUT_WEIGHTS", raising=False)
     with patch.object(ld, "_get_engine", return_value=_engine(["table"], [[0, 0, 1, 1]])):
         assert ld.detect_table_boxes(_img()) == [[0.0, 0.0, 1.0, 1.0]]
+
+
+# --- fine-tuned DocLayout-YOLO ONNX backend (Track A, §2.43) ---
+# The fine-tune trains in an isolated venv (the doclayout_yolo fork can't live in the
+# project venv — it needs opencv-python, which collides with opencv-python-headless),
+# so the weights cross the boundary as ONNX and are served by rapid_layout.
+
+def test_onnx_weights_route_to_onnx_backend_not_ultralytics(monkeypatch, tmp_path):
+    onnx = tmp_path / "best.onnx"
+    onnx.write_bytes(b"")
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(onnx))
+    with patch.object(ld, "_get_onnx_engine",
+                      return_value=_engine(["text", "Table"], [[0, 0, 1, 1], [5, 5, 9, 9]])) as go, \
+         patch.object(ld, "_get_yolo") as gy:
+        out = ld.detect_table_boxes(_img())
+    assert out == [[5.0, 5.0, 9.0, 9.0]]
+    go.assert_called_once_with(str(onnx))
+    gy.assert_not_called()
+
+
+def test_pt_weights_still_route_to_ultralytics(monkeypatch, tmp_path):
+    pt = tmp_path / "best.pt"
+    pt.write_bytes(b"")
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(pt))
+    with patch.object(ld, "_get_yolo", return_value=object()), \
+         patch.object(ld, "_yolo_table_boxes", return_value=[[1.0, 2.0, 3.0, 4.0]]), \
+         patch.object(ld, "_get_onnx_engine") as go:
+        out = ld.detect_table_boxes(_img())
+    assert out == [[1.0, 2.0, 3.0, 4.0]]
+    go.assert_not_called()
+
+
+def test_missing_onnx_weights_file_fails_loud(monkeypatch, tmp_path):
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(tmp_path / "nope.onnx"))
+    with pytest.raises(FileNotFoundError, match="no such weights file"):
+        ld.detect_table_boxes(_img())
+
+
+def test_onnx_backend_empty_result_returns_empty(monkeypatch, tmp_path):
+    # An empty detection must return [] so callers can fall back to Surya's boxes
+    # rather than silently dropping the table.
+    onnx = tmp_path / "best.onnx"
+    onnx.write_bytes(b"")
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(onnx))
+    with patch.object(ld, "_get_onnx_engine", return_value=_engine(None, None)):
+        assert ld.detect_table_boxes(_img()) == []
