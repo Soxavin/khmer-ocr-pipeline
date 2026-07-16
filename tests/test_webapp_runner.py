@@ -1,0 +1,81 @@
+"""Tests for webapp.runner — pipeline driving and run cancellation.
+
+Cancellation contract: setting `doc.progress.cancel_requested` stops the run at
+the next stage boundary AND mid-OCR (the per-page callback aborts), partial
+stage results are cleared (no half-populated document), and the run reports
+"cancelled" rather than a failure.
+"""
+from __future__ import annotations
+
+import asyncio
+from contextlib import ExitStack
+from unittest.mock import patch
+
+from webapp.runner import run_pipeline
+from webapp.settings import Settings
+from webapp.state import Document
+
+
+def _doc() -> Document:
+    return Document("doc.pdf", b"%PDF", "id1", 3)
+
+
+def _run_with(stubs: dict, doc: Document, s: Settings | None = None) -> bool:
+    """Run the pipeline with named runner-module attributes stubbed."""
+    async def main():
+        with ExitStack() as stack:
+            for name, fn in stubs.items():
+                stack.enter_context(patch(f"webapp.runner.{name}", fn))
+            stack.enter_context(patch("webapp.runner.clear_device_cache"))
+            return await run_pipeline(doc, s or Settings())
+    return asyncio.run(main())
+
+
+def test_cancel_before_next_stage_stops_run_and_clears_partials():
+    doc = _doc()
+
+    def fake_ingest(*a, **kw):
+        doc.progress.cancel_requested = True  # user hits Stop during stage 1
+        return "INGEST"
+
+    def fail(*a, **kw):  # stages after the cancel must never run
+        raise AssertionError("stage ran after cancellation")
+
+    ok = _run_with({"ingest": fake_ingest, "preprocess": fail}, doc)
+    assert ok is False
+    assert "cancelled" in (doc.run_error or "").lower()
+    assert doc.ingest_result is None       # partial results cleared
+    assert doc.progress.active is False
+    assert doc.progress.cancel_requested is False  # flag reset for the next run
+
+
+def test_cancel_mid_ocr_aborts_via_on_page():
+    doc = _doc()
+
+    def fake_engine(pre, on_page=None):
+        # engine reports page 1, user cancels, page 2's callback aborts the loop
+        on_page(0, 3)
+        doc.progress.cancel_requested = True
+        on_page(1, 3)  # must raise inside the engine
+        raise AssertionError("OCR continued past cancellation")
+
+    ok = _run_with({
+        "ingest": lambda *a, **kw: "INGEST",
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: fake_engine,
+    }, doc)
+    assert ok is False
+    assert "cancelled" in (doc.run_error or "").lower()
+    assert doc.surya_result is None and doc.ingest_result is None
+
+
+def test_uncancelled_run_reports_stage_failure_not_cancel():
+    doc = _doc()
+
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+
+    ok = _run_with({"ingest": boom}, doc)
+    assert ok is False
+    assert "failed" in (doc.run_error or "")
+    assert "cancelled" not in (doc.run_error or "").lower()

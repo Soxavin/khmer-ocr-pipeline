@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* Bundled Khmer face (repo fonts/, SIL OFL — license alongside the asset).
+   Variable font: one file covers all weights. */
+@font-face {
+  font-family: "Noto Sans Khmer";
+  src: url("./assets/fonts/NotoSansKhmer-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* Design tokens — one color language across the app (mirrors webapp/components.py).
+   The neutral ramp re-tints Tailwind's slate toward the GDDE blue hue (OKLCH h≈255,
+   low chroma): the whole chrome carries the brand instead of stock-Tailwind gray. */
+@theme {
+  --color-primary: #1565c0; /* MEF/GDDE blue */
+  --color-primary-strong: #0f4c94; /* hover/active of primary */
+  --color-conf-high: #16a34a;
+  --color-conf-mid: #f59e0b;
+  --color-conf-low: #dc2626;
+  --font-khmer: "Noto Sans Khmer", "Khmer OS", system-ui, sans-serif;
+
+  --color-slate-50: oklch(0.978 0.005 255);
+  --color-slate-100: oklch(0.955 0.008 255);
+  --color-slate-200: oklch(0.915 0.012 255);
+  --color-slate-300: oklch(0.855 0.015 255);
+  --color-slate-400: oklch(0.7 0.02 255);
+  --color-slate-500: oklch(0.55 0.024 255);
+  --color-slate-600: oklch(0.46 0.026 255);
+  --color-slate-700: oklch(0.39 0.026 255);
+  --color-slate-800: oklch(0.3 0.024 255);
+  --color-slate-900: oklch(0.22 0.02 255);
+}
+
+:root {
+  /* Adjustable content size (A− / A+ control); Khmer subscript stacks need room. */
+  --khmer-size: 14px;
+}
+
+/* Khmer content rendering is first-class: generous line-height for stacked
+   subscript consonants and diacritics. */
+.khmer-content {
+  font-family: var(--font-khmer);
+  font-size: var(--khmer-size);
+  line-height: 1.9;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+/* AG Grid: let rows grow with the Khmer line-height instead of clipping stacks. */
+.ag-theme-workspace .ag-cell {
+  font-family: var(--font-khmer);
+  font-size: var(--khmer-size);
+  line-height: 1.9;
+  display: flex;
+  align-items: center;
+}
+
+/* Diff view: cells that differ from the OCR original. */
+.cell-diff {
+  background: #dbeafe !important;
+  box-shadow: inset 0 0 0 1px #60a5fa;
+}
+/* Low-confidence carries a dotted underline as well as the tint — the trust
+   signal must survive color-blindness and washed-out projectors. Tints are
+   deliberately faint: on a bad page hundreds of cells are flagged, and loud
+   tints turn the grid into wallpaper (the signal has to survive volume too). */
+.cell-conf-low {
+  background: #fdecec;
+  text-decoration: underline dotted #b91c1c 1.5px;
+  text-underline-offset: 3px;
+}
+.cell-conf-mid { background: #fffcf0; }
+
+/* Flash a table the user jumped to from the page image. */
+@keyframes table-flash {
+  0% { box-shadow: 0 0 0 3px #2563eb; }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+.table-flash {
+  animation: table-flash 1.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-flash { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Clickable table regions on the page image are real keyboard stops. */
+.region-rect:focus-visible {
+  outline: none;
+  stroke: #2563eb;
+  stroke-width: 5px;
+}
