@@ -181,6 +181,38 @@ def test_ocr_rowbands_retries_blank_band_and_fills_it():
     assert grid == {(0, 0): "A", (1, 0): "B", (2, 0): "C"}
 
 
+def test_row_bands_records_sorted_col_ids():
+    # each band carries its row's SLANet col_ids (sorted) so recognition can place text
+    # by structural column, not by the VLM's positional <td> order.
+    cells = [
+        {"row_id": 0, "col_id": 2, "row_span": 1, "col_span": 1, "bbox": [100, 0, 150, 20]},
+        {"row_id": 0, "col_id": 0, "row_span": 1, "col_span": 2, "bbox": [0, 0, 100, 20]},
+    ]
+    bands = he._row_bands(cells, crop_w=200, crop_h=100)
+    assert bands[0]["col_ids"] == [0, 2]
+
+
+def test_ocr_rowbands_aligns_partial_span_to_slanet_col_ids():
+    # Row where a label spans cols 0-1 (SLANet col_id 0, col_span 2) then a value at col 2.
+    # Surya reads the strip and emits only TWO <td>s (no colspan) — positional numbering
+    # would wrongly place the value at col 1. Alignment to SLANet col_ids fixes it.
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30], "col_ids": [0, 2]}]
+    htmls = ["<table><tr><td>Label</td><td>99</td></tr></table>"]
+    grid = he._ocr_rowbands(_fake_rec_seq(htmls), crop, bands, n_cols=3)
+    assert grid == {(0, 0): "Label", (0, 2): "99"}
+
+
+def test_ocr_rowbands_positional_fallback_on_count_mismatch():
+    # When the <td> count doesn't match the row's SLANet cell count, keep the old
+    # positional behavior (safer than guessing).
+    crop = np.zeros((100, 200, 3), dtype=np.uint8)
+    bands = [{"row_id": 0, "bbox": [0, 0, 200, 30], "col_ids": [0, 1, 2]}]
+    htmls = ["<table><tr><td>A</td><td>B</td></tr></table>"]  # 2 tds vs 3 slanet cols
+    grid = he._ocr_rowbands(_fake_rec_seq(htmls), crop, bands, n_cols=3)
+    assert grid == {(0, 0): "A", (0, 1): "B"}
+
+
 def test_ocr_rowbands_clamps_trailing_column_to_n_cols():
     # Surya sometimes emits a spurious trailing empty <td>; n_cols (SLANet count) drops it.
     crop = np.zeros((100, 200, 3), dtype=np.uint8)

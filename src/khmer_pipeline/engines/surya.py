@@ -130,6 +130,11 @@ class _TableHTMLParser(HTMLParser):
         self._current_row: list[str] | None = None
         self._current_cell: list[str] | None = None
         self._current_colspan = 1
+        # colspan anchors: {(row, col): span}. Row-local spans are staged in
+        # _pending_spans until </tr>, because empty rows are dropped (which
+        # would otherwise shift row indices).
+        self._spans: dict[tuple[int, int], int] = {}
+        self._pending_spans: list[tuple[int, int]] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
         """Start tracking a new row (`tr`) or cell (`td`/`th`), reading `colspan` if present."""
@@ -147,6 +152,8 @@ class _TableHTMLParser(HTMLParser):
         if tag in ("td", "th") and self._current_cell is not None:
             text = " ".join(self._current_cell).strip()
             if self._current_row is not None:
+                if self._current_colspan > 1:
+                    self._pending_spans.append((len(self._current_row), self._current_colspan))
                 self._current_row.append(text)
                 # Pad spanned columns so col_id indices stay aligned.
                 for _ in range(self._current_colspan - 1):
@@ -155,6 +162,10 @@ class _TableHTMLParser(HTMLParser):
         elif tag == "tr" and self._current_row is not None:
             if self._current_row:
                 self._rows.append(self._current_row)
+                r = len(self._rows) - 1
+                for col, span in self._pending_spans:
+                    self._spans[(r, col)] = span
+            self._pending_spans = []
             self._current_row = None
 
     def handle_data(self, data: str) -> None:
@@ -170,11 +181,26 @@ class _TableHTMLParser(HTMLParser):
             for c, text in enumerate(row)
         }
 
+    def spans(self) -> dict[tuple[int, int], int]:
+        """Return `(row, col) -> colspan` for anchors of column-spanning cells."""
+        return dict(self._spans)
+
 
 def _parse_html_table(html: str) -> dict[tuple[int, int], str]:
     parser = _TableHTMLParser()
     parser.feed(_html_mod.unescape(html))
     return parser.grid()
+
+
+def _parse_html_table_with_spans(
+    html: str,
+) -> tuple[dict[tuple[int, int], str], dict[tuple[int, int], int]]:
+    """Like `_parse_html_table`, additionally returning the colspan anchors —
+    lets span-aware consumers (surya_kiri_vlm) crop a spanned cell as one
+    union region instead of per padded column."""
+    parser = _TableHTMLParser()
+    parser.feed(_html_mod.unescape(html))
+    return parser.grid(), parser.spans()
 
 
 def _closest_html_key(layout_bbox: list[float],
@@ -334,13 +360,21 @@ def _process_page(
                 )
                 tbl: Table = {"rows": [], "cols": [], "cells": [], "image_bbox": list(b.bbox)}
             else:
-                grid = _parse_html_table(table_html)
+                grid, spans = _parse_html_table_with_spans(table_html)
                 if not grid:
                     warnings.warn(
                         f"Page {page_index + 1}: VLM produced no <table> structure for table "
                         f"{len(tables) + 1}; using flat text in first cell."
                     )
                 tbl = _build_table_from_grid(grid, table_html, b.bbox)
+                # Optional col_span metadata on spanning anchors (from the VLM's
+                # colspan attr) — consumed by surya_kiri_vlm for union crops and
+                # available to exports/UI; unit cells stay shape-unchanged.
+                if spans:
+                    for cell in tbl["cells"]:
+                        span = spans.get((cell["row_id"], cell["col_id"]))
+                        if span and span > 1:
+                            cell["col_span"] = span
                 _log(f"Page {page_index}: built table with {len(tbl['cells'])} cells from HTML")
             tbl["bbox"] = list(b.bbox)
             tables.append(tbl)

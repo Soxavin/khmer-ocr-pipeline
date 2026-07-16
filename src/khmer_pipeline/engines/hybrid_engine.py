@@ -61,7 +61,9 @@ def _row_bands(cells: list[dict], crop_w: int, crop_h: int) -> list[dict]:
     # One full-width strip per SLANet row. x always spans the whole table crop so a
     # missing/short cell can't narrow the strip and rob the VLM of column context;
     # y is padded so ascenders/descenders and the grid lines (which the VLM uses to
-    # emit <td>s) are not clipped.
+    # emit <td>s) are not clipped. `col_ids` records the row's structural columns (sorted)
+    # so recognition can place text by SLANet column, not by positional <td> order —
+    # which misaligns rows that contain a column-spanning cell.
     by_row: dict[int, list[dict]] = {}
     for c in cells:
         by_row.setdefault(c["row_id"], []).append(c)
@@ -70,8 +72,24 @@ def _row_bands(cells: list[dict], crop_w: int, crop_h: int) -> list[dict]:
         ys = [v for c in by_row[row_id] for v in (c["bbox"][1], c["bbox"][3])]
         y0 = max(0, int(min(ys)) - _ROW_STRIP_Y_PAD_PX)
         y1 = min(crop_h, int(max(ys)) + _ROW_STRIP_Y_PAD_PX)
-        bands.append({"row_id": row_id, "bbox": [0, y0, crop_w, y1]})
+        col_ids = sorted(c["col_id"] for c in by_row[row_id])
+        bands.append({"row_id": row_id, "bbox": [0, y0, crop_w, y1], "col_ids": col_ids})
     return bands
+
+
+def _place_row(td_texts: list[str], col_ids: list[int], n_cols: int) -> dict[int, str]:
+    # Assign a row's recognized <td> texts (left-to-right) to columns. When the count
+    # matches the row's SLANet cells, map each text to its structural `col_id` (so a
+    # spanning cell's neighbours land in the right columns instead of shifting left);
+    # otherwise fall back to positional numbering. `n_cols` (SLANet's column count) drops
+    # any column past the real grid width (e.g. a spurious trailing empty <td>).
+    if col_ids and len(td_texts) == len(col_ids):
+        placed = {col_ids[i]: td_texts[i] for i in range(len(td_texts))}
+    else:
+        placed = {c: text for c, text in enumerate(td_texts)}
+    if n_cols:
+        placed = {c: text for c, text in placed.items() if c < n_cols}
+    return placed
 
 
 def _rec_grids(rec_pred, crop_rgb: np.ndarray, bboxes: list) -> list[dict[tuple[int, int], str]]:
@@ -129,12 +147,17 @@ def _ocr_rowbands(rec_pred, crop_rgb: np.ndarray, bands: list[dict],
 
     grid: dict[tuple[int, int], str] = {}
     row_offset = 0
-    for g in locals_:
+    for band, g in zip(bands, locals_):
         local_rows = (max(r for r, _ in g) + 1) if g else 0
+        col_ids = band.get("col_ids") or []
+        # Group the strip's cells by (Surya) row, then place each row by SLANet col_id.
+        by_r: dict[int, list[tuple[int, str]]] = {}
         for (r, c), text in g.items():
-            if n_cols and c >= n_cols:
-                continue
-            grid[(row_offset + r, c)] = text
+            by_r.setdefault(r, []).append((c, text))
+        for r, cells in by_r.items():
+            td_texts = [text for _, text in sorted(cells)]
+            for c, text in _place_row(td_texts, col_ids, n_cols).items():
+                grid[(row_offset + r, c)] = text
         row_offset += max(local_rows, 1)
     return grid
 

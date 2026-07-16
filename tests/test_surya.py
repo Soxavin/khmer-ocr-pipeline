@@ -361,6 +361,60 @@ def test_table_html_parser_colspan_padding():
     assert grid[(1, 2)] == "C"
 
 
+def test_parse_html_table_with_spans_exposes_colspan_anchors():
+    """The spans variant returns the same padded grid PLUS {(row,col): colspan}
+    for spanning anchors — needed by surya_kiri_vlm to crop a spanned cell as
+    one union region."""
+    from khmer_pipeline.engines.surya import _parse_html_table_with_spans
+    html = (
+        '<table>'
+        '<tr><th colspan="2">Header</th><th>C</th></tr>'
+        '<tr><td>A</td><td>B</td><td>C</td></tr>'
+        '</table>'
+    )
+    grid, spans = _parse_html_table_with_spans(html)
+    assert grid == _parse_html_table(html)  # grid identical to the plain parse
+    assert spans == {(0, 0): 2}
+
+
+def test_parse_html_table_with_spans_empty_when_no_colspan():
+    from khmer_pipeline.engines.surya import _parse_html_table_with_spans
+    html = '<table><tr><td>A</td><td>B</td></tr></table>'
+    grid, spans = _parse_html_table_with_spans(html)
+    assert spans == {}
+    assert grid[(0, 1)] == "B"
+
+
+def test_vlm_tables_carry_col_span_on_spanning_anchors():
+    """Plain Surya's built tables carry optional col_span on spanning anchors
+    (from the VLM's colspan attribute) so span-aware consumers need no re-parse."""
+    TABLE_BBOX = [10.0, 60.0, 200.0, 150.0]
+    layout_bboxes = [_make_layout_bbox_mock("Table")]
+    layout_bboxes[0].bbox = TABLE_BBOX
+    layout_result = MagicMock()
+    layout_result.error = False
+    layout_result.bboxes = layout_bboxes
+    layout_pred = MagicMock(return_value=[layout_result])
+
+    table_block = _make_block_mock(0, label="Table")
+    table_block.bbox = TABLE_BBOX
+    table_block.html = ('<table><tr><td colspan="2">14-06-26</td><td>x</td></tr>'
+                        '<tr><td>a</td><td>b</td><td>c</td></tr></table>')
+    page_ocr = MagicMock()
+    page_ocr.blocks = [table_block]
+    rec_pred = MagicMock(return_value=[page_ocr])
+
+    with patch("khmer_pipeline.engines.surya._get_predictors",
+               return_value=(layout_pred, rec_pred)):
+        r = run_surya(_make_preprocess_result(n_pages=1))
+
+    cells = r.pages[0].tables[0]["cells"]
+    anchor = next(c for c in cells if c["row_id"] == 0 and c["col_id"] == 0)
+    unit = next(c for c in cells if c["row_id"] == 1 and c["col_id"] == 0)
+    assert anchor["col_span"] == 2
+    assert "col_span" not in unit
+
+
 def test_flat_text_fallback_when_vlm_omits_table_tag():
     # Table HTML block with flat <p> text → warning + flat text in first cell.
     TABLE_BBOX = [10.0, 60.0, 200.0, 150.0]

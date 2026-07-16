@@ -28,6 +28,8 @@ class Cell(TypedDict, total=False):
     polygon: list[list[float]]
     text_lines: list[TextLine]
     confidence: float  # per-cell recognizer confidence (0..1), set by surya_kiri; absent for other engines
+    row_span: int      # >1 when the cell spans multiple rows; set by span-aware structure (surya_kiri slanet path), else absent
+    col_span: int      # >1 when the cell spans multiple columns; same provenance as row_span
 
 
 class RowSpec(TypedDict):

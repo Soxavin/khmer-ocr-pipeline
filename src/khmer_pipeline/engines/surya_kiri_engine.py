@@ -1,21 +1,38 @@
 """Surya + Kiri + Otsu hybrid OCR engine.
 
-Combines Surya's layout detection and table-structure prediction (TableRecPredictor)
-with per-cell Otsu binarization and Kiri CTC recognition. Registered as
-``OCR_ENGINE=surya_kiri``.
+Combines Surya's layout detection and a table-structure model with per-cell Otsu
+binarization and Kiri CTC recognition. Registered as ``OCR_ENGINE=surya_kiri``.
 
 Architecture
 ------------
 1. ``run_surya(skip_tables=True)`` for the page-level text layer only — Table
    regions are dropped before recognition, so Surya's expensive table-HTML VLM
    never runs (this engine rebuilds tables from raw-image structure instead).
-2. A dedicated layout + ``TableRecPredictor`` pass on the RAW page for cell
-   polygons + (row_id, col_id) structure.
+2. A dedicated layout pass on the RAW page, then a structure model per table
+   region, selected via ``KHMER_KIRI_STRUCTURE``:
+   - ``tablerec`` (default) — pure TableRec. Its simple path emits row×col
+     INTERSECTIONS with no spanning info, so column-spanning cells are
+     fragmented and their text split at internal boundaries ("14-06-26" →
+     "14" | "6-26") — a KNOWN, accepted limitation: it never corrupts data
+     cells, and analysts can repair the few affected header cells in the UI.
+   - ``merged`` (opt-in, §2.40) — TableRec grid + SLANet cell boxes as span
+     PROPOSALS confirmed by pixel evidence (`_has_vertical_separator`). Passed
+     the eval gate (zero regressions on 8 GT pages) but produced a data-cell
+     false merge in production UI use (ID column merged into the product-name
+     column at a rendering the probes didn't cover), so it was demoted from
+     default the same day: the stroke-vs-broken-gridline margin (0.31 vs 0.51)
+     is too narrow to trust across renderings. Data integrity > header
+     cosmetics.
+   - ``slanet`` — structure wholly from ``slanet_structure.predict_cells``.
+     Real spans, but its grid measured worse on data regions (lost a column on
+     ARDB p1) — kept for comparison only.
 3. Per cell: Otsu threshold → Kiri CTC decode → strip trailing dots.
-4. ``_build_table_from_grid`` to produce standard pipeline ``Table`` dicts.
+4. ``_build_table_from_grid`` to produce standard pipeline ``Table`` dicts
+   (+ optional ``row_span``/``col_span`` metadata on spanning cells).
 """
 from __future__ import annotations
 
+import os
 from typing import Callable, Optional
 
 import numpy as np
@@ -24,11 +41,139 @@ from PIL import Image
 from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from ..utils.memory import clear_device_cache
 from .surya import run_surya, get_manager, _get_predictors, _build_table_from_grid
+from .slanet_structure import predict_cells
 from .table_stitch import merge_table_regions
 from .kiri_recognizer import recognize_cells_conf, reset_kiri_failure
 
 # Cells below this per-cell recognizer confidence trigger a page-level warning.
 _LOW_CONF_THRESHOLD = 0.80
+
+
+def _kiri_structure() -> str:
+    """Structure-model source: 'tablerec' (default — pure TableRec; splits
+    column-spanning headers but NEVER merges data cells), 'merged' (opt-in —
+    TableRec grid + SLANet span merging with pixel confirmation; passed the
+    §2.40 eval gate but produced a data-cell false merge in production UI use,
+    so the default was reverted the same day — see §2.40 postscript), or
+    'slanet' (structure wholly from SLANet — worse on data grids, comparison
+    only)."""
+    return os.environ.get("KHMER_KIRI_STRUCTURE", "tablerec")
+
+
+# Coverage thresholds for span merging, measured on ARDB p1: genuine spans
+# cover their constituent TableRec units 92–105% in x, while a drifted
+# neighbour box only reaches ~33% — 0.60 separates them cleanly. y stays at
+# 0.50 (row alignment is solid in both models, and a loose y would let header
+# boxes grab data rows).
+_SPAN_X_OVERLAP_MIN = 0.60
+_SPAN_Y_OVERLAP_MIN = 0.50
+
+
+# Vertical-separator detection between two unit cells. Metric: the longest
+# CONTIGUOUS strong-gradient run along y in any single x-column of the scan
+# band, as a fraction of the band height. Measured on ARDB pages: genuine
+# merged cells (text strokes only) max out at ~0.31, while real boundaries
+# score 0.51 (p3's text-broken ល.រ/item rule) to 1.0 (clean fill gaps) —
+# 0.45 splits the populations. The scan spans center-of-A → center-of-B
+# because the painted boundary need not coincide with TableRec's geometric
+# column edge (measured 7px off).
+_SEP_EDGE_LUMA_DELTA = 30.0
+_SEP_MIN_RUN_COVERAGE = 0.45
+
+
+def _longest_run_fraction(mask_col: np.ndarray) -> float:
+    """Longest contiguous run of True in a 1-D bool array / its length."""
+    best = cur = 0
+    for v in mask_col:
+        cur = cur + 1 if v else 0
+        if cur > best:
+            best = cur
+    return best / len(mask_col) if len(mask_col) else 0.0
+
+
+def _has_vertical_separator(crop: np.ndarray, unit_a: list[float], unit_b: list[float]) -> bool:
+    """True when a vertical rule or fill-gap separates two horizontally adjacent
+    unit-cell bboxes in `crop` — i.e. the cells are visually distinct, so a
+    proposed span merge across them is bogus. A separator is an x-column whose
+    luminance gradient is strong over a near-full-height CONTIGUOUS run; text
+    strokes crossing a genuine merged cell are short runs."""
+    y0 = int(max(unit_a[1], unit_b[1]))
+    y1 = int(min(unit_a[3], unit_b[3]))
+    x0 = max(0, int((unit_a[0] + unit_a[2]) / 2))
+    x1 = min(crop.shape[1], int((unit_b[0] + unit_b[2]) / 2))
+    if y1 - y0 < 8 or x1 - x0 < 2:
+        # Nothing to measure → treat as separated: a merge may only proceed on
+        # POSITIVE pixel evidence of openness (a false merge eats a data cell;
+        # a missed merge just keeps today's split-text behaviour).
+        return True
+    band = crop[y0:y1, x0:x1].astype(float).mean(axis=2)  # luminance
+    gx = np.abs(np.diff(band, axis=1)) > _SEP_EDGE_LUMA_DELTA
+    return any(
+        _longest_run_fraction(gx[:, i]) >= _SEP_MIN_RUN_COVERAGE
+        for i in range(gx.shape[1])
+    )
+
+
+def _merge_spans(records: list[tuple], span_boxes: list[list[float]],
+                 crop: np.ndarray | None = None) -> list[tuple]:
+    """Merge TableRec unit-cell records covered by one SLANet cell box into ONE
+    record (union bbox, anchored at the min col, col_span = count of units).
+
+    `span_boxes` are ALL SLANet cell bboxes, not only its logical spans: SLANet
+    under-reports col_span when its own grid loses a column (measured on ARDB
+    p1 — the 2nd date header came back logical-unit cs=1 while its PHYSICAL box
+    covered two TableRec columns at 100%/92%). The physical box is the
+    trustworthy signal; a span "exists" exactly when one SLANet box
+    substantially covers ≥2 TableRec units.
+
+    `records` are (row_id, col_id, bbox, row_span, col_span) with crop-relative
+    bboxes. Only SAME-ROW, CONSECUTIVE-COLUMN merges are produced — SLANet's
+    multi-row block spans over sparse data regions consumed real data cells
+    when honored (measured on ARDB p1, col-4 digit rows 22→16). A unit is
+    covered when ≥60% of its width and ≥50% of its height lie inside the box,
+    consumed by at most one box (first wins); boxes covering fewer than two
+    free units are ignored (the normal unit-cell case). Pure geometry — no
+    text heuristics (PROJECT_LOG §2.30) and TableRec's trusted unit grid stays
+    the base (§2.37): SLANet only says which units belong together.
+    """
+    consumed: set[int] = set()
+    merged: list[tuple] = []
+    for sb in span_boxes:
+        sx0, sy0, sx1, sy1 = (float(v) for v in sb[:4])
+        covered = []
+        for i, (_r, _c, b, _rs, _cs) in enumerate(records):
+            if i in consumed:
+                continue
+            bw, bh = b[2] - b[0], b[3] - b[1]
+            if bw <= 0 or bh <= 0:
+                continue
+            ox = max(0.0, min(sx1, b[2]) - max(sx0, b[0]))
+            oy = max(0.0, min(sy1, b[3]) - max(sy0, b[1]))
+            if ox / bw >= _SPAN_X_OVERLAP_MIN and oy / bh >= _SPAN_Y_OVERLAP_MIN:
+                covered.append(i)
+        if len(covered) < 2:
+            continue
+        rows = {records[i][0] for i in covered}
+        if len(rows) != 1:
+            continue  # block span → data-eating risk; ignore
+        covered.sort(key=lambda i: records[i][1])
+        cols = [records[i][1] for i in covered]
+        if cols != list(range(cols[0], cols[0] + len(cols))):
+            continue  # non-consecutive columns → not a real horizontal span
+        if crop is not None and any(
+            _has_vertical_separator(crop, records[a][2], records[b][2])
+            for a, b in zip(covered, covered[1:])
+        ):
+            continue  # a rule/gap divides the units → the "span" is grid drift
+        union = [
+            min(records[i][2][0] for i in covered),
+            min(records[i][2][1] for i in covered),
+            max(records[i][2][2] for i in covered),
+            max(records[i][2][3] for i in covered),
+        ]
+        merged.append((rows.pop(), cols[0], union, 1, len(cols)))
+        consumed.update(covered)
+    return [rec for i, rec in enumerate(records) if i not in consumed] + merged
 
 
 def run_surya_kiri(
@@ -55,11 +200,16 @@ def run_surya_kiri(
     #    raw-image structure below, so Surya's table VLM would be wasted work).
     base = run_surya(result, on_page, skip_tables=True)
 
-    # 2. Lazy-init predictors on Surya's shared inference manager.
+    # 2. Lazy-init predictors on Surya's shared inference manager. TableRec is
+    #    only instantiated when it is the selected structure source — the slanet
+    #    path must not pay for (or depend on) it.
+    structure = _kiri_structure()
     manager = get_manager()
     layout_pred, _ = _get_predictors()
-    from surya.table_rec import TableRecPredictor
-    _tbl_pred = TableRecPredictor(manager=manager)
+    _tbl_pred = None
+    if structure != "slanet":
+        from surya.table_rec import TableRecPredictor
+        _tbl_pred = TableRecPredictor(manager=manager)
 
     pages: list[SuryaPageResult] = []
     extra_warnings: list[str] = []
@@ -115,7 +265,39 @@ def run_surya_kiri(
 
             crop = img[y0:y1, x0:x1]
             try:
-                cells = _tbl_pred([Image.fromarray(crop)])[0].cells
+                # Normalize both structure sources to (row_id, col_id, bbox,
+                # row_span, col_span) with crop-relative bboxes. TableRec's simple
+                # path has no span info (its schema: cells are row×col
+                # intersections), so its spans are always 1×1; SLANet emits real
+                # spans, giving a spanning cell ONE full-width crop.
+                if structure == "slanet":
+                    records = [
+                        (c["row_id"], c["col_id"], c["bbox"],
+                         c.get("row_span", 1), c.get("col_span", 1))
+                        for c in predict_cells(crop)
+                    ]
+                else:
+                    records = []
+                    for cell in _tbl_pred([Image.fromarray(crop)])[0].cells:
+                        xs = [p[0] for p in cell.polygon]
+                        ys = [p[1] for p in cell.polygon]
+                        records.append((cell.row_id, cell.col_id,
+                                        [min(xs), min(ys), max(xs), max(ys)], 1, 1))
+                    if structure == "merged":
+                        # SLANet is only a span detector here; if it breaks, the
+                        # TableRec table still stands — warn and keep it unmerged.
+                        # ALL its cell boxes are candidates (not just logical
+                        # spans): see _merge_spans on why physical boxes are the
+                        # trustworthy span signal.
+                        try:
+                            span_boxes = [c["bbox"] for c in predict_cells(crop)]
+                            records = _merge_spans(records, span_boxes, crop=crop)
+                        except Exception as exc:
+                            extra_warnings.append(
+                                f"Surya+Kiri page {page.page_index + 1}: span detection "
+                                f"failed for region {m_idx} ({exc}) — table kept without "
+                                f"span merging."
+                            )
             except Exception as exc:
                 # Never drop a table silently: the analyst would see "no table" on
                 # a page that visibly has one. Surface it via the warnings channel.
@@ -126,7 +308,7 @@ def run_surya_kiri(
                 )
                 continue
 
-            if not cells:
+            if not records:
                 extra_warnings.append(
                     f"Surya+Kiri page {page.page_index + 1}: table structure prediction "
                     f"returned no cells for region {m_idx} — table omitted; try the Surya "
@@ -134,23 +316,23 @@ def run_surya_kiri(
                 )
                 continue
 
-            # Build a (row, col) → text grid from TableRecPredictor cells, plus a
+            # Build a (row, col) → text grid from the structure cells, plus a
             # parallel confidence grid.
             # Pass 1: compute axis-aligned crops, applying the size guard directly
             # so tiny cells get "" without ever reaching the batched recognizer.
             grid: dict[tuple[int, int], str] = {}
             conf_grid: dict[tuple[int, int], float] = {}
+            span_map: dict[tuple[int, int], tuple[int, int]] = {}
             pending_keys: list[tuple[int, int]] = []
             pending_crops: list[np.ndarray] = []
-            for cell in cells:
-                # Polygon → axis-aligned bounding box within the crop.
-                xs = [p[0] for p in cell.polygon]
-                ys = [p[1] for p in cell.polygon]
-                cx0, cy0, cx1, cy1 = int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
+            for row_id, col_id, bbox, row_span, col_span in records:
+                cx0, cy0, cx1, cy1 = (int(v) for v in bbox)
                 cx0, cy0 = max(0, cx0), max(0, cy0)
                 cx1, cy1 = min(crop.shape[1], cx1), min(crop.shape[0], cy1)
 
-                key = (cell.row_id, cell.col_id)
+                key = (row_id, col_id)
+                if row_span > 1 or col_span > 1:
+                    span_map[key] = (row_span, col_span)
                 if cx1 - cx0 < 3 or cy1 - cy0 < 3:
                     # Intentionally blank (too small to hold text), not low-confidence.
                     grid[key] = ""
@@ -177,10 +359,19 @@ def run_surya_kiri(
             # sets "image_bbox", so mirror run_surya and set "bbox" here too.
             table["bbox"] = [float(x0), float(y0), float(x1), float(y1)]
             for tcell in table["cells"]:
-                conf = conf_grid.get((tcell["row_id"], tcell["col_id"]), 1.0)
+                key = (tcell["row_id"], tcell["col_id"])
+                conf = conf_grid.get(key, 1.0)
                 tcell["confidence"] = conf
                 if conf < _LOW_CONF_THRESHOLD:
                     page_low_conf_count += 1
+                # Span metadata (slanet path only): lets exports/UI know the cell
+                # covers multiple grid positions; unit cells stay shape-unchanged.
+                if key in span_map:
+                    rs, cs = span_map[key]
+                    if rs > 1:
+                        tcell["row_span"] = rs
+                    if cs > 1:
+                        tcell["col_span"] = cs
             new_tables.append(table)
 
         clear_device_cache()
