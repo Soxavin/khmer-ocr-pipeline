@@ -27,10 +27,16 @@ ExportResult`):
 | 4 | **Post-process** | Deterministic Khmer text normalization (optional Qwen2.5-VL fallback) |
 | 5 | **Export** | Document JSON + per-table CSV / Excel; multi-page tables stitched into one |
 
-**Review UI (`app.py`):** upload → run → a side-by-side view (page image left, **editable tables**
-right) → download Excel / CSV / JSON. Analysts can fix any cell, add/delete rows, and reset a table to
-the original. Advanced OCR/preprocessing settings are tucked behind an expander so the common path stays
-simple.
+**Review workspace (React, primary — `frontend/` served at `/app`):** a three-zone analyst UI — document
+queue left, zoomable page image center, **editable tables** right. Upload → run (live stage progress, ETA,
+■ Stop) → review → export Excel / CSV / JSON / zip. Review tools: per-cell **confidence tints**, an
+**Issues (N)** triage panel that jumps straight to low-confidence cells (`n`/`p`), **two-way
+image↔table linking**, undo/redo, row insert/delete, edited-vs-original **diff view**, **✓ verify**
+tracking per table, **find & replace across all tables** (Ctrl-F), and batch "Run all" / "Export all".
+Bundled Noto Sans Khmer with adjustable text size keeps stacked Khmer subscripts legible. The REST API
+(`webapp/api.py`) rides the same process as the pipeline, so models load once. The **NiceGUI** UI
+(`webapp/main.py`, port 8600 at `/`) remains as a fallback; the single-file **Streamlit** app (`app.py`)
+is legacy.
 
 **Swappable engines:** Surya (default), Tesseract-`khm`, and a structure-aware **hybrid** (SLANet grid +
 Surya row-strip recognition) for dense fragmented tables — selected via the `OCR_ENGINE` env var.
@@ -47,10 +53,17 @@ Tesseract engine); on Linux, the Docker image below bundles it.
 
 ```bash
 uv sync                                  # install dependencies (pyproject.toml + uv.lock)
+(cd frontend && npm install && npm run build)   # build the React workspace once (needs Node ≥ 20)
 
 # --- Review UI (analyst tool) ---
 source setup-metal-macos.sh              # configure the Surya Metal backend (sets env vars)
-uv run streamlit run app.py             # open the app, upload a document, click "Run Extraction"
+uv run python -m webapp.main            # one process serves BOTH UIs (no separate frontend server):
+                                        #   React workspace (primary)  → http://localhost:8600/app
+                                        #   NiceGUI UI (fallback)      → http://localhost:8600/
+# After changing frontend code: `cd frontend && npm run build`, then hard-refresh the
+# browser tab (Cmd+Shift+R / Safari Cmd+Option+R) — the server picks up dist/ as-is.
+# Live-reload development instead: `cd frontend && npm run dev` (Vite, proxies /api to :8600).
+uv run streamlit run app.py             # (legacy) older single-file Streamlit review UI
 uv run streamlit run lab.py             # (optional) researcher lab — compare engines + inspect pipeline stages
 
 # --- Command line (batch) ---
@@ -117,7 +130,9 @@ model beats Surya:
 
 | Path | What it is |
 |------|------------|
-| [`app.py`](app.py) | Streamlit review UI (the main user-facing tool) |
+| [`frontend/`](frontend/) | React review workspace (primary UI, served at `/app`) — Vite + TypeScript + AG Grid |
+| [`webapp/`](webapp/) | FastAPI REST layer (`api.py`) + NiceGUI fallback UI (`uv run python -m webapp.main` serves both) |
+| [`app.py`](app.py) | Older Streamlit review UI (legacy) |
 | [`src/khmer_pipeline/`](src/khmer_pipeline/) | The pipeline package — the 5 stages, swappable engines, synthetic-data generators, and the evaluation code |
 | [`scripts/`](scripts/) | Research & evaluation one-offs — see [`scripts/README.md`](scripts/README.md) |
 | [`docs/REPORT.md`](docs/REPORT.md) | Evaluation report (the write-up) |

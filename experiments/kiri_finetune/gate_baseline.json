@@ -1,0 +1,61 @@
+{
+  "weights": "stock",
+  "pages": {
+    "ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.16785714285714284,
+      "numeric_cell_accuracy": 0.12162162162162163,
+      "table_cer": 0.352734375,
+      "empty_cell_precision": 0.42045454545454547,
+      "cell_accuracy": 0.2849264705882353,
+      "pred_dims": "34x16"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.7209302325581395,
+      "numeric_cell_accuracy": 0.211864406779661,
+      "table_cer": 0.1253731343283582,
+      "empty_cell_precision": 0.5681818181818182,
+      "cell_accuracy": 0.19907407407407407,
+      "pred_dims": "25x9"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.774468085106383,
+      "numeric_cell_accuracy": 0.9285714285714286,
+      "table_cer": 0.061952861952861954,
+      "empty_cell_precision": 0.875,
+      "cell_accuracy": 0.7777777777777778,
+      "pred_dims": "27x9"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.7869822485207101,
+      "numeric_cell_accuracy": 0.9672131147540983,
+      "table_cer": 0.070902394106814,
+      "empty_cell_precision": 0.851063829787234,
+      "cell_accuracy": 0.8009259259259259,
+      "pred_dims": "24x9"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.7383720930232558,
+      "numeric_cell_accuracy": 0.09322033898305085,
+      "table_cer": 0.1162962962962963,
+      "empty_cell_precision": 0.5909090909090909,
+      "cell_accuracy": 0.16203703703703703,
+      "pred_dims": "25x9"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.7659574468085106,
+      "numeric_cell_accuracy": 0.9230769230769231,
+      "table_cer": 0.06233243967828418,
+      "empty_cell_precision": 0.875,
+      "cell_accuracy": 0.7695473251028807,
+      "pred_dims": "27x9"
+    },
+    "\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.7633136094674556,
+      "numeric_cell_accuracy": 0.9508196721311475,
+      "table_cer": 0.06439742410303588,
+      "empty_cell_precision": 0.9574468085106383,
+      "cell_accuracy": 0.8055555555555556,
+      "pred_dims": "24x9"
+    }
+  }
+}

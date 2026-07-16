@@ -6,6 +6,7 @@ __pycache__/
 dist/
 *.egg-info/
 .superpowers/
+.impeccable/
 .DS_Store
 
 # Sensitive inputs — never commit
@@ -39,3 +40,7 @@ scripts/_recall_taxonomy_output.json
 
 # Presentation materials — kept on disk, not tracked in the repo
 docs/presentations/
+
+# React frontend
+frontend/node_modules/
+frontend/dist/

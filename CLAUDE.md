@@ -36,9 +36,15 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `_DESKEW_MIN_ANGLE_DEG`, `_TABLE_BG_MIN_VALUE`,
   `_TABLE_BG_MIN_SATURATION`) — don't leave magic numbers inline.
 - New `PreprocessConfig` flags / pipeline options follow the established
-  4-point pattern: dataclass field with a default, sidebar checkbox in
-  `app.py`, `--no-<flag>` CLI argument in `pipeline.py`, and an entry
-  appended to `app.py`'s `settings_key` f-string.
+  pattern: dataclass field with a default, `--no-<flag>` CLI argument in
+  `pipeline.py`, and a UI control. The **primary UI is the React workspace**
+  (`frontend/`, served at `/app`) — add the field to `webapp/settings.py`'s
+  `Settings` (the API validates run payloads against its fields and it feeds
+  `/api/meta` defaults), a control in `frontend/src/components/run/
+  SettingsDrawer.tsx`, and (if it affects output) to `Settings.settings_key`.
+  Rebuild with `cd frontend && npm run build`. Mirror the flag in the NiceGUI
+  fallback (`webapp/main.py` widget) and the legacy Streamlit `app.py` only if
+  you're touching them anyway.
 - Pipeline issues (low OCR confidence, phantom table cells, OCR/table
   failures, etc.) are surfaced via `warnings.warn(...)`, collected into
   `SuryaResult.warnings`, and already displayed in both `app.py`

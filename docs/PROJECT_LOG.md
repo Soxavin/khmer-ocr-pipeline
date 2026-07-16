@@ -1355,6 +1355,264 @@ checkpoint; 8 epochs, AdamW 1e-4 cosine, batch 32, ~7 min/epoch **locally on the
   gate_{baseline,finetuned}.json. NEXT: decide default-weights policy for the app (env-var opt-in
   vs bundled), Track A A/B when weights arrive, Track C decision.
 
+### 2.40 surya_kiri column-spans fixed — TableRec grid + SLANet proposals + pixel confirmation (2026-07-13)
+
+**User-reported bug (screenshot, ARDB 15.06.26 p1):** column-spanning cells split mid-text —
+merged header "14-06-26" extracted as "14" | "6-26", full-width section header chopped across
+columns. **Root cause proven:** surya_kiri's structure comes from Surya's simple-path
+`TableRecPredictor`, whose own schema documents that cells are *row×col geometric
+intersections with no spanning info* — merged cells are fragmented BY CONSTRUCTION, and Kiri
+then recognizes crops that physically contain half the text. (Continues the §2.30 known
+limitation and the §2.36/§2.37 structure-source arc.)
+
+- **Failed candidate 1 — structure wholly from SLANet** (`KHMER_KIRI_STRUCTURE=slanet`, kept
+  for comparison): SLANet does emit spans and fixed the headers, but its grid lost a column on
+  ARDB p1 (25×8 vs true 9) and scattered data digits (col-concentration 22→12/16 rows). §2.37's
+  "TableRec structure is the stable part" held.
+- **Failed candidate 2 — SLANet logical spans over TableRec grid:** SLANet *under-reports*
+  spans when its grid drops a column (the 2nd date header came back `col_span=1` while its
+  PHYSICAL box covered two TableRec columns at 100%/92%); conversely honoring its row-span
+  blocks ate real data cells (col-4 digit rows 22→16). Logical span flags are not trustworthy.
+- **Shipped — `merged` (now default):** TableRec unit grid stays the base; ALL SLANet cell
+  boxes act as merge PROPOSALS (physical geometry only); a proposal is accepted only for
+  same-row, consecutive-column units with **positive pixel evidence of openness** —
+  `_has_vertical_separator` scans center-of-A→center-of-B for an x-column whose strong-gradient
+  run is contiguous over ≥45% of the shared height. Measured populations: genuine merged cells
+  (text strokes) ≤0.31; real boundaries 0.51 (p3's text-broken ល.រ rule, the one false merge
+  the first threshold let through) to 1.00 (clean fill gaps). Unmeasurable band ⇒ treat as
+  separated (false merge eats data; missed merge = status-quo split text). Merged cells carry
+  optional `row_span`/`col_span` (new optional `Cell` fields in `models.py`).
+- **Eval gate (8 GT pages incl. the non-ARDB budget doc): zero regressions, CER improved on 3
+  pages** (09.06 p1 0.059→0.057, 09.06 p3 0.022→0.020, 15.06 p1 0.059→0.056 — the intact
+  header dates), all other metrics identical; budget p3 byte-identical (no ARDB overfit
+  leakage). Probe on the user's page: both dates intact, span metadata correct, digit-column
+  concentration identical to pure TableRec. CellAcc did NOT jump on p1: the §2.30 GT convention
+  (one logical header row vs two physical) still dominates that metric — expected.
+- **Honest limits:** (a) genuine ROW-spans still split per row (deliberately rejected —
+  data-eating); (b) the 0.45/0.31/0.51 thresholds are calibrated on ARDB pages — wide margins,
+  and the failure asymmetry is safe (missed merge degrades to old behaviour), but new document
+  families should re-check via the probe scripts; (c) ornate-header recognition quality is a
+  Kiri model issue (§2.39 weights help), independent of spans.
+- Modules: `engines/surya_kiri_engine.py` (`_kiri_structure`, `_merge_spans`,
+  `_has_vertical_separator`, normalized structure records), `models.py` (optional
+  `row_span`/`col_span` on `Cell`), `tests/test_surya_kiri_engine.py` (+16, 577 total),
+  `CONTEXT.md` (env knob). Runs: `eval/runs/spanfix_{tablerec,merged2}`. Related: same-day
+  rowband col_id placement fix in `hybrid_engine.py` (the OTHER hybrid engine).
+- **POSTSCRIPT (same day) — default REVERTED to `tablerec`; `merged` demoted to opt-in.**
+  Within hours of the default flip, the user's production UI run (same 15.06.26 p1 doc,
+  through the app's preprocessing path) produced a **data-cell false merge the eval+probes
+  never showed**: row ២'s ល.រ ID merged into the product-name cell ("២សាច់គោ…"). Diagnosis
+  class: the separator's contiguous-run coverage at that row/rendering fell below the 0.45
+  threshold — confirming the margin between text strokes (~0.31) and broken gridlines (~0.51)
+  is **too narrow to trust across renderings** (probes used raw eval PNGs; the app path
+  renders/deskews differently). Decision rule applied: **data integrity > header cosmetics**
+  — a split header is a visible, manually-repairable annoyance; a silent ID-into-name merge
+  corrupts the export. `merged` remains available via `KHMER_KIRI_STRUCTURE=merged` for
+  experimentation. **Lessons:** (1) an eval gate over 8 pages at one rendering is necessary
+  but NOT sufficient for a threshold-based pixel heuristic — production-path variation moved
+  cases across the boundary; (2) the §2.30 instinct (no pixel/text heuristics for header
+  repair) was right for a second time; (3) the durable span fix is upstream — a structure
+  model that natively emits spans on our documents (Track A layout fine-tune / future
+  TableRec successor), not post-hoc merging.
+
+### 2.41 New engine `surya_kiri_vlm` — Surya-VLM structure+text, Kiri re-reads Khmer cells (2026-07-13)
+
+**The §2.36 "Surya-structure + Kiri-text" variant, finally built** — enabled by §2.39 (fine-tuned
+Kiri worth re-reading with) and shaped by §2.40's lesson (discrete gates, not pixel thresholds).
+User's insight prompted it: plain Surya's span-correct structure lives in its table VLM (joint
+structure+text HTML, emits colspan) — the exact component surya_kiri skips.
+
+- **Design (safety contract: the floor is plain Surya).** Run plain Surya IN FULL (VLM included);
+  for tables containing Khmer-heavy cells (`_khmer_ratio ≥ 0.5`), run TableRecPredictor on the
+  geometric-only crop; **gate: TableRec grid shape == VLM grid shape (exact integers)**; on pass,
+  batch-Kiri ONLY the Khmer-heavy cells (colspan anchors get union crops — VLM colspan now carried
+  as optional `col_span` on plain-Surya cells via additive `_parse_html_table_with_spans`), replace
+  text only at Kiri conf ≥ 0.5 and non-empty. Every fallback keeps Surya's text; re-read cells
+  carry `confidence` (UI shows exactly what Kiri touched). +2px crop pad for Khmer
+  ascenders/descenders. Numbers/Latin always stay Surya (§2.36).
+- **Eval (8 GT pages, raw-render path):** floor verified — never below plain Surya anywhere;
+  budget p3 byte-identical (0.974). **On ARDB p3 pages it is the best engine of all three:**
+  CellAcc 0.981/0.986 (surya 0.866/0.870, surya_kiri 0.977/0.981), NumAcc 1.000 (kiri 0.992),
+  CER 0.018/0.017 (best). On p1 the gate correctly refused (VLM emitted 25×11 vs true 9 — §2.37's
+  VLM column instability, now seen on ARDB too) → identical to plain Surya. On p2 the gate passed
+  and Kiri lifted Recall 0.79→0.91, but Surya's own misplacement kept CellAcc low (0.17) — Kiri
+  can't fix what Surya misplaces.
+- **Honest verdict.** `surya_kiri` (with §2.39 weights) remains the strongest ARDB tool overall
+  (wins p1/p2 decisively); `surya_kiri_vlm` is the best choice when Surya's structure holds and is
+  never worse than Surya — shipped as a third UI-selectable option, no default change. CAVEAT: the
+  eval is the raw-render path; the app preprocesses first, where Surya's structure may behave
+  better than these p1/p2 numbers suggest (user reports good Surya structure in the app).
+- Modules: `engines/surya_kiri_vlm_engine.py` (new), `engines/surya.py`
+  (`_parse_html_table_with_spans` + col_span attach — additive), `engine_registry.py`,
+  `webapp/main.py` + `app.py` (picker entries), `tests/test_surya_kiri_vlm_engine.py` (+12) and
+  parser/col_span tests in `tests/test_surya.py` (+3); 592 tests. Runs:
+  `eval/runs/spanfix_{surya,vlmkiri}`.
+
+### 2.42 React review workspace — new primary UI, analyst-first (2026-07-14/15)
+
+The NiceGUI UI (§ UI arcs) proved the workflow but capped the review UX; user asked for a React
+frontend designed "from a data analyst's viewpoint". Full plan (feature audit, residency tiers,
+cut list) in `~/.claude/plans/can-you-help-me-proud-quasar.md`; built P0→P5 with two user gates
+(P0.5 clickable-mockup sign-off; post-P2 usability check — both passed).
+
+- **Architecture: one process, three surfaces.** `nicegui.app` IS a FastAPI subclass, so a REST
+  layer (`webapp/api.py`) rides the existing process — the multi-GB models load once. React
+  (Vite+TS+Tailwind+AG Grid+TanStack Query, `frontend/`) is served at `/app` from `frontend/dist`;
+  NiceGUI stays at `/` as fallback; `app.py` is legacy. Server state moved to a process-global
+  registry (`webapp/registry.py`) → the React app is **refresh-safe** (reload keeps queue/results/
+  edits; deliberate semantics change: closing the tab no longer cancels — ■ Stop does, page-
+  granularly, and the run task releases the global GPU `run_lock` in a `finally`, so cancel/crash
+  can never wedge the registry; second concurrent run → 409).
+- **Analyst-first design (the sign-off decisions):** 3-zone workspace (queue | zoom/pan page |
+  tables); ONE morphing primary action (Upload → Run → Export); Issues-first triage (resident
+  "Issues (N)" badge → worst-first low-conf list, click or `n`/`p` jumps to the exact cell across
+  pages); always-on calibrated confidence tints (§2.33 buckets); contextual per-table toolbar
+  (undo/redo/diff/reset/+row/csv/✓ verify) only on the focused table; summoned tier: settings
+  drawer, Ctrl-F find/replace, `?` overlay. Khmer: bundled Noto Sans Khmer (repo `fonts/`, OFL),
+  line-height 1.9 everywhere incl. AG Grid cells, A−/A+ size control.
+- **Trust plumbing:** two-way table↔image linking (table-level — pipeline has no per-cell
+  geometry); edited-vs-original diff; ✓ verify per table with queue progress ("n/m verified");
+  staleness banner (form vs `last_run_settings`); warnings link to their page; last-used
+  engine/settings remembered silently (localStorage, no presets UI). Batch: client-side
+  sequential "Run all" (409-safe), "Export all" zip (`{stem}/` per doc).
+- **Two real-world bugs the live smokes caught** (unit tests alone missed both): (1) Khmer
+  filenames crash `Content-Disposition` (headers are latin-1) → RFC 5987 `filename*=UTF-8''…`
+  with ASCII fallback, regression-tested; (2) NiceGUI intercepts `HTTPException` with HTML error
+  pages → custom `ApiError` + JSON handler for all API errors.
+- **Verified:** 625 tests (37 new in `tests/test_webapp_api.py`, TDD), `npm run build` type-clean,
+  and live end-to-end on the real ARDB 15.06.26 PDF: upload → run (surya + surya_kiri) → lowconf
+  triage (50 issues) → cell edit → diff baseline kept → zip/xlsx/json/txt/csv/export-all → cancel
+  mid-OCR → lock released (immediate new run accepted). User usability check: editing trust ✓,
+  linking ✓; "more errors than NiceGUI" resolved as always-on tints exposing what the old editable
+  grid never colored.
+- Deferred to backlog: dark mode (a half-themed UI reads worse than a consistent light one),
+  paste-from-Excel, numeric sanity checks, EN/KH label toggle, disk-persisted sessions.
+
+### 2.43 Stitching becomes an export choice — verification-safe by construction (2026-07-16)
+
+Shaped via `/impeccable shape`; the user's challenge ("is stitch mode really a necessity?") overturned the
+proposed fix and produced a better one. Worth recording as a design lesson.
+
+- **The bug behind the symptom.** `stitch_pages` was an **extraction** flag (defaulting to True in the
+  webapp): it reshaped the pipeline result into `document_tables`, and that one shape then drove BOTH review
+  and export. Because a stitched doc-table has no 1:1 mapping to any page's Surya tables, `table_bbox_index`
+  came back empty → **page↔image linking silently died**, exactly when tables span pages (the ARDB case, and
+  the case an analyst most needs to verify). The UI apologised with a note instead of fixing it.
+- **The insight.** Review and export want *opposite* shapes, but at *different moments* — review wants
+  per-page (linked to the image being verified against); export wants one table (paste into Excel once,
+  header not repeated). They never actually conflict; the flag forced a false choice, and defaulted to the
+  un-verifiable side.
+- **The fix (smaller than the one first proposed).** Extraction always stays per-page. Joining happens at
+  **export**, on the **edited grids**: new pure `webapp/tables.py::stitch_grids(final_tables, stem)` mirrors
+  `engines/table_merge_pages.merge_document_tables` at the grid level (same ±1 col tolerance, same NFC+
+  whitespace header-repeat signature, same empty-row drop, same `{stem}_tableN` naming). Export endpoints take
+  `?combine=` (default true); the React Export menu carries the choice ("Join into one table" / "Keep one table
+  per page", remembered silently). The pipeline's own `stitch_pages` is untouched for the CLI.
+  **Rejected**: stamping per-row `source_page` provenance through the merge — it would have made the symptom
+  navigable while leaving the false choice in place.
+- **JSON stays per-page** (the faithful record); CSV/XLSX are the analyst's working artifacts and combine.
+- **Verified live on the real 3-page 15.06.26 bulletin:** linking alive on all 3 pages (`linked_regions=1`
+  each — previously 0); combined export = 1 CSV / 76 rows vs 3 CSVs per-page; an edit made on **page 3**
+  survives into the combined CSV (the risk named in the brief). Note the ARDB continuation pages start with
+  data, not a repeated header, so header de-duplication correctly no-ops there — the win is 3 CSVs → 1.
+- **Also in this arc:** empty cells are no longer flagged/tinted as low-confidence (blank cells are
+  intentional table structure, not OCR errors — this alone cut the triage list on p1 from **50 → 4**);
+  replace-all gained a confirm + server-side undo (`/replace/undo` snapshots `edited_tables`); verify-sync
+  failures surface instead of silently reverting; Export-all carries an aggregate unverified count; page-image
+  confidence boxes are dashed as well as coloured; the four stacked status banners collapsed to one
+  prioritised line; "GDDE · review workspace" subtitle dropped.
+- 640 tests (10 new: 7 `stitch_grids`, 3 export-combine). Design critique score 29 → 32/40 across the arc.
+
+**Lesson.** *A flag that forces a false choice is a design bug, not a setting.* When two needs look opposed,
+check whether they actually collide at the same moment — `stitch_pages` looked like a preference and was
+really a bug that silently disabled the tool's verification story. Also: the user asking "is this even
+necessary?" was worth more than the implementation I had already justified.
+
+---
+
+### 2.42 Resolution cap raised 2048→2900, after the eval harness was caught inverting the verdict (2026-07-16)
+
+**Trigger.** An outside consult (Gemini) proposed a "resolution A/B": raise `_CAP_RESOLUTION_MAX_DIM`
+to 4096 and/or ingest at 300–400 DPI, on the theory that dense-table cells are only 15–25px tall and
+are therefore *upsampled* into Kiri's `IMG_H = 48`, feeding the CTC stack interpolated blur.
+
+**The premise is false for the primary corpus — measured, not argued.** All 21,701 GT cell crops
+(`table_gt_v1/recognition`, harvested at 200 DPI) have median height **67px**, p10 67 / p90 68, and
+**0.0% fall below 48px**. Confirmed on the *production* path (instrumenting the crops handed to
+`recognize_cells_conf`): ARDB cells are **64px**, 0.0% below `IMG_H`. ARDB cells are *downscaled*
+0.75× into Kiri — extra page resolution is discarded at the resize and cannot help.
+
+Two supporting facts sink the proposal as framed:
+
+- **The cap was inert on ARDB.** The dailies are **720×720pt — square, not A4** → 2000×2000px at 200
+  DPI, under the 2048 cap. No downscale occurred. Raising DPI *alone* would render 3000×3000 and
+  downscale it straight back to 2048; raising the cap *alone* is a no-op. The suggested "4096px **or**
+  300/400 DPI" is wrong in **both** branches.
+- **A recognition-path-only cap bypass is impossible.** `preprocess()` asserts
+  `full.shape[:2] == geo.shape[:2]` (preprocess.py) — the invariant keeping table bboxes synced to
+  text bboxes. The suggested per-path bypass trips it.
+
+**But it is true for large scans.** Budget p3 is **4400×3400** natively → the 2048 cap crushed it
+0.465×, leaving median crop height **39px with 97.1% of cells BELOW `IMG_H`** — genuinely upsampling
+blur, exactly the hypothesised failure, on exactly one document class. At cap 2900 those crops become
+**55px (2.9% below)**.
+
+**The harness inverted the verdict.** The raw A/B *looked* like a regression:
+
+| budget p3 | cap 2048 | cap 2900 (raw) | cap 2900 (aligned) |
+|---|---|---|---|
+| `numeric_cell_accuracy` | 0.279 | **0.005** ✗ | **0.550** |
+| `cell_content_recall` | 0.246 | 0.457 | **0.457** |
+| `cell_accuracy` | 0.608 | **0.472** ✗ | **0.721** |
+| `table_cer` | 0.256 | 0.164 | **0.164** |
+
+Order-insensitive metrics rose while position-sensitive ones collapsed — the signature of a row
+shift, not a read failure. Root cause, two interacting flaws:
+
+1. `_strip_title_row` drops row 0 only if its first cell is non-empty and the rest are empty. GT's
+   *clean* title matches and is stripped (35→34 rows); the **same title OCR'd into garbage** (first
+   cell empty) does not → pred stays 35. Off by one.
+2. `_align_rows` used `difflib` opcodes. On real documents OCR garbles **every** row, so no row
+   compares `equal`, the matcher degrades to one big `replace` block, and rows pair **positionally**
+   — so the extra row shifted all 34 remaining rows.
+
+cap 2900 was being punished for *correctly* detecting the title row (35×16 = GT's true dims, vs
+34×16 at cap 2048).
+
+**Fix.** `_align_rows` is now monotonic Needleman-Wunsch over `_row_similarity` (1 − normalised edit
+distance, reusing the `_levenshtein` already in the module), with `_ROW_ALIGN_MIN_SIMILARITY = 0.5`
+leaving dissimilar rows unmatched. A better *title heuristic* was rejected: cap 2048's row 0 is a
+badly-OCR'd **header** that also looks sparse, so any "strip sparse row 0" rule would strip it and
+make things worse. The fix is alignment, not detection. `difflib` dropped (now unused).
+
+The rebuilt harness reproduces the manual title-drop control **exactly** (0.457 / 0.550 / 0.164 /
+0.721) with no hack — independent mutual validation.
+
+**GO — cap 2048 → 2900.** Budget p3 `numeric_cell_accuracy` **0.279 → 0.550** (~2×), recall
+**0.246 → 0.457** (~1.9×), CER **0.256 → 0.164** (−36% rel.). The 6 ARDB GT pages are **identical**
+across both caps (2000px < both) — a control that was unaffected by construction, so the blast radius
+is exactly the oversized docs. Runtime ~1m51s for the 8-page gate; no memory pressure on the 24GB box.
+
+**Historical numbers moved** (the harness fix, not the cap): ARDB p1 `cell_accuracy` 0.898 → **0.931**,
+`empty_cell_precision` 0.818 → **0.977**. They moved *toward correct* — prior figures under-reported.
+Any §2.33–§2.41 metric quoted from the old harness should be re-run before it enters the report.
+
+Artifacts: `experiments/crop_scale/{measure_crop_heights.py,gate_cap.py,heights_*.json,gate_*.json}`.
+640 tests pass (3 new: garbled-rows-with-leading-insert, monotonicity, dissimilar-rows-unmatched).
+
+**Lesson.** *A gate that can invert a verdict is more dangerous than no gate.* This is §2.7's lesson
+recurring — "Cell_Accuracy looked catastrophic … it was a row-alignment artifact" — and the harness
+still shipped the flaw, because the exact-match aligner is only correct when OCR is *clean*, i.e.
+precisely when the measurement doesn't matter. It silently punished a change that doubles accuracy.
+Also: an outside consultant with no repo access got the *mechanism* right (`IMG_H` starves on
+low-res crops) and every *specific* wrong (corpus shape, which knob binds, where it applies) — mine
+the reasoning, verify the specifics, and let the measurement rule.
+
+**Open — the real ceiling.** `IMG_H = 48` discards ~30% of the vertical detail already captured on
+ARDB (64px → 48px) — for Khmer that is the diacritic band. Page DPI cannot reach it; only a recognizer
+with a taller input can (arch change to the conv stem + CTC head; pretrained weights won't transfer).
+Logged, not built.
+
 ---
 
 ## 3. Results Snapshot

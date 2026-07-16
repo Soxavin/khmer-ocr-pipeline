@@ -60,6 +60,20 @@ def _clear_edit_state() -> None:
             del st.session_state[key]
 
 
+def _reset_run_state() -> None:
+    """Clear only pipeline-run + edit state so 'Retry' re-runs the SAME upload with
+    the SAME settings. Avoids the old `st.session_state.clear()`, which wiped the
+    whole session and effectively forced the user to start over."""
+    _clear_edit_state()
+    for key in (
+        "run_triggered", "last_key", "current_page_idx", "stage_times",
+        "filtered_ingest", "preprocess_result", "surya_result",
+        "postprocess_result", "export_result",
+        "_xlsx_bytes", "_xlsx_sig", "_zip_bytes", "_zip_sig",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _reset_table(tid: str) -> None:
     st.session_state.pop(f"edited_table_{tid}", None)
     st.session_state.pop(f"editor_{tid}", None)
@@ -144,8 +158,6 @@ with st.sidebar:
         elif page_selection == "Page range":
             page_start = st.number_input("From page", min_value=1, value=1, step=1)
             page_end = st.number_input("To page", min_value=1, value=5, step=1)
-            if page_end < page_start:
-                st.warning("'To page' is less than 'From page' — only the first page will be processed.")
 
         st.header("Preprocessing")
         remove_stamps = st.checkbox("Remove colored stamps", value=True)
@@ -164,6 +176,7 @@ with st.sidebar:
         _ENGINE_LABELS = {
             "Surya (fast — best all-round, default)": "surya",
             "Surya + Kiri (specialist: Khmer-text-heavy tables, slower)": "surya_kiri",
+            "Surya + Kiri VLM (Surya structure + Kiri Khmer — slowest)": "surya_kiri_vlm",
         }
         ocr_engine_label = st.radio(
             "OCR engine",
@@ -345,10 +358,24 @@ else:
 
     run_triggered = st.session_state.get("run_triggered", False)
     last_key = st.session_state.get("last_key")
-    if run_triggered and last_key is not None and last_key != settings_key:
-        st.info("Settings changed. Click **Run Extraction** to reprocess.")
+    # Results below reflect last_key's settings; if the sidebar has since changed,
+    # everything shown is stale until the user re-runs. Track it so the results
+    # header can flag it too (the banner here scrolls off once results render).
+    results_are_stale = run_triggered and last_key is not None and last_key != settings_key
+    if results_are_stale:
+        st.warning(
+            "⚠️ Settings changed since the last run — the results shown below are "
+            "**out of date**. Click **Run Extraction** to reprocess with the new settings."
+        )
 
-    run_clicked = st.button("▶ Run Extraction", type="primary")
+    # Block the run outright on an invalid page range, rather than silently
+    # processing only the first page (the old behaviour launched a run the user
+    # never intended). page_start/page_end only exist in Page-range mode.
+    _invalid_range = page_selection == "Page range" and int(page_end) < int(page_start)
+    if _invalid_range:
+        st.error("'To page' is before 'From page' — fix the range in Advanced settings to run.")
+
+    run_clicked = st.button("▶ Run Extraction", type="primary", disabled=_invalid_range)
 
     if run_clicked:
         st.session_state["run_triggered"] = True
@@ -396,7 +423,7 @@ else:
             except Exception as e:
                 status.update(label="Stage 1 failed", state="error")
                 st.error(f"Stage 1 failed: {str(e)}")
-                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.button("Retry", on_click=_reset_run_state)
                 st.stop()
             stage_times["Stage 1 — Ingest"] = time.perf_counter() - _t0
 
@@ -415,7 +442,7 @@ else:
             except Exception as e:
                 status.update(label="Stage 2 failed", state="error")
                 st.error(f"Stage 2 failed: {str(e)}")
-                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.button("Retry", on_click=_reset_run_state)
                 st.stop()
             stage_times["Stage 2 — Preprocess"] = time.perf_counter() - _t0
 
@@ -439,7 +466,7 @@ else:
             except Exception as e:
                 status.update(label="Stage 3 failed", state="error")
                 st.error(f"Stage 3 failed: {str(e)}")
-                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.button("Retry", on_click=_reset_run_state)
                 st.stop()
             stage_times["Stage 3 — OCR"] = time.perf_counter() - _t0
 
@@ -458,7 +485,7 @@ else:
             except Exception as e:
                 status.update(label="Stage 4 failed", state="error")
                 st.error(f"Stage 4 failed: {str(e)}")
-                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.button("Retry", on_click=_reset_run_state)
                 st.stop()
             stage_times["Stage 4 — Post-process"] = time.perf_counter() - _t0
 
@@ -490,7 +517,7 @@ else:
             except Exception as e:
                 status.update(label="Stage 5 failed", state="error")
                 st.error(f"Stage 5 failed: {str(e)}")
-                st.button("Retry", on_click=lambda: st.session_state.clear())
+                st.button("Retry", on_click=_reset_run_state)
                 st.stop()
             stage_times["Stage 5 — Export"] = time.perf_counter() - _t0
 
@@ -505,6 +532,19 @@ else:
     if not (st.session_state.get("run_triggered") and "export_result" in st.session_state):
         st.stop()
 
+    # Every stage's result must be present and current. A partial/stale session
+    # (e.g. a mid-run rerun, or objects cached before a code change) would raise a
+    # raw traceback deep in the render below — instead, detect it here and offer a
+    # clean reset rather than a broken page.
+    _required_state = (
+        "filtered_ingest", "preprocess_result", "surya_result",
+        "postprocess_result", "export_result",
+    )
+    if any(k not in st.session_state for k in _required_state):
+        st.warning("These results are incomplete or expired. Please re-run the extraction.")
+        st.button("↺ Reset", on_click=_reset_run_state)
+        st.stop()
+
     filtered_ingest = st.session_state["filtered_ingest"]
     preprocess_result = st.session_state["preprocess_result"]
     surya_result = st.session_state["surya_result"]
@@ -512,6 +552,8 @@ else:
     export_result = st.session_state["export_result"]
 
     st.subheader(f"{filtered_ingest.page_count} page(s) from `{filtered_ingest.source_name}`")
+    if results_are_stale:
+        st.caption("⚠️ Showing the previous run's results — settings have changed since. Re-run to refresh.")
 
     # Results overview — document-level summary for at-a-glance review / demo
     total_tables = sum(len(p.tables) for p in surya_result.pages)
@@ -602,32 +644,47 @@ else:
     if low_conf:
         st.caption("⚠ Some blocks have low OCR confidence — switch the overlay to 'Confidence' (Advanced settings) to locate them.")
 
-    # Build (table_id, grid) pairs for the FINAL export tables (document-level,
-    # built once — not per-page). Raw cell text, not numeral-converted: when
-    # stitch_pages is on, document_json["document_tables"] holds the stitched
-    # tables; otherwise each page's "tables" block holds the per-page tables.
-    _export_table_blocks = export_result.document_json.get("document_tables")
-    if _export_table_blocks is None:
-        _export_table_blocks = [
-            table
-            for page_data in export_result.document_json.get("pages", [])
-            for table in page_data.get("tables", [])
-        ]
-    _export_tables = []
-    for _block in _export_table_blocks:
-        _cells = _block.get("cells", [])
-        _max_row = max((c.get("row", 0) for c in _cells), default=0) + (1 if _cells else 0)
-        _max_col = max((c.get("col", 0) for c in _cells), default=0) + (1 if _cells else 0)
-        _grid = [["" for _ in range(_max_col)] for _ in range(_max_row)]
-        # Parallel per-cell confidence grid (None where the engine set none —
-        # e.g. plain Surya, or repair-padded cells). Drives the confidence view.
-        _conf_grid = [[None for _ in range(_max_col)] for _ in range(_max_row)]
-        for c in _cells:
-            r, col = c.get("row", 0), c.get("col", 0)
-            if 0 <= r < _max_row and 0 <= col < _max_col:
-                _grid[r][col] = c.get("text", "")
-                _conf_grid[r][col] = c.get("confidence")
-        _export_tables.append((_block["table_id"], _grid, _conf_grid))
+    # Build (table_id, grid, conf_grid) pairs from exported table blocks. Raw cell
+    # text, not numeral-converted. Two scopes are built:
+    #   • _all_export_tables — EVERY table in the document. Drives the Downloads
+    #     section, which must export the whole document regardless of which page
+    #     is currently on screen.
+    #   • _page_export_tables — what the review column shows beside the current
+    #     page image. When stitch_pages is OFF each page owns its tables, so we
+    #     show only THIS page's; when ON the tables are document-level (they span
+    #     pages) so we show them all under an "all pages (stitched)" label.
+    _doc_tables_json = export_result.document_json.get("document_tables")
+    _tables_are_stitched = _doc_tables_json is not None
+    _pages_json = export_result.document_json.get("pages", [])
+
+    def _blocks_to_tables(blocks: list[dict]) -> list[tuple]:
+        out = []
+        for _block in blocks:
+            _cells = _block.get("cells", [])
+            _max_row = max((c.get("row", 0) for c in _cells), default=0) + (1 if _cells else 0)
+            _max_col = max((c.get("col", 0) for c in _cells), default=0) + (1 if _cells else 0)
+            _grid = [["" for _ in range(_max_col)] for _ in range(_max_row)]
+            # Parallel per-cell confidence grid (None where the engine set none —
+            # e.g. plain Surya, or repair-padded cells). Drives the confidence view.
+            _conf_grid = [[None for _ in range(_max_col)] for _ in range(_max_row)]
+            for c in _cells:
+                r, col = c.get("row", 0), c.get("col", 0)
+                if 0 <= r < _max_row and 0 <= col < _max_col:
+                    _grid[r][col] = c.get("text", "")
+                    _conf_grid[r][col] = c.get("confidence")
+            out.append((_block["table_id"], _grid, _conf_grid))
+        return out
+
+    if _tables_are_stitched:
+        _all_blocks = _doc_tables_json
+        _page_blocks = _doc_tables_json  # stitched tables are document-level
+    else:
+        _all_blocks = [t for pg in _pages_json for t in pg.get("tables", [])]
+        _this_page_json = _pages_json[current_idx] if current_idx < len(_pages_json) else {}
+        _page_blocks = _this_page_json.get("tables", [])
+
+    _all_export_tables = _blocks_to_tables(_all_blocks)
+    _page_export_tables = _blocks_to_tables(_page_blocks)
 
     # ==========================================
     # SIDE-BY-SIDE REVIEW: page image (left) + editable tables (right)
@@ -660,9 +717,16 @@ else:
         return ""
 
     with right:
-        if _export_tables:
-            st.subheader("✏️ Review & edit tables")
-            for table_id, grid, conf_grid in _export_tables:
+        if _page_export_tables:
+            if _tables_are_stitched:
+                st.subheader("✏️ Review & edit tables — all pages (stitched)")
+                st.caption(
+                    "Stitch is on, so continuation tables are joined across pages and "
+                    "shown here in full — not split per page."
+                )
+            else:
+                st.subheader("✏️ Review & edit tables — this page")
+            for table_id, grid, conf_grid in _page_export_tables:
                 if not grid:
                     continue
                 st.markdown(f"**{table_id}**")
@@ -710,11 +774,17 @@ else:
                     args=(table_id,),
                 )
         else:
-            st.caption("No tables detected on this page.")
+            st.caption(
+                "No tables to review."
+                if _tables_are_stitched
+                else "No tables detected on this page."
+            )
 
+    # Downloads operate on the WHOLE document, not just the current page — always
+    # build final_tables from every document table, folding in any edits by id.
     final_tables = [
         (table_id, st.session_state.get(f"edited_table_{table_id}", original_grid))
-        for table_id, original_grid, _conf in _export_tables
+        for table_id, original_grid, _conf in _all_export_tables
     ]
 
     # ==========================================
@@ -844,31 +914,50 @@ else:
         if any(cell.strip() for row in grid for cell in row)
     ]
 
+    # Cache the expensive artifacts (xlsx workbook + zip bundle) keyed by a
+    # signature of their inputs. Paging between pages triggers a full rerun; without
+    # this, every Prev/Next rebuilt the workbook (twice — standalone + inside the
+    # zip) and re-compressed the whole bundle even though nothing changed.
+    _export_sig = hashlib.md5(
+        json.dumps(
+            [final_tables, doc_json, all_text, convert_numerals],
+            ensure_ascii=False, sort_keys=True, default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    _xlsx_bytes = None
     if _nonempty_tables:
+        if st.session_state.get("_xlsx_sig") != _export_sig:
+            st.session_state["_xlsx_bytes"] = tables_to_xlsx(final_tables, convert_numerals)
+            st.session_state["_xlsx_sig"] = _export_sig
+        _xlsx_bytes = st.session_state["_xlsx_bytes"]
         st.download_button(
             label="⬇ Download as Excel (.xlsx)",
-            data=tables_to_xlsx(final_tables, convert_numerals),
+            data=_xlsx_bytes,
             file_name=f"{_stem}_extracted.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width="stretch",
         )
 
     # One-click bundle: JSON + .txt report + Excel + every non-empty table CSV
-    _zip_buf = io.BytesIO()
-    with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
-        _zf.writestr(
-            f"{_stem}_extracted.json",
-            json.dumps(doc_json, ensure_ascii=False, indent=2),
-        )
-        _zf.writestr(f"{_stem}_extracted.txt", all_text)
-        if _nonempty_tables:
-            _zf.writestr(f"{_stem}_extracted.xlsx", tables_to_xlsx(final_tables, convert_numerals))
-        for table_id, grid in _nonempty_tables:
-            csv_string = grid_to_csv(grid, convert_numerals)
-            _zf.writestr(f"{table_id}.csv", csv_string.encode("utf-8-sig"))
+    if st.session_state.get("_zip_sig") != _export_sig:
+        _zip_buf = io.BytesIO()
+        with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+            _zf.writestr(
+                f"{_stem}_extracted.json",
+                json.dumps(doc_json, ensure_ascii=False, indent=2),
+            )
+            _zf.writestr(f"{_stem}_extracted.txt", all_text)
+            if _xlsx_bytes is not None:
+                _zf.writestr(f"{_stem}_extracted.xlsx", _xlsx_bytes)
+            for table_id, grid in _nonempty_tables:
+                csv_string = grid_to_csv(grid, convert_numerals)
+                _zf.writestr(f"{table_id}.csv", csv_string.encode("utf-8-sig"))
+        st.session_state["_zip_bytes"] = _zip_buf.getvalue()
+        st.session_state["_zip_sig"] = _export_sig
     st.download_button(
         label="⬇ Download everything (.zip)",
-        data=_zip_buf.getvalue(),
+        data=st.session_state["_zip_bytes"],
         file_name=f"{_stem}_extracted.zip",
         mime="application/zip",
         width="stretch",
