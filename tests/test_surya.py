@@ -39,6 +39,17 @@ def _make_layout_bbox_mock(label: str = "Text") -> MagicMock:
     b.bbox = [10.0, 10.0, 200.0, 50.0]
     b.polygon = [[10.0, 10.0], [200.0, 10.0], [200.0, 50.0], [10.0, 50.0]]
     b.position = 0
+
+    def _model_copy(update=None):
+        # Mimic pydantic's model_copy(update=...): a fresh box with fields applied,
+        # so label/bbox reflect the Track-A replacement rather than staying MagicMocks.
+        nb = _make_layout_bbox_mock(b.label)
+        nb.bbox, nb.polygon, nb.position = b.bbox, b.polygon, b.position
+        for k, v in (update or {}).items():
+            setattr(nb, k, v)
+        return nb
+
+    b.model_copy = _model_copy
     return b
 
 
@@ -527,3 +538,54 @@ def test_skip_tables_false_passes_table_region_through():
         for b in lr.bboxes
     )
     assert len(page.tables) == 1
+
+
+# --- Track A: fine-tuned layout detector replaces Surya's Table boxes (§2.43) ---
+# When KHMER_LAYOUT_WEIGHTS is set, _process_page swaps Surya's Table-labelled
+# layout boxes for detect_table_boxes() output (deterministic; §2.37 wants this),
+# leaving every other label untouched. One integration point serves all 3 engines.
+
+def _table_labels(rec_pred):
+    lr = rec_pred.call_args[1]["layout_results"][0]
+    return [b for b in lr.bboxes if b.label == "Table"]
+
+
+def test_yolo_layout_replaces_surya_table_boxes(monkeypatch):
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+    with patch("khmer_pipeline.engines.surya.detect_table_boxes",
+               return_value=[[1.0, 2.0, 3.0, 4.0]]) as dtb:
+        _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
+    dtb.assert_called_once()
+    tables = _table_labels(rec_pred)
+    assert len(tables) == 1
+    assert list(tables[0].bbox) == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_yolo_layout_leaves_non_table_boxes_untouched(monkeypatch):
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+    with patch("khmer_pipeline.engines.surya.detect_table_boxes",
+               return_value=[[1.0, 2.0, 3.0, 4.0]]):
+        _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
+    lr = rec_pred.call_args[1]["layout_results"][0]
+    texts = [b for b in lr.bboxes if b.label == "Text"]
+    assert len(texts) == 1
+    assert list(texts[0].bbox) == [10.0, 10.0, 200.0, 50.0]
+
+
+def test_yolo_layout_empty_result_keeps_surya_boxes(monkeypatch):
+    # Empty YOLO detection must NOT drop the table — fall back to Surya's box + warn.
+    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+    with patch("khmer_pipeline.engines.surya.detect_table_boxes", return_value=[]):
+        _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
+    assert len(_table_labels(rec_pred)) == 1
+
+
+def test_no_layout_env_does_not_call_detector(monkeypatch):
+    monkeypatch.delenv("KHMER_LAYOUT_WEIGHTS", raising=False)
+    layout_pred, rec_pred = _make_predictors(with_table=True)
+    with patch("khmer_pipeline.engines.surya.detect_table_boxes") as dtb:
+        _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
+    dtb.assert_not_called()

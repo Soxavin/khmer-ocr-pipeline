@@ -6,11 +6,13 @@ import traceback
 import warnings
 from html.parser import HTMLParser
 from typing import Callable, Optional
+import numpy as np
 from PIL import Image
 from ..models import PreprocessResult, SuryaResult, SuryaPageResult, Cell, Table, TextBlock
 from ..utils.device import configure_runtime
 from ..model_config import CONFIDENCE_LOW
 from .table_stitch import merge_table_regions, merge_table_rowbands
+from .layout_detect import detect_table_boxes
 
 _BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)
 
@@ -268,6 +270,34 @@ def _process_page(
         if layout_result.error:
             warnings.warn(f"Layout failed on page {page_index + 1}; returning empty result.")
             return SuryaPageResult(page_index=page_index, text_blocks=[], tables=[], ocr_text="")
+
+        # Track A (§2.43): when a fine-tuned layout detector is configured, REPLACE
+        # Surya's Table-labelled boxes with its deterministic ones (other labels
+        # untouched). One integration point serves surya, surya_kiri and
+        # surya_kiri_vlm. An empty detection keeps Surya's boxes (never drop a table).
+        if os.environ.get("KHMER_LAYOUT_WEIGHTS"):
+            yolo_boxes = detect_table_boxes(np.asarray(pil_img.convert("RGB")))
+            if yolo_boxes:
+                table_lboxes = [b for b in layout_result.bboxes if b.label == "Table"]
+                others = [b for b in layout_result.bboxes if b.label != "Table"]
+                template = table_lboxes[0] if table_lboxes else None
+                if template is not None:
+                    base_pos = min((getattr(b, "position", 0) or 0) for b in table_lboxes)
+                    new_tables = [
+                        template.model_copy(update={
+                            "bbox": [x0, y0, x1, y1], "label": "Table",
+                            "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                            "position": base_pos + k,
+                        })
+                        for k, (x0, y0, x1, y1) in enumerate(yolo_boxes)
+                    ]
+                    layout_result.bboxes = others + new_tables
+                    _log(f"Page {page_index}: layout detector replaced "
+                         f"{len(table_lboxes)} Table region(s) → {len(new_tables)}")
+            else:
+                warnings.warn(
+                    f"Fine-tuned layout detector found no table on page {page_index + 1}; "
+                    "keeping Surya's layout boxes.")
 
         # De-fragment tables: merge adjacent Table regions into master boxes so
         # recognition OCRs each whole table at once (not column-wise fragments).
