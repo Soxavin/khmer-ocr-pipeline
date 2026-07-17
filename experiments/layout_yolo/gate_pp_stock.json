@@ -1,0 +1,286 @@
+{
+  "weights": null,
+  "runs": 1,
+  "configs": {
+    "surya/layout_off/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.9429,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.9706,
+      "table_cer": 0.0242,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.6802,
+      "numeric_cell_accuracy": 0.7797,
+      "cell_accuracy": 0.6065,
+      "table_cer": 0.2134,
+      "dims_seen": [
+        "25x8"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.8383,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.8436,
+      "table_cer": 0.0471,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.6686,
+      "numeric_cell_accuracy": 0.7787,
+      "cell_accuracy": 0.4676,
+      "table_cer": 0.1335,
+      "dims_seen": [
+        "23x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.7558,
+      "numeric_cell_accuracy": 0.2288,
+      "cell_accuracy": 0.2593,
+      "table_cer": 0.1504,
+      "dims_seen": [
+        "25x10"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.8383,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.8436,
+      "table_cer": 0.0469,
+      "dims_seen": [
+        "27x10"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.7337,
+      "numeric_cell_accuracy": 0.7787,
+      "cell_accuracy": 0.588,
+      "table_cer": 0.0782,
+      "dims_seen": [
+        "23x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.9464,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.9724,
+      "table_cer": 0.0148,
+      "dims_seen": [
+        "34x16"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.686,
+      "numeric_cell_accuracy": 0.2797,
+      "cell_accuracy": 0.3287,
+      "table_cer": 0.1201,
+      "dims_seen": [
+        "25x11"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.8638,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.8683,
+      "table_cer": 0.0229,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.7337,
+      "numeric_cell_accuracy": 0.2131,
+      "cell_accuracy": 0.213,
+      "table_cer": 0.6814,
+      "dims_seen": [
+        "83x5"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.686,
+      "numeric_cell_accuracy": 0.3898,
+      "cell_accuracy": 0.4491,
+      "table_cer": 0.1222,
+      "dims_seen": [
+        "25x10"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.8383,
+      "numeric_cell_accuracy": 0.7143,
+      "cell_accuracy": 0.6543,
+      "table_cer": 0.4249,
+      "dims_seen": [
+        "50x7"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.8225,
+      "numeric_cell_accuracy": 0.4098,
+      "cell_accuracy": 0.5278,
+      "table_cer": 0.6937,
+      "dims_seen": [
+        "67x5"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.4571,
+      "numeric_cell_accuracy": 0.5495,
+      "cell_accuracy": 0.7206,
+      "table_cer": 0.1641,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.0649,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.9745,
+      "numeric_cell_accuracy": 0.978,
+      "cell_accuracy": 0.9712,
+      "table_cer": 0.0074,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.9704,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9722,
+      "table_cer": 0.0064,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.063,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.966,
+      "numeric_cell_accuracy": 0.967,
+      "cell_accuracy": 0.963,
+      "table_cer": 0.0087,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.9822,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9815,
+      "table_cer": 0.0046,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.4321,
+      "numeric_cell_accuracy": 0.5045,
+      "cell_accuracy": 0.7022,
+      "table_cer": 0.1852,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.9302,
+      "numeric_cell_accuracy": 0.9915,
+      "cell_accuracy": 0.9398,
+      "table_cer": 0.0604,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.9787,
+      "numeric_cell_accuracy": 0.989,
+      "cell_accuracy": 0.9753,
+      "table_cer": 0.0067,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.9645,
+      "numeric_cell_accuracy": 0.9836,
+      "cell_accuracy": 0.9676,
+      "table_cer": 0.0074,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.936,
+      "numeric_cell_accuracy": 0.9915,
+      "cell_accuracy": 0.9444,
+      "table_cer": 0.06,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.9787,
+      "numeric_cell_accuracy": 0.989,
+      "cell_accuracy": 0.9753,
+      "table_cer": 0.0047,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.9822,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.9815,
+      "table_cer": 0.0055,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    }
+  }
+}

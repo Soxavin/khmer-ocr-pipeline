@@ -1,0 +1,286 @@
+{
+  "weights": "/private/tmp/claude-501/-Users-vin-Internship/8112c8f2-8d79-43ea-8ade-211bde2784d2/scratchpad/doclayout_meta.onnx",
+  "runs": 1,
+  "configs": {
+    "surya/layout_off/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.9429,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.9706,
+      "table_cer": 0.0242,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.5698,
+      "numeric_cell_accuracy": 0.4492,
+      "cell_accuracy": 0.4907,
+      "table_cer": 0.3015,
+      "dims_seen": [
+        "25x8"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.8383,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.8436,
+      "table_cer": 0.0471,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.5089,
+      "numeric_cell_accuracy": 0.6311,
+      "cell_accuracy": 0.463,
+      "table_cer": 0.2827,
+      "dims_seen": [
+        "23x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.7558,
+      "numeric_cell_accuracy": 0.2288,
+      "cell_accuracy": 0.2593,
+      "table_cer": 0.1504,
+      "dims_seen": [
+        "25x10"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.8383,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.8436,
+      "table_cer": 0.0469,
+      "dims_seen": [
+        "27x10"
+      ],
+      "stable": true
+    },
+    "surya/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.7515,
+      "numeric_cell_accuracy": 1.0,
+      "cell_accuracy": 0.7685,
+      "table_cer": 0.0626,
+      "dims_seen": [
+        "23x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.875,
+      "numeric_cell_accuracy": 0.0,
+      "cell_accuracy": 0.4485,
+      "table_cer": 0.0656,
+      "dims_seen": [
+        "34x17"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.1802,
+      "numeric_cell_accuracy": 0.0,
+      "cell_accuracy": 0.1898,
+      "table_cer": 0.4836,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.7234,
+      "numeric_cell_accuracy": 0.0824,
+      "cell_accuracy": 0.0947,
+      "table_cer": 0.0808,
+      "dims_seen": [
+        "27x8"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.5266,
+      "numeric_cell_accuracy": 0.0574,
+      "cell_accuracy": 0.0694,
+      "table_cer": 0.3122,
+      "dims_seen": [
+        "17x8"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.3721,
+      "numeric_cell_accuracy": 0.2712,
+      "cell_accuracy": 0.3009,
+      "table_cer": 0.3193,
+      "dims_seen": [
+        "25x6"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.7234,
+      "numeric_cell_accuracy": 0.0714,
+      "cell_accuracy": 0.0864,
+      "table_cer": 0.0784,
+      "dims_seen": [
+        "27x8"
+      ],
+      "stable": true
+    },
+    "surya/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.5325,
+      "numeric_cell_accuracy": 0.0656,
+      "cell_accuracy": 0.0741,
+      "table_cer": 0.3109,
+      "dims_seen": [
+        "17x8"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.4571,
+      "numeric_cell_accuracy": 0.5495,
+      "cell_accuracy": 0.7206,
+      "table_cer": 0.1641,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.0649,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.9745,
+      "numeric_cell_accuracy": 0.978,
+      "cell_accuracy": 0.9712,
+      "table_cer": 0.0074,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.9704,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9722,
+      "table_cer": 0.0064,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.063,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.966,
+      "numeric_cell_accuracy": 0.967,
+      "cell_accuracy": 0.963,
+      "table_cer": 0.0087,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_off/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.9822,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9815,
+      "table_cer": 0.0046,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/ecutioninApr-2024_p3": {
+      "cell_content_recall": 0.4571,
+      "numeric_cell_accuracy": 0.5495,
+      "cell_accuracy": 0.7206,
+      "table_cer": 0.1641,
+      "dims_seen": [
+        "35x16"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.0649,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p2": {
+      "cell_content_recall": 0.9745,
+      "numeric_cell_accuracy": 0.978,
+      "cell_accuracy": 0.9712,
+      "table_cer": 0.0074,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-09.06.26_p3": {
+      "cell_content_recall": 0.9704,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9722,
+      "table_cer": 0.0064,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p1": {
+      "cell_content_recall": 0.9186,
+      "numeric_cell_accuracy": 0.9661,
+      "cell_accuracy": 0.9306,
+      "table_cer": 0.063,
+      "dims_seen": [
+        "25x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p2": {
+      "cell_content_recall": 0.966,
+      "numeric_cell_accuracy": 0.967,
+      "cell_accuracy": 0.963,
+      "table_cer": 0.0087,
+      "dims_seen": [
+        "27x9"
+      ],
+      "stable": true
+    },
+    "surya_kiri/layout_on/\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3-15.06.26_p3": {
+      "cell_content_recall": 0.9822,
+      "numeric_cell_accuracy": 0.9918,
+      "cell_accuracy": 0.9815,
+      "table_cer": 0.0046,
+      "dims_seen": [
+        "24x9"
+      ],
+      "stable": true
+    }
+  }
+}
