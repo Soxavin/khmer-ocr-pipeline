@@ -135,3 +135,17 @@ def test_onnx_backend_empty_result_returns_empty(monkeypatch, tmp_path):
     monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", str(onnx))
     with patch.object(ld, "_get_onnx_engine", return_value=_engine(None, None)):
         assert ld.detect_table_boxes(_img()) == []
+
+
+# --- model-type selection (licence: PP is Apache-2.0, DocLayout is AGPL-3.0) ---
+
+def test_default_model_type_is_apache_licensed_pp(monkeypatch):
+    monkeypatch.delenv("KHMER_LAYOUT_MODEL", raising=False)
+    # The default must stay Apache-2.0: DocLayout-YOLO is an Ultralytics derivative
+    # (AGPL-3.0) and this deliverable is served over a web UI to a government dept.
+    assert ld._model_type() == "pp_doc_layoutv2"
+
+
+def test_model_type_is_env_overridable(monkeypatch):
+    monkeypatch.setenv("KHMER_LAYOUT_MODEL", "doclayout_docstructbench")
+    assert ld._model_type() == "doclayout_docstructbench"

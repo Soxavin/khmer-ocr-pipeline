@@ -551,7 +551,7 @@ def _table_labels(rec_pred):
 
 
 def test_yolo_layout_replaces_surya_table_boxes(monkeypatch):
-    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "rapid")
     layout_pred, rec_pred = _make_predictors(with_table=True)
     with patch("khmer_pipeline.engines.surya.detect_table_boxes",
                return_value=[[1.0, 2.0, 3.0, 4.0]]) as dtb:
@@ -563,7 +563,7 @@ def test_yolo_layout_replaces_surya_table_boxes(monkeypatch):
 
 
 def test_yolo_layout_leaves_non_table_boxes_untouched(monkeypatch):
-    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "rapid")
     layout_pred, rec_pred = _make_predictors(with_table=True)
     with patch("khmer_pipeline.engines.surya.detect_table_boxes",
                return_value=[[1.0, 2.0, 3.0, 4.0]]):
@@ -576,7 +576,7 @@ def test_yolo_layout_leaves_non_table_boxes_untouched(monkeypatch):
 
 def test_yolo_layout_empty_result_keeps_surya_boxes(monkeypatch):
     # Empty YOLO detection must NOT drop the table — fall back to Surya's box + warn.
-    monkeypatch.setenv("KHMER_LAYOUT_WEIGHTS", "/some/best.onnx")
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "rapid")
     layout_pred, rec_pred = _make_predictors(with_table=True)
     with patch("khmer_pipeline.engines.surya.detect_table_boxes", return_value=[]):
         _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
@@ -584,7 +584,7 @@ def test_yolo_layout_empty_result_keeps_surya_boxes(monkeypatch):
 
 
 def test_no_layout_env_does_not_call_detector(monkeypatch):
-    monkeypatch.delenv("KHMER_LAYOUT_WEIGHTS", raising=False)
+    monkeypatch.delenv("KHMER_LAYOUT_DETECTOR", raising=False)
     layout_pred, rec_pred = _make_predictors(with_table=True)
     with patch("khmer_pipeline.engines.surya.detect_table_boxes") as dtb:
         _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)

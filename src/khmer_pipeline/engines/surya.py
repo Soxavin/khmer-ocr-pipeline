@@ -12,7 +12,7 @@ from ..models import PreprocessResult, SuryaResult, SuryaPageResult, Cell, Table
 from ..utils.device import configure_runtime
 from ..model_config import CONFIDENCE_LOW
 from .table_stitch import merge_table_regions, merge_table_rowbands
-from .layout_detect import detect_table_boxes
+from .layout_detect import detect_table_boxes, detector_enabled
 
 _BBOX_MATCH_TOLERANCE = 20.0  # max summed |Δ| across all 4 coords (layout vs OCR pass)
 
@@ -275,7 +275,7 @@ def _process_page(
         # Surya's Table-labelled boxes with its deterministic ones (other labels
         # untouched). One integration point serves surya, surya_kiri and
         # surya_kiri_vlm. An empty detection keeps Surya's boxes (never drop a table).
-        if os.environ.get("KHMER_LAYOUT_WEIGHTS"):
+        if detector_enabled():
             yolo_boxes = detect_table_boxes(np.asarray(pil_img.convert("RGB")))
             if yolo_boxes:
                 table_lboxes = [b for b in layout_result.bboxes if b.label == "Table"]

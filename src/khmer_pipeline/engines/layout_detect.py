@@ -18,7 +18,16 @@ import numpy as np
 # this project's `opencv-python-headless` (both provide `cv2`). ONNX carries no Python
 # class dependency, so the weights cross the venv boundary cleanly.
 
-_MODEL_TYPE = "doclayout_docstructbench"
+# LICENCE-DRIVEN DEFAULT. PP-DocLayout (PaddlePaddle lineage) is **Apache-2.0**;
+# DocLayout-YOLO is an Ultralytics derivative and its exports carry **AGPL-3.0**,
+# whose §13 network clause reaches software served over a web UI — which is exactly
+# what this deliverable is, for a government department. Every other dependency here
+# is Apache/MIT/BSD, so an AGPL detector would be the only copyleft component in the
+# tree. Keep the default Apache-2.0; `doclayout_docstructbench` stays reachable via
+# KHMER_LAYOUT_MODEL for measurement/comparison only — do not ship it (§2.43).
+_DEFAULT_MODEL_TYPE = "pp_doc_layoutv2"
+_MODEL_ENV = "KHMER_LAYOUT_MODEL"
+_DETECTOR_ENV = "KHMER_LAYOUT_DETECTOR"
 _WEIGHTS_ENV = "KHMER_LAYOUT_WEIGHTS"
 _YOLO_TABLE_CLASS = "Table"  # class name in our fine-tune dataset (ardb_layout_coco_v1)
 _YOLO_MIN_CONF = 0.25
@@ -27,11 +36,30 @@ _yolo_engine = None  # (weights_path, model)
 _onnx_engine = None  # (weights_path, RapidLayout)
 
 
+def detector_enabled() -> bool:
+    """True when the pipeline should use this module's detector instead of Surya's
+    layout. Follows the established KHMER_LAYOUT_DETECTOR convention (hybrid_engine):
+    "surya" (default) = off. Any other value routes table-region detection here, with
+    KHMER_LAYOUT_WEIGHTS optionally supplying fine-tuned weights over the stock model.
+    """
+    return os.environ.get(_DETECTOR_ENV, "surya") != "surya"
+
+
+def _model_type() -> str:
+    """The rapid_layout model type to run (KHMER_LAYOUT_MODEL, default Apache-2.0 PP)."""
+    return os.environ.get(_MODEL_ENV) or _DEFAULT_MODEL_TYPE
+
+
+_engine_type: str | None = None  # model_type the cached _engine was built for
+
+
 def _get_engine():
-    global _engine
-    if _engine is None:
+    global _engine, _engine_type
+    mt = _model_type()
+    if _engine is None or _engine_type != mt:
         from rapid_layout import RapidLayout
-        _engine = RapidLayout(model_type=_MODEL_TYPE)
+        _engine = RapidLayout(model_type=mt)
+        _engine_type = mt
     return _engine
 
 
@@ -60,7 +88,7 @@ def _get_onnx_engine(weights: str):
         # list from the ONNX's `character` metadata key — experiments/layout_yolo/
         # export_onnx.py injects it, since an exported model has no such key.
         _onnx_engine = (weights, RapidLayout(RapidLayoutInput(
-            model_type=ModelType(_MODEL_TYPE),
+            model_type=ModelType(_model_type()),
             model_dir_or_path=weights,
             conf_thresh=_YOLO_MIN_CONF,
         )))

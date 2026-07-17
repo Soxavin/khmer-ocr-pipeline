@@ -70,25 +70,30 @@ def main() -> None:
     ap.add_argument("--tag", default="v1")
     args = ap.parse_args()
 
+    # Weights are optional: the stock Apache-2.0 PP-DocLayout model needs none, so
+    # the off-the-shelf detector can be baselined before any training happens.
     weights = os.environ.get(_WEIGHTS_ENV)
-    if not weights:
-        sys.exit(f"{_WEIGHTS_ENV} is unset — point it at the .onnx from the Colab notebook.")
-    if not os.path.isfile(weights):
+    if weights and not os.path.isfile(weights):
         sys.exit(f"{_WEIGHTS_ENV}={weights!r}: no such file")
+    model = os.environ.get("KHMER_LAYOUT_MODEL", "pp_doc_layoutv2 (default)")
+    print(f"detector: model={model} weights={weights or '(stock)'}")
 
     pages = _gt_pages()
     print(f"{len(pages)} GT page(s) x {len(_ENGINES)} engine(s) x layout on/off x {args.runs} run(s)\n")
 
     results: dict = {}
+    os.environ.pop("KHMER_LAYOUT_DETECTOR", None)
     for engine_name in _ENGINES:
         engine = get_ocr_engine(engine_name)
         for layout_on in (False, True):
             # detect_table_boxes reads the env at call time, so toggling it here
             # flips the layout source without reimporting anything.
             if layout_on:
-                os.environ[_WEIGHTS_ENV] = weights
+                os.environ["KHMER_LAYOUT_DETECTOR"] = "rapid"
+                if weights:
+                    os.environ[_WEIGHTS_ENV] = weights
             else:
-                os.environ.pop(_WEIGHTS_ENV, None)
+                os.environ.pop("KHMER_LAYOUT_DETECTOR", None)
             cfg = f"{engine_name}/layout_{'on' if layout_on else 'off'}"
 
             for page_id, png, grid in pages:
@@ -109,7 +114,7 @@ def main() -> None:
                       f"dims={','.join(entry['dims_seen'])}{flag}")
             print()
 
-    os.environ.pop(_WEIGHTS_ENV, None)
+    os.environ.pop("KHMER_LAYOUT_DETECTOR", None)
     out = _REPO / f"experiments/layout_yolo/gate_{args.tag}.json"
     out.write_text(json.dumps({"weights": weights, "runs": args.runs,
                                "configs": results}, indent=2))

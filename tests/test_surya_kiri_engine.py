@@ -560,3 +560,55 @@ def test_kiri_unavailable_warning_reaches_result():
 
     unavailable = [w for w in r.warnings if "unavailable" in w]
     assert len(unavailable) == 1  # merged/deduped to a single warning
+
+
+def _img_arr() -> np.ndarray:
+    return np.zeros((100, 100, 3), dtype=np.uint8)
+
+
+def _layout_pred_stub(table_bboxes):
+    """A layout_pred stub whose result carries the given Table-labelled bboxes."""
+    def _pred(imgs):
+        boxes = []
+        for bb in table_bboxes:
+            b = MagicMock()
+            b.label = "Table"
+            b.bbox = bb
+            boxes.append(b)
+        r = MagicMock()
+        r.bboxes = boxes
+        return [r]
+    return _pred
+
+
+
+# --- Track A: the layout detector must reach surya_kiri too (§2.43) ---
+# surya_kiri runs its OWN layout pass on the geometric-only frame (it does not use
+# run_surya's table boxes), so the hook in surya.py::_process_page never fires here.
+# Without this, KHMER_LAYOUT_WEIGHTS silently no-ops on the ARDB production engine —
+# the gate caught exactly that (layout_on == layout_off, byte-identical, 7/7 pages).
+
+def test_layout_detector_replaces_table_regions_in_surya_kiri(monkeypatch):
+    import khmer_pipeline.engines.surya_kiri_engine as ske
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "rapid")
+    with patch.object(ske, "detect_table_boxes", return_value=[[5.0, 6.0, 70.0, 80.0]]) as dtb:
+        boxes = ske._table_regions(_layout_pred_stub([[1.0, 2.0, 3.0, 4.0]]), _img_arr())
+    dtb.assert_called_once()
+    assert boxes == [(5.0, 6.0, 70.0, 80.0)]
+
+
+def test_surya_kiri_falls_back_to_surya_layout_when_detector_finds_nothing(monkeypatch):
+    import khmer_pipeline.engines.surya_kiri_engine as ske
+    monkeypatch.setenv("KHMER_LAYOUT_DETECTOR", "rapid")
+    with patch.object(ske, "detect_table_boxes", return_value=[]):
+        boxes = ske._table_regions(_layout_pred_stub([[1.0, 2.0, 3.0, 4.0]]), _img_arr())
+    assert boxes == [(1.0, 2.0, 3.0, 4.0)]
+
+
+def test_surya_kiri_uses_surya_layout_when_no_weights_env(monkeypatch):
+    import khmer_pipeline.engines.surya_kiri_engine as ske
+    monkeypatch.delenv("KHMER_LAYOUT_DETECTOR", raising=False)
+    with patch.object(ske, "detect_table_boxes") as dtb:
+        boxes = ske._table_regions(_layout_pred_stub([[1.0, 2.0, 3.0, 4.0]]), _img_arr())
+    dtb.assert_not_called()
+    assert boxes == [(1.0, 2.0, 3.0, 4.0)]

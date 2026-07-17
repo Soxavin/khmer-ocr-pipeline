@@ -33,6 +33,7 @@ Architecture
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Callable, Optional
 
 import numpy as np
@@ -41,6 +42,7 @@ from PIL import Image
 from ..models import PreprocessResult, SuryaResult, SuryaPageResult
 from ..utils.memory import clear_device_cache
 from .surya import run_surya, get_manager, _get_predictors, _build_table_from_grid
+from .layout_detect import detect_table_boxes, detector_enabled
 from .slanet_structure import predict_cells
 from .table_stitch import merge_table_regions
 from .kiri_recognizer import recognize_cells_conf, reset_kiri_failure
@@ -89,6 +91,27 @@ def _longest_run_fraction(mask_col: np.ndarray) -> float:
         if cur > best:
             best = cur
     return best / len(mask_col) if len(mask_col) else 0.0
+
+
+def _table_regions(layout_pred, img: np.ndarray) -> list[tuple]:
+    """Table-region bboxes for a page: the fine-tuned layout detector when
+    KHMER_LAYOUT_WEIGHTS is set, else Surya's own layout pass.
+
+    surya_kiri runs its own layout pass (it never sees run_surya's table boxes), so
+    the detector must be wired in HERE as well as in surya.py — otherwise
+    KHMER_LAYOUT_WEIGHTS silently no-ops on this engine (§2.43). An empty detection
+    falls back to Surya's boxes rather than dropping the table.
+    """
+    layout = layout_pred([Image.fromarray(img)])[0]
+    surya_boxes = [tuple(float(v) for v in b.bbox)
+                   for b in layout.bboxes if b.label == "Table"]
+    if not detector_enabled():
+        return surya_boxes
+    detected = detect_table_boxes(img)
+    if not detected:
+        warnings.warn("Fine-tuned layout detector found no table; keeping Surya's layout boxes.")
+        return surya_boxes
+    return [tuple(float(v) for v in b) for b in detected]
 
 
 def _has_vertical_separator(crop: np.ndarray, unit_a: list[float], unit_b: list[float]) -> bool:
@@ -243,8 +266,7 @@ def run_surya_kiri(
         page_low_conf_count = 0
 
         # Detect table regions on the raw page (own layout pass, not base.tables).
-        layout = layout_pred([Image.fromarray(img)])[0]
-        table_bboxes = [tuple(float(v) for v in b.bbox) for b in layout.bboxes if b.label == "Table"]
+        table_bboxes = _table_regions(layout_pred, img)
         if not table_bboxes:
             pages.append(page)
             continue
