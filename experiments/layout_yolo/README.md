@@ -1,15 +1,42 @@
 # Track A — fine-tuning a layout detector (what happens and why)
 
-*A walkthrough for us, not a formal doc. Status: dataset published to HF; integration built
-and verified; **training pending on Colab**.*
+*A walkthrough for us, not a formal doc. **Status: GO on stock PP-DocLayout — no training needed
+(§2.56).** Fine-tuning below is preserved as optional upside.*
 
-## Why we're doing this
+## OUTCOME FIRST (§2.56)
 
-§2.37 measured our biggest reliability problem: **Surya's layout stage is non-deterministic** —
-on the wide budget table its column count swings 14–21 between identical runs, and one run found
-no table at all. Recognition is fine; *finding the table box consistently* is not. A detector
-fine-tuned on our own documents is deterministic: same page in → same boxes out, every time.
-That's the whole bet. If it also *finds* the boxes as well as Surya does, it wins.
+**Stock, off-the-shelf `pp_doc_layoutv2` (Apache-2.0) is a GO for the ARDB `surya_kiri` path with
+zero training:** mean numeric-cell-accuracy **0.977 → 0.991** across the 6 ARDB GT pages (3 runs
+each, all stable), and it recovered a row Surya was dropping (24×9 → 25×9 on 15.06 p3). Enable with
+`KHMER_LAYOUT_DETECTOR=rapid` (default model is already PP; no weights file needed).
+
+Two things the gate taught us:
+- **The effect is engine-dependent.** `surya_kiri` only needs a good table *region* (TableRec
+  rebuilds the structure), so a slightly-off box still helps. `surya` feeds the box straight to its
+  table-HTML VLM, so a fragmented region is catastrophic (dims 23×9 → 83×5). §2.24's "off-the-shelf
+  detectors lose" was measured on the VLM consumer only and does not generalise.
+- **This is an accuracy win, not a stability one.** `surya_kiri`'s TableRec structure was already
+  deterministic; the §2.37 run-to-run instability was plain `surya`'s VLM layout — a different engine.
+
+**Licence: use PP, not DocLayout.** DocLayout-YOLO is an Ultralytics derivative and its exports carry
+**AGPL-3.0** (§13 network clause → reaches a served web UI). PP-DocLayout is **Apache-2.0**, matching
+the rest of the stack. `doclayout_docstructbench` stays reachable via `KHMER_LAYOUT_MODEL` for
+*measurement comparison only* — never shipped.
+
+Everything below is the **optional fine-tuning path** (train PP on our 84 ARDB pages to try to beat
+the stock +1.4pp). Not required for the GO; kept because the integration is model-agnostic and the
+dataset exists regardless.
+
+---
+
+## Why fine-tuning was on the table
+
+§2.37 measured a reliability problem: **plain Surya's layout stage is non-deterministic** —
+on the wide budget table its column count swings 14–21 between identical runs. (Note: this hurts the
+`surya` engine, not `surya_kiri`, whose TableRec structure is already deterministic — see the
+OUTCOME above.) A detector fine-tuned on our own documents is deterministic and could also *find* the
+boxes better. That was the bet; the stock PP baseline already cleared the accuracy bar, so the
+fine-tune is now upside rather than a dependency.
 
 ## What we fine-tune (and what we don't)
 
