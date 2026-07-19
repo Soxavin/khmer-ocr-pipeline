@@ -35,6 +35,7 @@ experiments/kiri_finetune/run*/
 experiments/kiri_finetune/*.log
 experiments/layout_yolo/runs/
 experiments/layout_yolo/*.pt
+experiments/layout_yolo/data_local.yaml
 # derived from real pages (recall_taxonomy output)
 scripts/_recall_taxonomy_output.json
 
