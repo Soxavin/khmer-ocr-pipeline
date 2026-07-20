@@ -3,6 +3,7 @@ import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, X } from 'lucid
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { scanWordingKey } from '../../lib/scan'
+import { autoBadge } from '../../lib/settings'
 import { iconBtnCls, inputCls } from '../../ui'
 
 const PREPROCESS_FLAGS: [string, Key, Key][] = [
@@ -22,16 +23,17 @@ const OUTPUT_FLAGS: [string, Key, Key][] = [
 
 /** A real switch, not a checkbox: the drawer's clearest "designed" signal.
     36×20 track, 150ms knob travel, token colors, reduced-motion covered globally. */
-function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  const { checked, onChange, label } = props
+function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  const { checked, onChange, label, disabled = false } = props
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? 'bg-primary' : 'bg-line-strong'
       }`}
     >
@@ -73,9 +75,11 @@ export function SettingsDrawer(props: {
   /** Telemetry-bar jump target: scroll to + pulse this flag's row (n re-triggers). */
   highlight?: { k: string; n: number } | null
   pageCount: number
+  /** A run is in flight: its parameters are frozen until it finishes. */
+  disabled?: boolean
   onClose: () => void
 }) {
-  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, onClose } = props
+  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, disabled = false, onClose } = props
   const { t } = useT()
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const [pulsing, setPulsing] = useState<string | null>(null)
@@ -121,6 +125,7 @@ export function SettingsDrawer(props: {
                   type="button"
                   role="radio"
                   aria-checked={selected}
+                  disabled={disabled}
                   onClick={() => onEngineChange(e2.key)}
                   className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
                     selected
@@ -163,6 +168,7 @@ export function SettingsDrawer(props: {
                       ? 'bg-primary-soft text-primary-strong'
                       : 'bg-surface text-ink-2 hover:bg-rail'
                   }`}
+                  disabled={disabled}
                   onClick={() => set('dpi', d)}
                 >
                   {d}
@@ -172,7 +178,7 @@ export function SettingsDrawer(props: {
           </div>
           <span className="mb-1 block text-xs font-medium text-ink-2">{t('pages')}</span>
           <div className="flex items-center gap-2">
-            <select className={`${inputCls} min-w-0 flex-1 pr-6`}
+            <select className={`${inputCls} min-w-0 flex-1 pr-6`} disabled={disabled}
                     value={scope} onChange={(e) => set('page_scope', e.target.value)}>
               <option value="all">{t('all_pages')}</option>
               <option value="single">{t('single_page')}</option>
@@ -186,16 +192,16 @@ export function SettingsDrawer(props: {
               )}
             </select>
             {scope === 'single' && (
-              <input type="number" min={1} max={Math.max(1, pageCount)} className={`${inputCls} w-16 px-1`}
+              <input type="number" disabled={disabled} min={1} max={Math.max(1, pageCount)} className={`${inputCls} w-16 px-1`}
                      value={Number(settings.page_num ?? 1)} onChange={(e) => set('page_num', Number(e.target.value))} />
             )}
             {scope === 'range' && (
               <>
-                <input type="number" min={1} className={`${inputCls} w-14 px-1`}
+                <input type="number" disabled={disabled} min={1} className={`${inputCls} w-14 px-1`}
                        aria-label={t('first_page')}
                        value={Number(settings.page_start ?? 1)} onChange={(e) => set('page_start', Number(e.target.value))} />
                 <span>–</span>
-                <input type="number" min={1} className={`${inputCls} w-14 px-1`}
+                <input type="number" disabled={disabled} min={1} className={`${inputCls} w-14 px-1`}
                        aria-label={t('last_page')}
                        value={Number(settings.page_end ?? 5)} onChange={(e) => set('page_end', Number(e.target.value))} />
               </>
@@ -251,22 +257,28 @@ export function SettingsDrawer(props: {
                 <span className="min-w-0">
                   <span className="text-sm font-semibold text-ink">
                     {t(labelKey)}
-                    {/* Dynamic auto readout: the scan check either acted on this
-                        toggle (emerald) or measured it and left it alone (slate). */}
-                    {checks.length > 0 && (
-                      <span
-                        className={`ml-1.5 rounded px-1.5 py-0.5 text-2xs font-semibold ${
-                          k in auto ? 'bg-ok-soft text-ok-ink' : 'bg-rail text-ink-2'
-                        }`}
-                      >
-                        {t(k in auto ? 'auto_applied' : 'auto_not_applied')}
-                      </span>
-                    )}
+                    {/* Present only where the scan check made the call — and it says
+                        which way, so a step it disabled stays auditable without ever
+                        looking like it is running. */}
+                    {(() => {
+                      const badge = autoBadge(bool(k), k in auto)
+                      if (badge === null) return null
+                      return (
+                        <span
+                          className={`ml-1.5 rounded px-1.5 py-0.5 text-2xs font-semibold ${
+                            badge === 'applied' ? 'bg-ok-soft text-ok-ink' : 'bg-rail text-ink-2'
+                          }`}
+                        >
+                          {t(badge === 'applied' ? 'auto_applied' : 'auto_off')}
+                        </span>
+                      )
+                    })()}
                   </span>
                   <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
                 </span>
                 <Switch
                   checked={bool(k)}
+                  disabled={disabled}
                   onChange={(v) => {
                     set(k, v)
                     onAutoOverride?.(k)
@@ -282,12 +294,12 @@ export function SettingsDrawer(props: {
           <SectionTitle icon={ScanSearch} label={t('ai_correction')} />
           <div className="flex items-start justify-between gap-3 rounded-md border border-line-strong/30 bg-rail/20 p-2">
             <span className="min-w-0 text-sm font-semibold text-ink">{t('ai_enable')}</span>
-            <Switch checked={bool('enable_qwen')} onChange={(v) => set('enable_qwen', v)} label={t('ai_correction')} />
+            <Switch checked={bool('enable_qwen')} disabled={disabled} onChange={(v) => set('enable_qwen', v)} label={t('ai_correction')} />
           </div>
           {bool('enable_qwen') && (
             <label className="mt-2 flex items-center justify-between">
               <span className="text-ink-2">{t('anomaly')}</span>
-              <input type="number" step={0.05} min={0} max={1} className={`${inputCls} w-20 px-1`}
+              <input type="number" disabled={disabled} step={0.05} min={0} max={1} className={`${inputCls} w-20 px-1`}
                      value={Number(settings.anomaly_threshold ?? 0.15)}
                      onChange={(e) => set('anomaly_threshold', Number(e.target.value))} />
             </label>
@@ -304,7 +316,7 @@ export function SettingsDrawer(props: {
                   <span className="text-sm font-semibold text-ink">{t(labelKey)}</span>
                   <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
                 </span>
-                <Switch checked={bool(k)} onChange={(v) => set(k, v)} label={t(labelKey)} />
+                <Switch checked={bool(k)} disabled={disabled} onChange={(v) => set(k, v)} label={t(labelKey)} />
               </div>
             ))}
           </div>

@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
-import { Download, PanelLeft, PanelLeftClose, Play, Plus, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Download, PanelLeft, PanelLeftClose, Play, Plus, Trash2, X } from 'lucide-react'
 import type { DocSummary } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
-import { btnCls, btnSmCls, ICON, ICON_SM, iconBtnCls } from '../../ui'
+import { btnCls, btnSmCls, dangerBtnCls, ICON, ICON_SM, iconBtnCls } from '../../ui'
 
 // Linear-style status: a 6px dot + neutral text, not a colored pill.
 const STATUS_DOT: Record<string, string> = {
@@ -28,10 +28,13 @@ export function QueueRail(props: {
   onRemove: (id: string) => void
   uploading: boolean
   onRunAll: () => void
+  onRemoveAll: () => void
   batchRunning: boolean
+  /** A run is in flight somewhere in the workspace: no second one may start. */
+  pipelineBusy: boolean
   exportAllUrl: string | null
 }) {
-  const { documents, activeId, onSelect, onUpload, onRemove, uploading, onRunAll, batchRunning, exportAllUrl } = props
+  const { documents, activeId, onSelect, onUpload, onRemove, onRemoveAll, uploading, onRunAll, batchRunning, pipelineBusy, exportAllUrl } = props
   const pending = documents.filter((d) => d.status === 'queued' || d.status === 'error').length
   const unverifiedAcrossDocs = documents
     .filter((d) => d.status === 'done')
@@ -42,6 +45,26 @@ export function QueueRail(props: {
   // The queue is management chrome; the page image + tables are the work. The rail
   // folds to a slim strip so the review zones get the width (remembered per machine).
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('railCollapsed') === 'true')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const confirmRef = useRef<HTMLDivElement>(null)
+  // The guard closes on Escape or an outside click — never strands a modal state.
+  useEffect(() => {
+    if (!confirmClear) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmClear(false)
+    }
+    const onDown = (e: PointerEvent) => {
+      if (!confirmRef.current?.contains(e.target as Node)) setConfirmClear(false)
+    }
+    window.addEventListener('keydown', onKey)
+    // Deferred: the opening click itself must not immediately close the popover.
+    const id = setTimeout(() => window.addEventListener('pointerdown', onDown), 0)
+    return () => {
+      clearTimeout(id)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onDown)
+    }
+  }, [confirmClear])
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       localStorage.setItem('railCollapsed', String(!c))
@@ -103,9 +126,50 @@ export function QueueRail(props: {
               </span>
             )}
           </span>
-          <button className={iconBtnCls} onClick={toggleCollapsed} aria-label={t('hide_queue')} title={t('hide_queue')}>
-            <PanelLeftClose size={ICON} aria-hidden />
-          </button>
+          <span className="relative flex shrink-0 items-center gap-0.5">
+            {/* Bulk clear earns its place only once the queue is genuinely a queue. */}
+            {documents.length > 1 && (
+              <button
+                className={`${iconBtnCls} ${confirmClear ? 'bg-danger-soft text-danger-ink' : 'hover:bg-danger-soft hover:text-danger-ink'}`}
+                onClick={() => setConfirmClear((c) => !c)}
+                aria-label={t('delete_all')}
+                aria-expanded={confirmClear}
+                title={t('delete_all')}
+              >
+                <Trash2 size={ICON} aria-hidden />
+              </button>
+            )}
+            <button className={iconBtnCls} onClick={toggleCollapsed} aria-label={t('hide_queue')} title={t('hide_queue')}>
+              <PanelLeftClose size={ICON} aria-hidden />
+            </button>
+            {/* Destructive guard: the action names the count and never fires on the
+                first click. Anchored to the icon so the consequence reads in place. */}
+            {confirmClear && (
+              <div
+                role="dialog"
+                aria-label={t('delete_all')}
+                ref={confirmRef}
+                className="overlay-enter absolute right-0 top-full z-50 mt-1 w-60 rounded-lg border border-line-strong bg-raised p-3 text-left shadow-modal"
+              >
+                <p className="text-sm font-semibold text-ink">{t('delete_all_title')}</p>
+                <p className="mt-1 text-xs leading-4 text-ink-2">{t('delete_all_confirm', { n: documents.length })}</p>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button className={btnSmCls} onClick={() => setConfirmClear(false)}>
+                    {t('cancel')}
+                  </button>
+                  <button
+                    className={dangerBtnCls}
+                    onClick={() => {
+                      setConfirmClear(false)
+                      onRemoveAll()
+                    }}
+                  >
+                    {t('delete_all_action')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </span>
         </div>
         <div className="p-3 pb-2">
           <button
@@ -137,7 +201,7 @@ export function QueueRail(props: {
             <button
               className={`${btnSmCls} flex-1 justify-center`}
               onClick={onRunAll}
-              disabled={batchRunning}
+              disabled={batchRunning || pipelineBusy}
               title={t('run_all_tip')}
             >
               <Play size={ICON_SM} aria-hidden />

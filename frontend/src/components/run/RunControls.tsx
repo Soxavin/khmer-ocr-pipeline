@@ -18,6 +18,13 @@ function stageIndex(stage: string): number {
   return STAGES.findIndex(([label]) => label === stage)
 }
 
+// Sub-stages the OCR engine reports inside a single page (webapp/state.py Progress.step).
+const SUB_STEPS: Record<string, Key> = {
+  layout: 'step_layout',
+  text: 'step_text',
+  tables: 'step_tables',
+}
+
 export function RunControls(props: {
   status: RunStatus | undefined
   docSelected: boolean
@@ -70,6 +77,11 @@ export function RunControls(props: {
             <span className="font-medium text-ink">
               {idx >= 0 ? t(STAGES[idx][1]) : status.stage || t('working')}
             </span>
+            {/* The OCR stage runs for minutes: its sub-step keeps the line moving
+                so a working pipeline never reads as a frozen one. */}
+            {SUB_STEPS[status.step] && (
+              <span className="text-ink-2">{t(SUB_STEPS[status.step])}</span>
+            )}
             {status.total > 0 && (
               <span className="text-ink-2">{t('page_of', { a: status.page, b: status.total })}</span>
             )}

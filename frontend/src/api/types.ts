@@ -24,6 +24,8 @@ export type DocSummary = {
 export type RunStatus = {
   active: boolean
   stage: string
+  /** Sub-stage within the current stage ("layout"/"text"/"tables"); "" if unknown. */
+  step: string
   page: number
   total: number
   fraction: number

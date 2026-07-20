@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CircleHelp, Files, FileUp, Grid3x3, Languages, Monitor, Moon, MoreHorizontal, Search, Settings2, ShieldCheck, Square, StickyNote, Sun, TriangleAlert, X } from 'lucide-react'
+import { CircleHelp, Files, FileUp, Grid3x3, Languages, Monitor, Moon, MoreHorizontal, ScanSearch, Search, Settings2, ShieldCheck, Square, StickyNote, Sun, TriangleAlert, X } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api/client'
 import type { RunSettings } from './api/types'
@@ -13,6 +13,8 @@ import { TablesPanel } from './components/review/TablesPanel'
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useRunStatus } from './hooks/useRunStatus'
 import { encodePages, gridPages, pagesFromSettings } from './lib/pages'
+import { mergeSuggestion, scanSummary } from './lib/settings'
+import { configDiffers, guardedRun, isBusy } from './lib/run'
 import { useT } from './i18n.tsx'
 import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
 
@@ -241,18 +243,31 @@ export default function App() {
       return
     }
     suggestSeenRef.current.set(active.id, active.status === 'queued' ? 'queued' : 'run')
+    // A fresh document: report what the scan check saw, once, in passing.
+    const sum = scanSummary(s.checks ?? [])
+    if (sum) {
+      setScanToast({
+        msg: sum.active > 0 ? t('scan_toast_active', { n: sum.active }) : t('scan_toast_clean'),
+        field: sum.fields[0] ?? null,
+        n: Date.now(),
+      })
+    }
     const keys = Object.keys(s.suggested)
     setAutoApplied(keys.length ? { ...s.rationale } : {})
     if (keys.length) {
-      setRunSettings((prev) => ({ ...prev, ...s.suggested }))
+      setRunSettings((prev) => mergeSuggestion(prev, s.suggested, touchedRef.current))
       setSettingsPulse(true)
     }
     // runSettings intentionally omitted: this effect must run on doc/suggestion
     // changes only, not on every settings keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, suggestion.data])
+  // Keys the operator changed by hand for the active document. The advisory
+  // suggestion merges around these — automation never overrules a person.
+  const touchedRef = useRef<Set<string>>(new Set())
   // The user touched a toggle: their choice wins — drop its Auto badge.
   const clearAuto = useCallback((k: string) => {
+    touchedRef.current.add(k)
     setAutoApplied((prev) => {
       if (!(k in prev)) return prev
       const { [k]: _dropped, ...rest } = prev
@@ -338,6 +353,13 @@ export default function App() {
     wasActive.current = nowActive
   }, [status.data?.active, qc])
 
+  // Passive scan-check notice: slides in on upload, leaves on its own after 4s.
+  const [scanToast, setScanToast] = useState<{ msg: string; field: string | null; n: number } | null>(null)
+  useEffect(() => {
+    if (scanToast === null) return
+    const id = setTimeout(() => setScanToast(null), 4000)
+    return () => clearTimeout(id)
+  }, [scanToast])
   const [dupNotice, setDupNotice] = useState<string | null>(null)
   const upload = useMutation({
     mutationFn: api.upload,
@@ -358,6 +380,22 @@ export default function App() {
     const id = setTimeout(() => setDupNotice(null), 6000)
     return () => clearTimeout(id)
   }, [dupNotice])
+  const removeAll = useMutation({
+    mutationFn: api.clear,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['documents'] })
+      // Back to a bare workspace: no active document, no carried-over triage state.
+      setActiveId(null)
+      setPageIdx(0)
+      setSelectedTable(null)
+      setIssueIdx(-1)
+      setDismissedIssues(new Set())
+      setDrawer(null)
+      suggestSeenRef.current.clear()
+      touchedRef.current = new Set()
+    },
+    onError: (e) => setError(friendlyError(e, t('err_unreachable'))),
+  })
   const remove = useMutation({
     mutationFn: api.remove,
     onSuccess: (_res, id) => {
@@ -369,7 +407,11 @@ export default function App() {
   })
   // Every run is per-page: stitching is applied at export instead, so the review
   // panel can always link a row back to the page image it came from.
-  const runPayload: RunSettings = { ...runSettings, ocr_engine_key: engine, stitch_pages: false }
+  // draftConfiguration: the live sidebar state, sent on the NEXT run.
+  const draftConfiguration: RunSettings = { ...runSettings, ocr_engine_key: engine, stitch_pages: false }
+  // The server extracts one document at a time; this gate keeps every launch
+  // control in the workspace honest instead of letting the API 409 explain it.
+  const pipelineBusy = isBusy(documents, batchRunning) || (status.data?.active ?? false)
 
   const rememberSettings = useCallback(() => {
     localStorage.setItem('engine', engine)
@@ -378,10 +420,24 @@ export default function App() {
   }, [engine, runSettings, combineExport])
 
   const run = useMutation({
-    mutationFn: (id: string) => api.run(id, runPayload),
-    onSuccess: () => {
+    // Guarded so a double-click or a stale button never races the single-run
+    // server: a collision is caught here (or swallowed from a 409) rather than
+    // surfacing "Another extraction is already running." as a red banner.
+    mutationFn: (id: string) => guardedRun(pipelineBusy, () => api.run(id, draftConfiguration)),
+    onSuccess: (outcome) => {
+      if (outcome === 'blocked') return
       setError(null)
       rememberSettings()
+      // A new run invalidates the results on screen: drop the caches for the old
+      // ones so nothing from the previous configuration lingers into review.
+      qc.removeQueries({ queryKey: ['overview', active?.id] })
+      qc.removeQueries({ queryKey: ['page', active?.id] })
+      qc.removeQueries({ queryKey: ['lowconf', active?.id] })
+      setSelectedTable(null)
+      setFlashToken(null)
+      setFocusCell(null)
+      setIssueIdx(-1)
+      setDismissedIssues(new Set())
       qc.invalidateQueries({ queryKey: ['status'] })
       qc.invalidateQueries({ queryKey: ['documents'] })
     },
@@ -398,7 +454,7 @@ export default function App() {
       for (const d of targets) {
         setActiveId(d.id)
         try {
-          await api.run(d.id, runPayload)
+          await guardedRun(false, () => api.run(d.id, draftConfiguration))
         } catch (e) {
           setError(friendlyError(e, t('err_unreachable')))
           break
@@ -449,7 +505,7 @@ export default function App() {
         setShowMore(false)
       } else if (e.key === '?') {
         setShowHelp((h) => !h)
-      } else if (e.key === 'r' && active && !status.data?.active && !run.isPending) {
+      } else if (e.key === 'r' && active && !pipelineBusy && !run.isPending) {
         run.mutate(active.id)
       } else if (e.key === 'v' && active && selectedTable && page.data) {
         const tbl = page.data.tables.find((x) => x.table_id === selectedTable)
@@ -497,32 +553,6 @@ export default function App() {
     })
   }, [])
 
-  // Scan-check telemetry chips: read-only "what automation decided", living in the
-  // canvas strip (not a banner row — vertical space belongs to the document). A click
-  // opens Settings and scrolls to that exact field.
-  const telemetryChips = Object.keys(suggestion.data?.suggested ?? {}).length > 0 && (
-    <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
-      {Object.entries(suggestion.data?.suggested ?? {}).map(([k]) => {
-        const f = { deskew: 'flag_deskew', remove_stamps: 'flag_stamps', sharpen: 'flag_sharpen', normalise: 'flag_contrast', normalise_table_backgrounds: 'flag_tablebg' }[k]
-        const label = f ? t(f as Parameters<typeof t>[0]) : k
-        const on = Boolean(runSettings[k])
-        return (
-          <button
-            key={k}
-            className="group inline-flex h-6 shrink-0 items-center rounded-full border border-primary/30 bg-surface px-2 text-2xs font-medium text-ink transition-colors duration-150 hover:border-primary"
-            title={t('tele_tip')}
-            onClick={() => {
-              setDrawer('settings')
-              setHighlightFlag((h) => ({ k, n: (h?.n ?? 0) + 1 }))
-            }}
-          >
-            <span className="group-hover:underline">{t(on ? 'tele_on' : 'tele_off', { x: label })}</span>
-          </button>
-        )
-      })}
-    </span>
-  )
-
   const smoothProgress = useSmoothProgress(
     status.data?.active ?? false,
     status.data?.stage ?? '',
@@ -536,6 +566,7 @@ export default function App() {
   // orchestrate existing actions — the palette owns no logic of its own.
   const selectDoc = useCallback((id: string) => {
     setActiveId(id)
+    touchedRef.current = new Set()
     setPageIdx(0)
     setSelectedTable(null)
     setFlashToken(null)
@@ -545,7 +576,7 @@ export default function App() {
   }, [])
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = []
-    if (active && !status.data?.active && !run.isPending) {
+    if (active && !pipelineBusy && !run.isPending) {
       cmds.push({ id: 'run', group: t('group_actions'), label: t('run_extraction'), keywords: 're-run extract', shortcut: 'r', run: () => run.mutate(active.id) })
     }
     if (active?.status === 'done') {
@@ -613,13 +644,9 @@ export default function App() {
     : 0
 
   // Staleness: current form vs the settings the visible results were made with.
-  const lastRun = status.data?.last_run_settings ?? null
-  const current: RunSettings = { ...runSettings, ocr_engine_key: engine, stitch_pages: false }
-  // Key-order-insensitive: compare each field the last run recorded.
-  const stale =
-    hasResults &&
-    lastRun !== null &&
-    Object.keys(lastRun).some((k) => k in current && JSON.stringify(current[k]) !== JSON.stringify(lastRun[k]))
+  // appliedConfiguration: the frozen snapshot the visible results were made with.
+  const appliedConfiguration = status.data?.last_run_settings ?? null
+  const stale = hasResults && configDiffers(appliedConfiguration, draftConfiguration)
   // The stale toast shows for 10s per settings change, then gets out of the way;
   // further edits while stale bring it back (each restarts the window).
   const [staleToastHidden, setStaleToastHidden] = useState(false)
@@ -864,9 +891,27 @@ export default function App() {
       {/* Stale-settings warning: a floating bottom-left toast instead of a banner —
           it advises without stealing a full-width row. Auto-hides after 10s; the
           wrapper stays mounted so aria-live announces arrivals politely. */}
-      <div aria-live="polite">
+      <div aria-live="polite" className="pointer-events-none fixed bottom-4 left-4 z-50 flex w-full max-w-[320px] flex-col gap-2">
+        {scanToast && (
+          <div key={scanToast.n} className="toast-in pointer-events-auto flex items-start gap-2.5 rounded-lg border border-line-strong bg-surface/95 p-3.5 shadow-modal backdrop-blur-md">
+            <ScanSearch size={15} className="mt-0.5 shrink-0 text-primary" aria-hidden />
+            <p className="min-w-0 text-sm leading-5 text-ink">
+              {scanToast.msg}{' '}
+              <button
+                className="font-medium text-primary underline underline-offset-2"
+                onClick={() => {
+                  setDrawer('settings')
+                  if (scanToast.field) setHighlightFlag((h) => ({ k: scanToast.field!, n: (h?.n ?? 0) + 1 }))
+                  setScanToast(null)
+                }}
+              >
+                {t('scan_toast_open')}
+              </button>
+            </p>
+          </div>
+        )}
         {stale && !status.data?.active && !staleToastHidden && (
-          <div className="toast-in fixed bottom-4 left-4 z-50 w-full max-w-[320px] rounded-lg border border-warn/25 bg-surface/95 p-3.5 shadow-modal backdrop-blur-md">
+          <div className="toast-in pointer-events-auto w-full rounded-lg border border-warn/25 bg-surface/95 p-3.5 shadow-modal backdrop-blur-md">
             <div className="flex items-start gap-2.5">
               <TriangleAlert size={15} className="mt-0.5 shrink-0 text-warn" aria-hidden />
               <p className="min-w-0 text-sm leading-5 text-ink">
@@ -902,6 +947,8 @@ export default function App() {
           }}
           uploading={upload.isPending}
           onRunAll={runAll}
+          onRemoveAll={() => removeAll.mutate()}
+          pipelineBusy={pipelineBusy}
           batchRunning={batchRunning}
           exportAllUrl={documents.some((d) => d.status === 'done') ? api.exportAllUrl(combineExport) : null}
         />
@@ -932,12 +979,6 @@ export default function App() {
                 </>
               )}
               <ViewToggle view={canvasView} onChange={setCanvasView} />
-              {telemetryChips && (
-                <>
-                  <span className="mx-1.5 h-4 w-px shrink-0 bg-line" aria-hidden />
-                  {telemetryChips}
-                </>
-              )}
             </div>
             {canvasView === 'grid' ? (
               <PageGrid
@@ -1133,6 +1174,7 @@ export default function App() {
             engines={meta.data?.engines ?? []}
             engine={engine}
             onEngineChange={setEngine}
+            disabled={pipelineBusy}
             checks={suggestion.data?.checks ?? []}
             scores={suggestion.data?.scores ?? null}
             auto={autoApplied}
