@@ -10,6 +10,7 @@ import os
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 import numpy as np
+import pytest
 
 from khmer_pipeline.models import PreprocessResult, SuryaResult, SuryaPageResult
 from khmer_pipeline.engines.engine_registry import _OCR_ENGINES
@@ -612,3 +613,51 @@ def test_surya_kiri_uses_surya_layout_when_no_weights_env(monkeypatch):
         boxes = ske._table_regions(_layout_pred_stub([[1.0, 2.0, 3.0, 4.0]]), _img_arr())
     dtb.assert_not_called()
     assert boxes == [(1.0, 2.0, 3.0, 4.0)]
+
+
+# --- per-cell geometry (HITL capture prerequisite) ---
+# surya_kiri crops each cell to feed Kiri but historically discarded the geometry
+# (_build_table_from_grid writes bbox: []). The HITL loop needs the crop image to
+# pair with an analyst's correction, so the bbox is threaded through alongside
+# confidence. Page-space, so it is usable directly against the page image.
+#
+# Stub geometry: table box [50,50,350,350] (origin 50,50); TableRec cell (r,c) is
+# crop-relative [c*50+5, r*30+5, +45, +25].
+
+def _page_space(r: int, c: int) -> list[float]:
+    x0, y0 = c * 50 + 5, r * 30 + 5
+    return [x0 + 50.0, y0 + 50.0, x0 + 45 + 50.0, y0 + 25 + 50.0]
+
+
+def test_cells_carry_non_empty_bbox():
+    table = _run(recognize=["A", "B", "C", "D"]).pages[0].tables[0]
+    assert table["cells"], "expected cells"
+    assert all(cell["bbox"] for cell in table["cells"]), "every cell needs geometry"
+
+
+def test_cell_bbox_is_page_space_not_crop_relative():
+    # The crop origin (50,50) must be added, else crops are taken from the wrong
+    # place on the page — the off-by-origin bug the visual gate guards against.
+    table = _run(recognize=["A", "B", "C", "D"]).pages[0].tables[0]
+    by_key = {(c["row_id"], c["col_id"]): c["bbox"] for c in table["cells"]}
+    assert by_key[(0, 0)] == pytest.approx(_page_space(0, 0))
+    assert by_key[(1, 1)] == pytest.approx(_page_space(1, 1))
+
+
+def test_cell_bbox_keyed_same_as_confidence():
+    # bbox and confidence must be attached by the same (row_id, col_id) key, or a
+    # correction would pair one cell's text with another cell's image.
+    table = _run(recognize=["A", "B", "C", "D"], confidence=0.5).pages[0].tables[0]
+    for cell in table["cells"]:
+        assert cell["bbox"] == pytest.approx(_page_space(cell["row_id"], cell["col_id"]))
+        assert cell["confidence"] == 0.5
+
+
+def test_cell_bbox_lies_within_table_region():
+    # Round-trip sanity: every cell box must sit inside the table's own bbox.
+    table = _run(recognize=["A", "B", "C", "D"]).pages[0].tables[0]
+    tx0, ty0, tx1, ty1 = table["bbox"]
+    for cell in table["cells"]:
+        cx0, cy0, cx1, cy1 = cell["bbox"]
+        assert tx0 <= cx0 < cx1 <= tx1, f"cell {cell['cell_id']} escapes table in x"
+        assert ty0 <= cy0 < cy1 <= ty1, f"cell {cell['cell_id']} escapes table in y"

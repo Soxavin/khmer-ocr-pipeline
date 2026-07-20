@@ -344,6 +344,11 @@ def run_surya_kiri(
             # so tiny cells get "" without ever reaching the batched recognizer.
             grid: dict[tuple[int, int], str] = {}
             conf_grid: dict[tuple[int, int], float] = {}
+            # Per-cell geometry in PAGE space (crop-relative coords + the table
+            # crop's origin). Kept so an analyst's correction can be paired with the
+            # exact pixels Kiri read — the HITL capture loop's training pair. Without
+            # it _build_table_from_grid would leave every cell's bbox empty.
+            bbox_grid: dict[tuple[int, int], list[float]] = {}
             span_map: dict[tuple[int, int], tuple[int, int]] = {}
             pending_keys: list[tuple[int, int]] = []
             pending_crops: list[np.ndarray] = []
@@ -353,6 +358,10 @@ def run_surya_kiri(
                 cx1, cy1 = min(crop.shape[1], cx1), min(crop.shape[0], cy1)
 
                 key = (row_id, col_id)
+                # x0/y0 is the table crop's origin in `img` (the frame the cells were
+                # cropped from), so this box indexes the page image directly.
+                bbox_grid[key] = [float(cx0 + x0), float(cy0 + y0),
+                                  float(cx1 + x0), float(cy1 + y0)]
                 if row_span > 1 or col_span > 1:
                     span_map[key] = (row_span, col_span)
                 if cx1 - cx0 < 3 or cy1 - cy0 < 3:
@@ -384,6 +393,9 @@ def run_surya_kiri(
                 key = (tcell["row_id"], tcell["col_id"])
                 conf = conf_grid.get(key, 1.0)
                 tcell["confidence"] = conf
+                # Same key as confidence: a mismatch here would pair one cell's
+                # text with another cell's pixels in the HITL capture.
+                tcell["bbox"] = bbox_grid.get(key, [])
                 if conf < _LOW_CONF_THRESHOLD:
                     page_low_conf_count += 1
                 # Span metadata (slanet path only): lets exports/UI know the cell
