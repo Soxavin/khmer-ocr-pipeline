@@ -6,6 +6,7 @@ from .tesseract_engine import run_tesseract
 from .hybrid_engine import run_hybrid
 from .surya_kiri_engine import run_surya_kiri
 from .surya_kiri_vlm_engine import run_surya_kiri_vlm
+from .auto_engine import run_auto
 from ..postprocess import postprocess
 
 _OCR_ENGINES: dict[str, OCREngine] = {
@@ -14,6 +15,7 @@ _OCR_ENGINES: dict[str, OCREngine] = {
     "hybrid": run_hybrid,
     "surya_kiri": run_surya_kiri,
     "surya_kiri_vlm": run_surya_kiri_vlm,
+    "auto": run_auto,
 }
 
 
