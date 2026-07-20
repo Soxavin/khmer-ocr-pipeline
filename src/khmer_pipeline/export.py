@@ -8,6 +8,9 @@ from pathlib import Path
 import openpyxl
 from .models import PostprocessResult, ExportResult, Table, Cell
 from .engines.table_merge_pages import merge_document_tables
+from .validate import validate_pages
+
+_FLAGS_CSV_HEADER = ["table_id", "page", "row", "col", "text", "confidence", "flagged_reason"]
 
 _XLSX_SHEET_NAME_ILLEGAL = set("[]:*?/\\")
 _XLSX_SHEET_NAME_MAX_LEN = 31
@@ -83,6 +86,12 @@ def export(result: PostprocessResult, convert_numerals: bool = False, repair_tab
 
     `provenance`, when given (engine/version/settings from the orchestrator), is
     embedded as `document_json["provenance"]`; None keeps today's JSON shape."""
+    # Failure-mode classification: always-on, annotate-only. Attaches per-cell
+    # `flags` (surfaced in the JSON + flags CSV) and feeds its per-page summaries
+    # into the same warnings channel every orchestrator already displays. Runs
+    # before repair/JSON build so flags reach both document_json and the CSV.
+    result.warnings.extend(validate_pages(result.pages))
+
     # Repair tables in place before building the JSON, so was_repaired and
     # the padded cell grid are reflected in both document_json and the CSVs.
     # This mutates the input PostprocessResult's page.tables; export() is the
@@ -122,7 +131,39 @@ def export(result: PostprocessResult, convert_numerals: bool = False, repair_tab
         source_name=result.source_name,
         document_json=document_json,
         tables_csv=tables_csv,
+        flags_csv=_build_flags_csv(document_json),
     )
+
+
+def _flag_rows_for_block(table_id: str, page: str, cells: list[dict]) -> list[list[str]]:
+    """One CSV row per (cell, flag) pair for a JSON table block's cells."""
+    out: list[list[str]] = []
+    for c in cells:
+        flags = c.get("flags") or []
+        if not flags:
+            continue
+        conf = c.get("confidence")
+        conf_str = "" if conf is None else str(conf)
+        for flag in flags:
+            out.append([table_id, page, str(c.get("row", 0)), str(c.get("col", 0)),
+                        c.get("text", ""), conf_str, flag])
+    return out
+
+
+def _build_flags_csv(document_json: dict) -> str:
+    """Document-level flags CSV (one row per flagged cell/flag pair). Header-only
+    when nothing is flagged. `page` is empty for stitched document tables."""
+    grid: list[list[str]] = [list(_FLAGS_CSV_HEADER)]
+    doc_tables = document_json.get("document_tables")
+    if doc_tables is not None:
+        for tbl in doc_tables:
+            grid.extend(_flag_rows_for_block(tbl.get("table_id", ""), "", tbl.get("cells", [])))
+    else:
+        for page in document_json.get("pages", []):
+            page_str = str(page.get("page_index", 0) + 1)
+            for tbl in page.get("tables", []):
+                grid.extend(_flag_rows_for_block(tbl.get("table_id", ""), page_str, tbl.get("cells", [])))
+    return grid_to_csv(grid)
 
 
 def _make_doc_table_id(source_name: str, n: int) -> str:
@@ -142,6 +183,8 @@ def _json_cell(c: Cell) -> dict:
     }
     if "confidence" in c:
         cell["confidence"] = c["confidence"]
+    if c.get("flags"):
+        cell["flags"] = list(c["flags"])
     return cell
 
 

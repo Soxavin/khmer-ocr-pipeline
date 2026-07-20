@@ -21,6 +21,7 @@ def _make_result(source_name="ardb_sample.pdf", pages=None):
     r = MagicMock(spec=PostprocessResult)
     r.source_name = source_name
     r.pages = pages or []
+    r.warnings = []  # validate_pages extends this (dataclass default_factory field)
     return r
 
 
@@ -407,3 +408,55 @@ def test_tables_to_xlsx_returns_nonempty_bytes():
     xlsx_bytes = tables_to_xlsx([("t1", [["a"]])])
     assert isinstance(xlsx_bytes, bytes)
     assert len(xlsx_bytes) > 0
+
+
+# --- failure-mode flags integration ----------------------------------------
+
+def _flagged_table():
+    # col 1 is numeric (three numbers) with one unparseable body cell.
+    cells = [
+        {"row_id": 0, "col_id": 0, "text_lines": [{"text": "label"}]},
+        {"row_id": 0, "col_id": 1, "text_lines": [{"text": "amount"}]},
+        {"row_id": 1, "col_id": 0, "text_lines": [{"text": "a"}]},
+        {"row_id": 1, "col_id": 1, "text_lines": [{"text": "10"}]},
+        {"row_id": 2, "col_id": 0, "text_lines": [{"text": "b"}]},
+        {"row_id": 2, "col_id": 1, "text_lines": [{"text": "20"}]},
+        {"row_id": 3, "col_id": 0, "text_lines": [{"text": "c"}]},
+        {"row_id": 3, "col_id": 1, "text_lines": [{"text": "30"}]},
+        {"row_id": 4, "col_id": 0, "text_lines": [{"text": "d"}]},
+        {"row_id": 4, "col_id": 1, "text_lines": [{"text": "oops"}], "confidence": 0.3},
+    ]
+    return {"rows": [], "cols": [], "cells": cells, "image_bbox": [0, 0, 10, 10]}
+
+
+def test_flags_passed_through_json_cell():
+    doc = export(_make_result(pages=[_make_page(0, tables=[_flagged_table()])])).document_json
+    cells = doc["pages"][0]["tables"][0]["cells"]
+    bad = next(c for c in cells if c["text"] == "oops")
+    assert "numeric_unparseable" in bad["flags"]
+    assert "low_conf" in bad["flags"]
+    clean = next(c for c in cells if c["text"] == "10")
+    assert "flags" not in clean
+
+
+def test_flags_csv_header_and_columns():
+    res = export(_make_result(pages=[_make_page(0, tables=[_flagged_table()])]))
+    assert res.flags_csv.startswith("﻿")
+    rows = list(csv.reader(io.StringIO(res.flags_csv.lstrip("﻿"))))
+    assert rows[0] == ["table_id", "page", "row", "col", "text", "confidence", "flagged_reason"]
+    reasons = {r[6] for r in rows[1:]}
+    assert {"numeric_unparseable", "low_conf"} <= reasons
+    # one row per (cell, flag): the "oops" cell contributes two rows
+    oops_rows = [r for r in rows[1:] if r[4] == "oops"]
+    assert len(oops_rows) == 2
+    assert oops_rows[0][1] == "1"  # page (1-based)
+    assert oops_rows[0][5] == "0.3"  # confidence
+
+
+def test_flags_csv_header_only_when_nothing_flagged():
+    clean = {"rows": [], "cols": [], "cells": [
+        {"row_id": 0, "col_id": 0, "text_lines": [{"text": "hi"}], "confidence": 0.99}],
+        "image_bbox": [0, 0, 10, 10]}
+    res = export(_make_result(pages=[_make_page(0, tables=[clean])]))
+    rows = list(csv.reader(io.StringIO(res.flags_csv.lstrip("﻿"))))
+    assert len(rows) == 1  # header only

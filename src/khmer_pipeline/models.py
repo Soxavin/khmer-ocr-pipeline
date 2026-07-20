@@ -28,6 +28,7 @@ class Cell(TypedDict, total=False):
     polygon: list[list[float]]
     text_lines: list[TextLine]
     confidence: float  # per-cell recognizer confidence (0..1), set by surya_kiri; absent for other engines
+    flags: list[str]   # failure-mode classification tags (validate.py taxonomy); absent/omitted when the cell passed every check
     row_span: int      # >1 when the cell spans multiple rows; set by span-aware structure (surya_kiri slanet path), else absent
     col_span: int      # >1 when the cell spans multiple columns; same provenance as row_span
 
@@ -129,3 +130,7 @@ class ExportResult:
     # table_id convention: {source_stem}_page{n}_table{m}, 1-indexed
     # e.g. ardb_sample_page1_table1 → file ardb_sample_page1_table1.csv
     tables_csv: list[tuple[str, str]]   # (table_id, csv_string)
+    # Document-level failure-mode flags CSV (validate.py), one row per flagged
+    # (cell, reason). Header-only when nothing is flagged. Empty string default
+    # keeps older/test constructions that don't pass it working.
+    flags_csv: str = ""

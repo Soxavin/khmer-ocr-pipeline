@@ -39,6 +39,17 @@ def block_to_table(block: dict) -> ExportTable:
     return block["table_id"], grid, conf
 
 
+def block_flags(block: dict) -> dict[tuple[int, int], list[str]]:
+    """Per-cell failure-mode flags for a table block, keyed by (row, col). Only
+    cells that carry a non-empty `flags` list appear. Parallels `block_to_table`."""
+    out: dict[tuple[int, int], list[str]] = {}
+    for c in block.get("cells", []):
+        flags = c.get("flags")
+        if flags:
+            out[(c.get("row", 0), c.get("col", 0))] = list(flags)
+    return out
+
+
 def is_stitched(document_json: dict) -> bool:
     return document_json.get("document_tables") is not None
 
