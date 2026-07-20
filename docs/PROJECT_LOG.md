@@ -2163,6 +2163,111 @@ HEAVY_STAMP_RATIO=5%, SEVERE_CONTRAST_STD=40 vs the backend's 60 threshold).
 **Outcome.** vitest 19/19, pytest 710, tsc/build clean, detector 0 findings; bundle
 `index-Bx8Rx1Mf.js` live without a server restart (frontend-only change).
 
+### 2.65 Delete-all, absolute toggle semantics, passive scan notice (§2.65)
+
+**Problem.** (1) No way to empty the queue short of removing documents one at a
+time. (2) The preprocessing panel could show an emerald "Auto: Applied" badge next
+to a switch that was OFF — because a suggestion of `sharpen: false` counted as
+"applied automation" — so the panel contradicted itself. (3) The pre-run canvas
+strip carried read-only telemetry chips ("Sharpen — off (auto)") that spent
+permanent layout on information relevant only once, just after upload.
+
+**Investigation.** The "off means off" claim was traced end to end before touching
+anything: `Settings.sharpen` -> `PreprocessConfig(sharpen=...)` -> `if cfg.sharpen:`
+in `_geometric_preprocess`. The pipeline already honours a false flag exactly; the
+defect was purely the badge's wording. One real state bug did surface though: the
+suggestion effect merged `{...prev, ...s.suggested}`, so an advisory scan result
+arriving after the operator had already flipped a toggle would silently overwrite
+their choice. `DELETE /api/documents` and `api.clear()` already existed and were
+tested (`test_clear_all`), so no backend work was needed.
+
+**Decision.** TDD via new `frontend/src/lib/settings.ts` (9 tests, red first):
+
+- `autoBadge(on, isAuto)` — OFF always yields a neutral "Off" badge, never an
+  automation claim; ON + suggested yields "Auto: Applied"; ON by hand yields no
+  badge at all (the switch already says so). This also retires the "Auto: Not
+  applied" noise §2.64 put on every row.
+- `mergeSuggestion(prev, suggested, touched)` — advisory values fold in only for
+  keys the operator has not touched, backed by a `touchedRef` fed by the existing
+  override callback and reset per document. Automation advises; the person decides.
+- `scanSummary(checks)` — digest powering the new notice.
+
+**Correction (same day, user review).** The first cut of `autoBadge` returned a bare
+"Off" for any disabled step, which erased the automation's authorship exactly when it
+had acted. Worse, `preprocess.py` only ever emits `sharpen: False` / `normalise:
+False` — every suggestion this backend can produce is a turn-OFF — so the emerald
+"Auto: Applied" branch was unreachable in practice and the one real case rendered as
+an anonymous "Off". Rewritten so the badge answers a single question, "did the scan
+check decide this row?", with the text carrying direction: `applied` (emerald, it
+switched the step on), `auto-off` (neutral "Auto: Off", it switched the step off —
+auditable, and unambiguous that nothing is running), `null` for the operator's own
+choices and untouched defaults, where the switch already says everything.
+
+Rail: "Delete all" appears in the Documents header only at >1 document, confirms,
+then clears the collection and resets the canvas to the empty dropzone (plus
+triage/suggestion state). Strip: telemetry chips deleted; in their place a passive
+toast slides in on upload, summarises the scan check, and unmounts after 4 s with
+no confirmation click. Its "Review" link keeps the §2.58 jump-to-setting behaviour
+alive. Both toasts now share one bottom-left stack instead of overlapping.
+
+**Verification gap found.** `npx tsc --noEmit` — used as the typecheck gate through
+this whole arc — is a NO-OP here: `tsconfig.json` is solution-style (`"files": []`
+with project references), so it exits 0 without checking anything. It silently
+passed a genuinely broken tree (a `ScanSearch` usage with no import). The real gate
+is `npx tsc -b`, which the build script already used. Prior "tsc clean" claims in
+this arc were vacuous; use `tsc -b` from here on.
+
+**Outcome.** vitest 28/28, pytest 732, `tsc -b` clean, build clean, detector 0
+findings; bundle `index-CbTGgIfl.js` live (frontend-only, no restart needed).
+
+
+### 2.66 Delete guard, concurrency gating, sub-stage telemetry, applied/draft config (§2.66)
+
+**Problem.** (1) Clearing the queue relied on a native `window.confirm`. (2) Launching
+a second extraction produced a red banner reading "Another extraction is already
+running." — the server's 409 leaking into the UI as though the analyst had erred.
+(3) The OCR stage label sat frozen on "Finding text & tables…" for minutes. (4) The
+applied-vs-draft settings split existed but was unnamed and re-derived inline, and a
+re-run left the previous run's results cached under the old configuration.
+
+**Decision.**
+
+*Phase 1 — test infrastructure.* The frontend had no component-test capability, so
+this pass added jsdom + Testing Library. Two obstacles worth recording: vitest does
+NOT consume `vite.config.ts` for its own `test` block under rolldown-vite (a separate
+`vitest.config.ts` is required), and Node 22 injects a stub global `localStorage`
+whose `getItem` is undefined, shadowing jsdom's — `src/test/setup.ts` installs a real
+in-memory Storage per test. 5 component tests + 12 logic tests, red first.
+
+*Phase 2.* "Delete all" is now a trash icon opening an anchored confirmation popover
+(count named, Escape/outside-click dismiss, `role="dialog"`), replacing the native
+confirm. The guard is what the tests pin: the first click can never remove anything.
+
+*Phase 3.* The 409 banner is gone. `isBusy(documents, batchRunning)` derives one
+workspace-wide gate from the document list, and `guardedRun` refuses to dispatch
+while busy and swallows a server 409 as a benign collision while still propagating
+real failures. The gate now disables Run all, the run buttons, the `r` shortcut, the
+palette's run command, and every engine/preprocess control in the settings drawer —
+run parameters cannot be edited out from under a run that is consuming them.
+
+*Phase 4.* Real sub-stage telemetry, not a socket (the app polls; no socket exists).
+`run_surya` gained an optional `on_step` callback firing "layout" / "text" / "tables"
+inside each page; `Progress.step` carries it and `/status` exposes it. The runner
+passes `on_step` only to engines whose signature accepts it (`inspect.signature`), so
+the five other engines keep working untouched — pinned by a test asserting a legacy
+two-parameter engine is still called cleanly.
+
+*Phase 5.* The two configurations are now named — `appliedConfiguration` (the frozen
+`last_run_settings` snapshot) and `draftConfiguration` (live sidebar state) — and
+compared through `configDiffers`, which deep-compares only the keys the applied
+snapshot recorded. On re-run the stale result caches (overview/page/lowconf) are
+removed rather than left to be invalidated later, and triage state resets, so nothing
+from the old configuration survives into the new review.
+
+**Outcome.** vitest 45/45 (5 files), pytest 736, `tsc -b` clean, build clean,
+detector 0 findings. Server restarted (backend touched; registry cleared); bundle
+`index-BoZU3nNU.js` live.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
