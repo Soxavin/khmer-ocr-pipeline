@@ -4,7 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { TableEditor } from './TableEditor'
-import { btnSmCls, iconBtnCls } from '../../ui'
+import { useT } from '../../i18n.tsx'
+import { btnSmCls, iconBtnCls, inputCls } from '../../ui'
 
 const CONF_LOW = 0.5 // text-block bucket (model_config.py CONFIDENCE_LOW)
 
@@ -30,6 +31,7 @@ export function TablesPanel(props: {
 }) {
   const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onCloseFind } = props
   const qc = useQueryClient()
+  const { t } = useT()
   const findRef = useRef<HTMLInputElement>(null)
   const [find, setFind] = useState('')
   const [repl, setRepl] = useState('')
@@ -44,33 +46,31 @@ export function TablesPanel(props: {
   // not reviewed — so it confirms with a count first and stays undoable after.
   const doReplace = () => {
     if (!find) return
-    const ok = window.confirm(
-      `Replace “${find}” with “${repl}” in every table of this document — including pages you have not reviewed?\n\nYou can undo this immediately afterwards.`,
-    )
+    const ok = window.confirm(t('replace_confirm', { a: find, b: repl }))
     if (!ok) return
     api
       .replace(docId, find, repl)
       .then((r) => {
-        setFindMsg(r.total ? `Replaced ${r.total} occurrence(s) in ${r.tables_changed} table(s).` : 'No matches found.')
+        setFindMsg(r.total ? t('replaced_msg', { n: r.total, t: r.tables_changed }) : t('no_matches'))
         setCanUndoReplace(r.total > 0)
         if (r.total) {
           qc.invalidateQueries({ queryKey: ['page'] })
           qc.invalidateQueries({ queryKey: ['lowconf'] })
         }
       })
-      .catch((e) => setFindMsg(`Replace failed: ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) => setFindMsg(t('replace_failed', { e: e instanceof Error ? e.message : String(e) })))
   }
 
   const undoReplace = () => {
     api
       .undoReplace(docId)
       .then(() => {
-        setFindMsg('Replace undone.')
+        setFindMsg(t('replace_undone'))
         setCanUndoReplace(false)
         qc.invalidateQueries({ queryKey: ['page'] })
         qc.invalidateQueries({ queryKey: ['lowconf'] })
       })
-      .catch((e) => setFindMsg(`Undo failed: ${e instanceof Error ? e.message : String(e)}`))
+      .catch((e) => setFindMsg(t('undo_failed', { e: e instanceof Error ? e.message : String(e) })))
   }
   // Shown until the analyst dismisses it once, then gone for good on this machine.
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem('reviewIntroDone') !== 'true')
@@ -93,22 +93,26 @@ export function TablesPanel(props: {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Per-page quality banner + content size control. Numbers carry the weight;
           labels recede — the banner should scan as facts, not a gray sentence. */}
-      <div className="flex items-center gap-4 border-b border-slate-200 bg-white px-3 py-1.5 text-xs">
-        <span className="text-slate-500">
-          <strong className="font-semibold text-slate-800">{page.tables.length}</strong>{' '}
-          table{page.tables.length === 1 ? '' : 's'}
+      {/* Utility header: facts anchored left, type-size controls right, one fixed row.
+          Overflow scrolls sideways — the header never grows a second line. */}
+      <div className="flex h-10 shrink-0 items-center justify-between gap-3 whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3 text-xs">
+        <span className="flex min-w-0 items-center gap-4 overflow-hidden">
+        {/* Facts read as figures first: numbers a step larger and heavier than labels. */}
+        <span className="shrink-0 text-ink-2">
+          <strong className="text-sm font-semibold text-ink">{page.tables.length}</strong>{' '}
+          {page.tables.length === 1 ? t('tables_one') : t('tables_other')}
         </span>
-        <span className="text-slate-500">
-          <strong className="font-semibold text-slate-800">{page.text_blocks.length}</strong>{' '}
-          text block{page.text_blocks.length === 1 ? '' : 's'}
+        <span className="shrink-0 text-ink-2">
+          <strong className="text-sm font-semibold text-ink">{page.text_blocks.length}</strong>{' '}
+          {page.text_blocks.length === 1 ? t('blocks_one') : t('blocks_other')}
         </span>
         {lowConfBlocks > 0 && (
-          <span className="font-semibold text-conf-low">{lowConfBlocks} low-confidence</span>
+          <span className="font-semibold text-danger-ink">{t('n_lowconf', { n: lowConfBlocks })}</span>
         )}
         {page.tables.length > 1 && page.tables.some((t) => !t.verified) && (
           <button
             className={btnSmCls}
-            title="Mark every table on this page as reviewed"
+            title={t('verify_page_tip')}
             onClick={() => {
               const unverified = page.tables.filter((t) => !t.verified)
               Promise.all(unverified.map((t) => api.review(docId, t.table_id, true)))
@@ -120,102 +124,108 @@ export function TablesPanel(props: {
             }}
           >
             <Check size={12} aria-hidden />
-            Verify page
+            {t('verify_page')}
           </button>
         )}
-        <span className="ml-auto flex items-center gap-1" title="Content text size (Khmer legibility)">
-          <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label="Smaller content text">
+        {/* Legend lives in the header as micro swatches — only when this page has tinted cells. */}
+        {page.tables.some((t) => t.confidence.some((row) => row.some((v) => v !== null && v < 0.95))) && (
+          <span className="hidden shrink-0 items-center gap-3 text-ink-2 md:flex">
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px] border border-danger/25" style={{ background: 'var(--cell-low-bg)' }} aria-hidden />
+              <span className="whitespace-nowrap">
+                <span className="underline decoration-danger-ink decoration-dotted underline-offset-2">{t('legend_check_pct')}</span> {t('legend_check')}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px] border border-warn/25" style={{ background: 'var(--cell-mid-bg)' }} aria-hidden />
+              <span className="whitespace-nowrap">{t('legend_skim')}</span>
+            </span>
+          </span>
+        )}
+        </span>
+        <span className="flex shrink-0 items-center gap-1" title={t('size_tip')}>
+          <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label={t('size_smaller')}>
             A−
           </button>
-          <span className="text-slate-600">{size}px</span>
-          <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label="Larger content text">
+          <span className="text-ink-2">{size}px</span>
+          <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label={t('size_larger')}>
             A+
           </button>
         </span>
       </div>
 
-      {/* Legend on its own quiet line — only when this page actually has tinted cells. */}
-      {page.tables.some((t) => t.confidence.some((row) => row.some((v) => v !== null && v < 0.95))) && (
-        <div className="flex items-center gap-4 border-b border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-red-200" style={{ background: '#fdecec' }} aria-hidden />
-            <span className="whitespace-nowrap">
-              <span className="underline decoration-red-700 decoration-dotted underline-offset-2">below 80%</span> — check
-            </span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-amber-200" style={{ background: '#fffcf0' }} aria-hidden />
-            <span className="whitespace-nowrap">80–95% — skim</span>
-          </span>
-        </div>
-      )}
-
       {showFind && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-blue-50/50 px-3 py-1.5 text-sm">
-          <input ref={findRef} className="khmer-content w-36 rounded border border-slate-300 px-2 py-0.5"
-                 placeholder="Find…" value={find}
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-rail px-3 py-1.5 text-sm">
+          <input ref={findRef} className={`${inputCls} khmer-content w-36`}
+                 placeholder={t('find_ph')} value={find}
                  onChange={(e) => setFind(e.target.value)}
                  onKeyDown={(e) => e.key === 'Enter' && doReplace()} />
-          <input className="khmer-content w-36 rounded border border-slate-300 px-2 py-0.5"
-                 placeholder="Replace with…" value={repl}
+          <input className={`${inputCls} khmer-content w-36`}
+                 placeholder={t('replace_ph')} value={repl}
                  onChange={(e) => setRepl(e.target.value)}
                  onKeyDown={(e) => e.key === 'Enter' && doReplace()} />
           <button className={btnSmCls} disabled={!find} onClick={doReplace}
-                  title="Replace in every table of this document">
-            Replace in all tables
+                  title={t('replace_all_tip')}>
+            {t('replace_all_btn')}
           </button>
           {canUndoReplace && (
-            <button className={btnSmCls} onClick={undoReplace} title="Restore the tables to before the replace">
+            <button className={btnSmCls} onClick={undoReplace} title={t('undo_replace_tip')}>
               <Undo2 size={13} aria-hidden />
-              Undo replace
+              {t('undo_replace')}
             </button>
           )}
-          {findMsg && <span className="text-xs text-slate-600">{findMsg}</span>}
-          <button className={`${iconBtnCls} ml-auto`} onClick={onCloseFind} aria-label="Close find and replace">
+          {findMsg && <span className="text-xs text-ink-2">{findMsg}</span>}
+          <button className={`${iconBtnCls} ml-auto`} onClick={onCloseFind} aria-label={t('close_find')}>
             <X size={14} aria-hidden />
           </button>
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
         {page.tables.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">No tables on this page.</p>
+          <p className="py-6 text-center text-sm text-ink-2">{t('no_tables')}</p>
         )}
         {/* First-run guidance: names the loop in place, once, then never again.
             No tour, no coach marks — the analyst is already mid-task. */}
         {showIntro && page.tables.length > 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-slate-700">
+          <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft px-3 py-2 text-xs text-ink">
             <Info size={14} className="mt-0.5 shrink-0 text-primary" aria-hidden />
             <p className="min-w-0">
-              <span className="font-medium">Checking a table:</span> tinted cells are the ones the recogniser was
-              unsure of — compare each against the page image on the left, correct it here, then mark the table{' '}
-              <span className="font-medium">Verify</span>. Export stays available at any point; it tells you how much
-              is still unverified.
+              <span className="font-medium">{t('intro_title')}</span> {t('intro_body')}
+              <span className="font-medium">{t('intro_verify')}</span>
+              {t('intro_tail')}
             </p>
-            <button className={`${iconBtnCls} shrink-0`} onClick={dismissIntro} aria-label="Dismiss this tip">
+            <button className={`${iconBtnCls} shrink-0`} onClick={dismissIntro} aria-label={t('dismiss_tip')}>
               <X size={13} aria-hidden />
             </button>
           </div>
         )}
-        {page.tables.map((t) => (
-          <TableEditor
+        {page.tables.map((t, i) => (
+          /* Cards settle onto the sheet with a short stagger when the page changes
+             (keyed remount fires the animation; base state stays visible). */
+          <div
             key={`${docId}:${pageIdx}:${t.table_id}`}
-            docId={docId}
-            table={t}
-            focused={selectedTable === t.table_id}
-            onFocus={() => onSelectTable(t.table_id)}
-            flash={flashToken?.tid === t.table_id ? flashToken.n : 0}
-            focusCell={focusCell?.tid === t.table_id ? focusCell : null}
-          />
+            className="sheet-in"
+            style={{ '--sheet-delay': `${Math.min(i, 6) * 25}ms` } as React.CSSProperties}
+          >
+            <TableEditor
+              docId={docId}
+              table={t}
+              focused={selectedTable === t.table_id}
+              onFocus={() => onSelectTable(t.table_id)}
+              flash={flashToken?.tid === t.table_id ? flashToken.n : 0}
+              focusCell={focusCell?.tid === t.table_id ? focusCell : null}
+            />
+          </div>
         ))}
 
         {(page.corrected_text || text) && (
-          <details className="rounded-md border border-slate-200 bg-white p-2">
-            <summary className="cursor-pointer text-sm font-medium text-slate-600">
-              Page text{textSaved ? '' : ' — unsaved'}
+          <details className="rounded-lg border border-line bg-surface p-2 shadow-raised">
+            <summary className="cursor-pointer text-sm font-medium text-ink-2">
+              {t('page_text')}{textSaved ? '' : t('unsaved_suffix')}
             </summary>
             <textarea
-              className="khmer-content mt-2 w-full rounded border border-slate-200 p-2 text-slate-700"
+              className="khmer-content mt-2 w-full rounded-md border border-line-strong p-2 text-ink"
               rows={8}
               value={text}
               onChange={(e) => {
@@ -228,7 +238,7 @@ export function TablesPanel(props: {
               disabled={textSaved}
               onClick={() => api.putPageText(docId, pageIdx, text).then(() => setTextSaved(true))}
             >
-              Save text
+              {t('save_text')}
             </button>
           </details>
         )}

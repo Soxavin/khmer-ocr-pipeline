@@ -1,28 +1,74 @@
-// One control vocabulary for the whole workspace. Every select, button, and
-// icon-button composes from these; per-instance styling drift is the enemy.
+// One control vocabulary for the whole workspace. Every select, button, chip,
+// input, and menu composes from these; per-instance styling drift is the enemy.
 
+const focus = 'focus-visible:outline-2 focus-visible:outline-primary'
+const trans = 'transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out'
+const press = 'active:scale-[0.98]'
+
+// --- NEW: Spatial Depth & Layering Primitives ---
+// Gives Claude the vocabulary to create layered panels instead of flat walls
+export const panelCanvasCls = 'bg-canvas p-3 min-h-screen' // Base workspace background
+export const panelMainCls = `bg-surface border border-line-strong/60 rounded-xl shadow-sm ${trans}` // Standard crisp panel
+export const panelFloatingCls = `bg-raised border border-line-strong shadow-overlay rounded-xl backdrop-blur-md ${trans}` // Elevated contextual panel
+
+// --- Controls Framework ---
 export const selectCls =
-  'rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 ' +
-  'focus-visible:outline-2 focus-visible:outline-primary'
+  `h-7 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink ${trans} ` +
+  `hover:border-ink-3 hover:bg-rail/30 ${focus}`
 
 export const btnCls =
-  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-sm ' +
-  'text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none ' +
-  'focus-visible:outline-2 focus-visible:outline-primary'
+  `inline-flex h-7 items-center gap-1.5 rounded-md border border-line-strong bg-surface px-2.5 text-sm ` +
+  `font-medium text-ink-2 ${trans} ${press} hover:bg-rail hover:text-ink hover:border-ink-3 ` +
+  `disabled:opacity-40 disabled:pointer-events-none ${focus}`
 
 export const btnSmCls =
-  'inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs ' +
-  'text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none ' +
-  'focus-visible:outline-2 focus-visible:outline-primary'
+  `inline-flex h-6 items-center gap-1 rounded-md border border-line-strong bg-surface px-1.5 text-xs ` +
+  `font-medium text-ink-2 ${trans} ${press} hover:bg-rail hover:text-ink ` +
+  `disabled:opacity-40 disabled:pointer-events-none ${focus}`
 
+// Modernized primary button with subtle depth instead of a flat fill
 export const primaryBtnCls =
-  'inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-semibold text-white ' +
-  'shadow-sm hover:bg-primary-strong disabled:cursor-default disabled:opacity-50 ' +
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
+  `inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-semibold text-white ` +
+  `shadow-md shadow-primary/10 ${trans} ${press} hover:bg-primary-strong hover:shadow-lg hover:shadow-primary/15 ` +
+  `disabled:cursor-default disabled:opacity-50 ${focus}`
 
 export const iconBtnCls =
-  'inline-flex items-center justify-center rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 ' +
-  'focus-visible:outline-2 focus-visible:outline-primary'
+  `inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-3 ${trans} ${press} ` +
+  `hover:bg-rail hover:text-ink ${focus}`
 
-// Standard icon sizing: 15px chrome icons, stroke 2 (lucide default).
+export const dangerBtnCls =
+  `inline-flex h-7 items-center gap-1.5 rounded-md border border-danger/40 bg-surface px-2.5 text-sm ` +
+  `font-medium text-danger-ink ${trans} ${press} hover:bg-danger-soft hover:border-danger ` +
+  `disabled:opacity-40 disabled:pointer-events-none ${focus}`
+
+export const chipCls =
+  `inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium ${trans} ${focus}`
+
+export const inputCls =
+  `h-7 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink ` +
+  `placeholder:text-ink-3 ${trans} focus:border-primary ${focus}`
+
+// Floating menus/popovers + their rows.
+// (zoom-rise lives in the overlay-in keyframe — tailwindcss-animate isn't installed,
+// so animate-in/* classes would be silent no-ops here.)
+export const menuCls =
+  'overlay-enter rounded-lg border border-line bg-raised py-1 text-sm shadow-overlay'
+export const menuItemCls =
+  `block w-full px-3 py-1.5 text-left text-ink-2 ${trans} hover:bg-rail hover:text-ink ${focus}`
+
+export const kbdCls =
+  'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-line-strong ' +
+  'bg-surface px-1 font-mono text-2xs font-medium text-ink-2 shadow-raised'
+
 export const ICON = 15
+export const ICON_SM = 12
+
+import { flushSync } from 'react-dom'
+export function withViewTransition(update: () => void) {
+  const d = document as Document & { startViewTransition?: (cb: () => void) => unknown }
+  if (d.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    d.startViewTransition(() => flushSync(update))
+  } else {
+    update()
+  }
+}

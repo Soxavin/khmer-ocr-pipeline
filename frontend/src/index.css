@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Inter Variable (bundled, offline) — the UI chrome face. Khmer content never uses it. */
+@import "@fontsource-variable/inter";
 
 /* Bundled Khmer face (repo fonts/, SIL OFL — license alongside the asset).
    Variable font: one file covers all weights. */
@@ -9,17 +11,71 @@
   font-display: swap;
 }
 
-/* Design tokens — one color language across the app (mirrors webapp/components.py).
-   The neutral ramp re-tints Tailwind's slate toward the GDDE blue hue (OKLCH h≈255,
-   low chroma): the whole chrome carries the brand instead of stock-Tailwind gray. */
+/* ─── Design tokens ─────────────────────────────────────────────────────────
+   One semantic layer over one hue (GDDE blue, OKLCH h≈255). Layered-zones
+   scheme: zones separate by background steps (rail / canvas / surface), not
+   borders. Dark mode later overrides these variables only — components never
+   hard-code a color. */
 @theme {
-  --color-primary: #1565c0; /* MEF/GDDE blue */
-  --color-primary-strong: #0f4c94; /* hover/active of primary */
+  /* Brand — the ONLY blue. Focus, selection, links, flash all derive from it. */
+  --color-primary: #1565c0;
+  --color-primary-strong: #0f4c94; /* hover/active */
+  --color-primary-soft: oklch(0.945 0.028 255); /* selected bg, soft accents */
+
+  /* Surfaces (layered zones) */
+  --color-surface: #ffffff; /* header, tables, cards */
+  --color-rail: oklch(0.972 0.006 255); /* queue rail, grid headers */
+  --color-canvas: oklch(0.916 0.011 255); /* recessed page-viewer ground */
+  --color-raised: #ffffff; /* popovers, dialogs */
+
+  /* Ink */
+  --color-ink: oklch(0.24 0.022 255);
+  --color-ink-2: oklch(0.42 0.026 255); /* secondary — safe on all surfaces */
+  --color-ink-3: oklch(0.52 0.024 255); /* muted — ≥4.5:1 on white, non-load-bearing only */
+
+  /* Lines */
+  --color-line: oklch(0.895 0.011 255); /* hairline seams */
+  --color-line-strong: oklch(0.856 0.014 255); /* control borders */
+
+  /* Status (semantic, aligned with the confidence palette) */
+  --color-ok: #16a34a;
+  --color-ok-ink: #166534;
+  --color-ok-soft: oklch(0.962 0.024 155);
+  --color-warn: #d97706;
+  --color-warn-ink: #92400e;
+  --color-warn-soft: oklch(0.972 0.022 85);
+  --color-danger: #dc2626;
+  --color-danger-ink: #b91c1c;
+  --color-danger-soft: oklch(0.962 0.018 25);
+
+  /* Confidence trio (mirrors webapp/components.py) */
   --color-conf-high: #16a34a;
   --color-conf-mid: #f59e0b;
   --color-conf-low: #dc2626;
-  --font-khmer: "Noto Sans Khmer", "Khmer OS", system-ui, sans-serif;
 
+  /* Type */
+  --font-sans: "Inter Variable", system-ui, -apple-system, sans-serif;
+  --font-khmer: "Noto Sans Khmer", "Khmer OS", system-ui, sans-serif;
+  /* Chrome runs half a step smaller and tighter than stock Tailwind.
+     Full ramp: 2xs 11 → xs 12.5 → sm 13.5 → [15px panel titles] → lg/xl display. */
+  --text-2xs: 0.6875rem; /* 11px — count badges, micro labels */
+  --text-2xs--line-height: 1.4;
+  --text-xs: 0.78125rem; /* 12.5px */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.84375rem; /* 13.5px */
+  --text-sm--line-height: 1.5;
+
+  /* Elevation — cards barely lift; overlays clearly float. */
+  --shadow-raised: 0 1px 2px oklch(0.24 0.022 255 / 0.06);
+  --shadow-overlay:
+    0 1px 3px oklch(0.24 0.022 255 / 0.08),
+    0 8px 24px oklch(0.24 0.022 255 / 0.13);
+  --shadow-modal:
+    0 2px 6px oklch(0.24 0.022 255 / 0.08),
+    0 16px 48px oklch(0.24 0.022 255 / 0.22);
+
+  /* Neutral ramp kept for the few remaining slate-* utilities — same hue 255
+     tint so nothing on screen carries stock-Tailwind gray. */
   --color-slate-50: oklch(0.978 0.005 255);
   --color-slate-100: oklch(0.955 0.008 255);
   --color-slate-200: oklch(0.915 0.012 255);
@@ -35,6 +91,83 @@
 :root {
   /* Adjustable content size (A− / A+ control); Khmer subscript stacks need room. */
   --khmer-size: 14px;
+  /* Grid cell washes (themed below): faint by design — see .cell-conf-low note. */
+  --cell-low-bg: #fdecec;
+  --cell-mid-bg: #fffcf0;
+  --cell-low-line: #b91c1c;
+}
+
+/* ─── Dark theme ────────────────────────────────────────────────────────────
+   JS resolves the preference (light / dark / system) and stamps data-theme with
+   the RESOLVED value, so CSS needs exactly one override block. Same hue 255,
+   inverted lightness; primary lifts to hold contrast on dark grounds. */
+:root[data-theme="dark"] {
+  /* L 0.62 keeps white button text ≥4.5:1 while still reading "lifted" on dark. */
+  --color-primary: oklch(0.62 0.14 255);
+  --color-primary-strong: oklch(0.7 0.13 255);
+  --color-primary-soft: oklch(0.3 0.055 255);
+
+  --color-surface: oklch(0.245 0.018 255);
+  --color-rail: oklch(0.215 0.016 255);
+  --color-canvas: oklch(0.17 0.014 255);
+  --color-raised: oklch(0.28 0.02 255);
+
+  --color-ink: oklch(0.93 0.01 255);
+  --color-ink-2: oklch(0.74 0.018 255);
+  --color-ink-3: oklch(0.62 0.02 255);
+
+  --color-line: oklch(0.35 0.021 255);
+  --color-line-strong: oklch(0.42 0.024 255);
+
+  --color-ok-ink: oklch(0.8 0.14 155);
+  --color-ok-soft: oklch(0.27 0.05 155);
+  --color-warn-ink: oklch(0.82 0.12 85);
+  --color-warn-soft: oklch(0.28 0.05 85);
+  --color-danger-ink: oklch(0.78 0.14 25);
+  --color-danger-soft: oklch(0.28 0.06 25);
+
+  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-overlay: 0 1px 3px oklch(0 0 0 / 0.5), 0 8px 24px oklch(0 0 0 / 0.55);
+  --shadow-modal: 0 2px 6px oklch(0 0 0 / 0.5), 0 16px 48px oklch(0 0 0 / 0.7);
+
+  --cell-low-bg: oklch(0.3 0.055 25);
+  --cell-mid-bg: oklch(0.29 0.045 85);
+  --cell-low-line: oklch(0.72 0.15 25);
+}
+
+/* Khmer UI language: the chrome face becomes Noto Sans Khmer with extra leading
+   (subscript stacks need it even at chrome sizes). Token-level, like dark mode. */
+:root[data-lang="km"] {
+  --font-sans: "Noto Sans Khmer", "Inter Variable", system-ui, sans-serif;
+  --text-2xs--line-height: 1.7;
+  --text-xs--line-height: 1.75;
+  --text-sm--line-height: 1.8;
+}
+
+html, body, #root {
+  height: 100%;
+}
+body {
+  /* Numbers line up everywhere by default — this is a numbers product. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Quiet, consistent scrollbars across the three panes. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Khmer content rendering is first-class: generous line-height for stacked
@@ -45,45 +178,132 @@
   line-height: 1.9;
 }
 
-html, body, #root {
-  height: 100%;
-}
-
-/* AG Grid: let rows grow with the Khmer line-height instead of clipping stacks. */
+/* AG Grid: rows grow with the Khmer line-height AND with wrapped content —
+   cells never clip subscript stacks or hide text behind a truncation. */
 .ag-theme-workspace .ag-cell {
   font-family: var(--font-khmer);
   font-size: var(--khmer-size);
   line-height: 1.9;
+  font-variant-numeric: tabular-nums;
   display: flex;
   align-items: center;
+  white-space: normal;
+  word-break: break-word;
+  min-height: 38px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.ag-theme-workspace .ag-header-cell-label {
+  font-family: var(--font-sans);
 }
 
-/* Diff view: cells that differ from the OCR original. */
+/* Diff view: cells that differ from the OCR original — primary-tinted, since
+   "edited" is the analyst's own mark, not a warning. */
 .cell-diff {
-  background: #dbeafe !important;
-  box-shadow: inset 0 0 0 1px #60a5fa;
+  background: var(--color-primary-soft) !important;
+  box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 /* Low-confidence carries a dotted underline as well as the tint — the trust
    signal must survive color-blindness and washed-out projectors. Tints are
    deliberately faint: on a bad page hundreds of cells are flagged, and loud
    tints turn the grid into wallpaper (the signal has to survive volume too). */
 .cell-conf-low {
-  background: #fdecec;
-  text-decoration: underline dotted #b91c1c 1.5px;
+  background: var(--cell-low-bg);
+  text-decoration: underline dotted var(--cell-low-line) 1.5px;
   text-underline-offset: 3px;
 }
-.cell-conf-mid { background: #fffcf0; }
+.cell-conf-mid { background: var(--cell-mid-bg); }
 
 /* Flash a table the user jumped to from the page image. */
 @keyframes table-flash {
-  0% { box-shadow: 0 0 0 3px #2563eb; }
+  0% { box-shadow: 0 0 0 3px var(--color-primary); }
   100% { box-shadow: 0 0 0 3px transparent; }
 }
 .table-flash {
   animation: table-flash 1.2s ease-out;
 }
+
+/* Motion vocabulary — three purposes, three moves, all expo-out:
+   menus rise from their trigger, drawers slide from their edge, backdrops fade. */
+@keyframes overlay-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.overlay-enter {
+  animation: overlay-in 90ms cubic-bezier(0.19, 1, 0.22, 1);
+}
+@keyframes drawer-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.drawer-enter {
+  animation: drawer-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Toast arrival: a short rise from the corner it lives in. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-in { animation: toast-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.backdrop-enter {
+  animation: fade-in 75ms ease-out;
+}
+/* Sheets settle onto the workbench: table cards on page change (staggered via
+   --sheet-delay), 200ms expo-out. Base state is the keyframe's end — content is
+   never gated on the animation firing. */
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sheet-in {
+  animation: sheet-in 200ms cubic-bezier(0.19, 1, 0.22, 1) both;
+  animation-delay: var(--sheet-delay, 0ms);
+}
+/* Dismissed issue rows slide out before unmounting (150ms, matches the JS timer). */
+@keyframes issue-out {
+  to { opacity: 0; transform: translateX(8px); }
+}
+.issue-out {
+  animation: issue-out 150ms ease-out forwards;
+}
+/* The morphing primary action crossfades its label instead of snapping. */
+@keyframes label-fade {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.label-fade {
+  animation: label-fade 120ms ease-out;
+}
+/* One earned celebration: marking work verified / clearing the last issue.
+   A single 250ms pulse — quick enough to never block, big enough to register. */
+@keyframes verify-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+.verify-pop {
+  animation: verify-pop 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Zoom-to-evidence spotlight: everything except the flagged region dims for a
+   beat after the camera lands, then releases. */
+@keyframes spotlight-fade {
+  0% { opacity: 0.32; }
+  55% { opacity: 0.32; }
+  100% { opacity: 0; }
+}
+.spotlight-fade {
+  /* Base 0 so reduced-motion (animation: none) shows nothing rather than a full dim. */
+  opacity: 0;
+  animation: spotlight-fade 1100ms ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .table-flash { animation: none; }
+  .table-flash, .overlay-enter, .drawer-enter, .backdrop-enter, .verify-pop, .spotlight-fade, .sheet-in, .label-fade, .issue-out, .toast-in { animation: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
@@ -93,6 +313,6 @@ html, body, #root {
 /* Clickable table regions on the page image are real keyboard stops. */
 .region-rect:focus-visible {
   outline: none;
-  stroke: #2563eb;
+  stroke: var(--color-primary);
   stroke-width: 5px;
 }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Maximize2, ZoomIn } from 'lucide-react'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
-import { btnSmCls, iconBtnCls, selectCls } from '../../ui'
+import { useT } from '../../i18n.tsx'
+import { btnSmCls, ICON, ICON_SM, iconBtnCls, selectCls } from '../../ui'
+import { ViewToggle } from './PageGrid'
 
 // Text-block confidence buckets (model_config.py: CONFIDENCE_LOW/MID).
 const CONF_LOW = 0.5
@@ -33,10 +35,19 @@ export function PageViewer(props: {
   page: PageData | undefined
   selectedTable: string | null
   onTableClick: (tableId: string) => void
+  flyToken?: number // increments on triage jumps: fly the camera to the evidence
+  /** Canvas view toggle (single ⇄ grid) shown in the strip when provided. */
+  view?: 'single' | 'grid'
+  onViewChange?: (v: 'single' | 'grid') => void
 }) {
-  const { docId, pageIdx, pageCount, onPageChange, page, selectedTable, onTableClick } = props
+  const { docId, pageIdx, pageCount, onPageChange, page, selectedTable, onTableClick, flyToken = 0, view: canvasView, onViewChange } = props
+  const { t } = useT()
   const [variant, setVariant] = useState<'processed' | 'original'>('processed')
   const [overlay, setOverlay] = useState<OverlayMode>('confidence')
+  const [loupeOn, setLoupeOn] = useState(false)
+  const [lensPos, setLensPos] = useState<{ x: number; y: number } | null>(null)
+  const LENS = 180 // lens diameter (px)
+  const LENS_MAG = 3 // magnification relative to the scan's natural pixels
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
@@ -86,96 +97,149 @@ export function PageViewer(props: {
   const bboxIndex = page?.table_bbox_index ?? {}
   const selectedBbox = selectedTable ? bboxIndex[selectedTable] : undefined
 
+  // Zoom-to-evidence: on a triage jump, fly the camera to the flagged table and
+  // spotlight it for a beat. The tool navigates the proof; the analyst just reads.
+  const flyAnim = useRef<number | null>(null)
+  const lastFlown = useRef(0)
+  const [spotlight, setSpotlight] = useState<{ bbox: number[]; n: number } | null>(null)
+  useEffect(() => {
+    // Retriggers when page data arrives late (cross-page jumps load async).
+    if (flyToken === 0 || flyToken === lastFlown.current) return
+    const el = containerRef.current
+    if (!el || !natural || !selectedBbox) return
+    lastFlown.current = flyToken
+    const [x0, y0, x1, y1] = selectedBbox
+    const bw = Math.max(1, x1 - x0)
+    const bh = Math.max(1, y1 - y0)
+    // Frame the region at 90% of the canvas, capped at 3× so text stays crisp.
+    const scale = Math.min((el.clientWidth * 0.9) / bw, (el.clientHeight * 0.9) / bh, 3)
+    const target = {
+      scale,
+      tx: el.clientWidth / 2 - ((x0 + x1) / 2) * scale,
+      ty: el.clientHeight / 2 - ((y0 + y1) / 2) * scale,
+    }
+    const done = () => setSpotlight({ bbox: selectedBbox, n: flyToken })
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setView(target)
+      done()
+      return
+    }
+    if (flyAnim.current !== null) cancelAnimationFrame(flyAnim.current)
+    const from = { ...view }
+    const t0 = performance.now()
+    const DUR = 380
+    const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t))
+    const step = (now: number) => {
+      const k = easeOutExpo(Math.min(1, (now - t0) / DUR))
+      setView({
+        scale: from.scale + (target.scale - from.scale) * k,
+        tx: from.tx + (target.tx - from.tx) * k,
+        ty: from.ty + (target.ty - from.ty) * k,
+      })
+      if (k < 1) flyAnim.current = requestAnimationFrame(step)
+      else {
+        flyAnim.current = null
+        done()
+      }
+    }
+    flyAnim.current = requestAnimationFrame(step)
+    return () => {
+      if (flyAnim.current !== null) cancelAnimationFrame(flyAnim.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToken, selectedBbox, natural])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1.5 text-sm">
-        <div className="flex items-center gap-1">
-          <button
-            className={iconBtnCls}
-            onClick={() => onPageChange(pageIdx - 1)}
-            disabled={pageIdx <= 0}
-            aria-label="Previous page"
-          >
-            <ChevronLeft size={16} aria-hidden />
-          </button>
-          <select
-            className={selectCls}
-            value={pageIdx}
-            onChange={(e) => onPageChange(Number(e.target.value))}
-            aria-label="Page"
-          >
-            {Array.from({ length: pageCount }, (_, i) => (
-              <option key={i} value={i}>
-                Page {i + 1} / {pageCount}
-              </option>
-            ))}
-          </select>
-          <button
-            className={iconBtnCls}
-            onClick={() => onPageChange(pageIdx + 1)}
-            disabled={pageIdx >= pageCount - 1}
-            aria-label="Next page"
-          >
-            <ChevronRight size={16} aria-hidden />
-          </button>
-        </div>
-        <div className="flex items-center gap-1 text-xs">
-          <button className={btnSmCls} onClick={() => fit()}>
-            Fit
-          </button>
-          <button className={btnSmCls} onClick={() => setView((v) => ({ ...v, scale: 1 }))}>
-            100%
-          </button>
-          <button
-            className={`${btnSmCls} ${variant === 'original' ? 'border-primary text-primary' : ''}`}
-            onClick={() => setVariant((v) => (v === 'processed' ? 'original' : 'processed'))}
-            title="Toggle between the cleaned page and the original scan"
-          >
-            {variant === 'processed' ? 'Processed' : 'Original'}
-          </button>
-          <select
-            className={selectCls}
-            value={overlay}
-            onChange={(e) => setOverlay(e.target.value as OverlayMode)}
-            aria-label="Overlay mode"
-            title="What the colored boxes mean"
-          >
-            <option value="confidence">Confidence boxes</option>
-            <option value="regions">Region types</option>
-            <option value="none">No boxes</option>
-          </select>
-        </div>
+      {/* Top strip carries reading position ONLY — view controls float on the
+          canvas they act on (control placement architecture, §2.45). */}
+      <div className="flex h-10 shrink-0 items-center justify-center gap-1 overflow-x-auto whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3 text-sm">
+        <button
+          className={iconBtnCls}
+          onClick={() => onPageChange(pageIdx - 1)}
+          disabled={pageIdx <= 0}
+          aria-label={t('prev_page')}
+        >
+          <ChevronLeft size={ICON} aria-hidden />
+        </button>
+        <select
+          className={selectCls}
+          value={pageIdx}
+          onChange={(e) => onPageChange(Number(e.target.value))}
+          aria-label={t('pages')}
+        >
+          {Array.from({ length: pageCount }, (_, i) => (
+            <option key={i} value={i}>
+              {t('page_n_of', { i: i + 1, n: pageCount })}
+            </option>
+          ))}
+        </select>
+        <button
+          className={iconBtnCls}
+          onClick={() => onPageChange(pageIdx + 1)}
+          disabled={pageIdx >= pageCount - 1}
+          aria-label={t('next_page')}
+        >
+          <ChevronRight size={ICON} aria-hidden />
+        </button>
+        {canvasView && onViewChange && (
+          <>
+            <span className="mx-1.5 h-4 w-px shrink-0 bg-line" aria-hidden />
+            <ViewToggle view={canvasView} onChange={onViewChange} />
+          </>
+        )}
       </div>
 
       <div
         ref={containerRef}
-        className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-slate-200 active:cursor-grabbing"
+        className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-canvas active:cursor-grabbing"
         onMouseDown={(e) => {
           drag.current = { x: e.clientX - view.tx, y: e.clientY - view.ty }
         }}
         onMouseMove={(e) => {
-          if (!drag.current) return
-          setView((v) => ({ ...v, tx: e.clientX - drag.current!.x, ty: e.clientY - drag.current!.y }))
+          if (drag.current) {
+            setLensPos(null) // panning and inspecting are different hand modes
+            setView((v) => ({ ...v, tx: e.clientX - drag.current!.x, ty: e.clientY - drag.current!.y }))
+            return
+          }
+          if (loupeOn) {
+            const rect = e.currentTarget.getBoundingClientRect()
+            setLensPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+          }
         }}
         onMouseUp={() => (drag.current = null)}
-        onMouseLeave={() => (drag.current = null)}
+        onMouseLeave={() => {
+          drag.current = null
+          setLensPos(null)
+        }}
       >
-        {/* Legend floats on the canvas corner — out of the toolbar's flow. */}
-        {overlay === 'confidence' && (
-          <span className="absolute bottom-2 left-2 z-10 flex items-center gap-2.5 rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-xs text-slate-600 shadow-sm">
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3.5 border-2" style={{ borderColor: PALETTE.high }} aria-hidden />
-              ≥80% solid
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3.5 border-2 border-dashed" style={{ borderColor: PALETTE.mid }} aria-hidden />
-              50–80%
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3.5 border-2 border-dashed" style={{ borderColor: PALETTE.low }} aria-hidden />
-              &lt;50% dashed
-            </span>
-          </span>
+        {/* Loupe: a lens showing the SAME image at 3× natural pixels around the
+            cursor — glyph-level inspection without disturbing the page view. */}
+        {loupeOn && lensPos && natural && (
+          <div
+            className="pointer-events-none absolute z-20 overflow-hidden rounded-full border-2 border-line-strong bg-surface shadow-overlay"
+            style={{ width: LENS, height: LENS, left: lensPos.x - LENS / 2, top: lensPos.y - LENS / 2 }}
+            aria-hidden
+          >
+            <img
+              src={api.pageImageUrl(docId, pageIdx, variant)}
+              alt=""
+              draggable={false}
+              className="max-w-none select-none"
+              style={{
+                width: natural.w,
+                height: natural.h,
+                transformOrigin: '0 0',
+                transform: (() => {
+                  // Image coords under the cursor, via the current pan/zoom…
+                  const ix = (lensPos.x - view.tx) / view.scale
+                  const iy = (lensPos.y - view.ty) / view.scale
+                  // …centered in the lens at fixed 3× natural magnification.
+                  return `translate(${LENS / 2 - ix * LENS_MAG}px, ${LENS / 2 - iy * LENS_MAG}px) scale(${LENS_MAG})`
+                })(),
+              }}
+            />
+          </div>
         )}
         <div
           style={{
@@ -190,7 +254,8 @@ export function PageViewer(props: {
             src={api.pageImageUrl(docId, pageIdx, variant)}
             alt={`Page ${pageIdx + 1} (${variant})`}
             draggable={false}
-            className="block max-w-none select-none shadow"
+            // Pages fade in once sized — page turns read as a transition, not a pop.
+            className={`block max-w-none select-none shadow-overlay transition-opacity duration-200 ${natural ? 'opacity-100' : 'opacity-0'}`}
             onLoad={(e) => {
               const img = e.currentTarget
               const n = { w: img.naturalWidth, h: img.naturalHeight }
@@ -238,7 +303,7 @@ export function PageViewer(props: {
                   className="region-rect cursor-pointer"
                   role="button"
                   tabIndex={0}
-                  aria-label={`Open table ${tid}`}
+                  aria-label={t('open_table', { tid })}
                   onClick={() => onTableClick(tid)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -247,7 +312,7 @@ export function PageViewer(props: {
                     }
                   }}
                 >
-                  <title>{`${tid} — click to open this table`}</title>
+                  <title>{t('open_table_tip', { tid })}</title>
                 </rect>
               ))}
               {selectedBbox && (
@@ -256,16 +321,90 @@ export function PageViewer(props: {
                   y={selectedBbox[1]}
                   width={selectedBbox[2] - selectedBbox[0]}
                   height={selectedBbox[3] - selectedBbox[1]}
-                  fill="#2563eb"
+                  fill="var(--color-primary)"
                   fillOpacity={0.15}
-                  stroke="#2563eb"
+                  stroke="var(--color-primary)"
                   strokeWidth={4 / view.scale}
                   pointerEvents="none"
                 />
               )}
+              {/* Spotlight: dim everything around the evidence for a beat after landing. */}
+              {spotlight && (
+                <g key={spotlight.n} className="spotlight-fade" pointerEvents="none" fill="#0b1526">
+                  <rect x={0} y={0} width={natural.w} height={Math.max(0, spotlight.bbox[1])} />
+                  <rect x={0} y={spotlight.bbox[3]} width={natural.w} height={Math.max(0, natural.h - spotlight.bbox[3])} />
+                  <rect x={0} y={spotlight.bbox[1]} width={Math.max(0, spotlight.bbox[0])} height={spotlight.bbox[3] - spotlight.bbox[1]} />
+                  <rect x={spotlight.bbox[2]} y={spotlight.bbox[1]} width={Math.max(0, natural.w - spotlight.bbox[2])} height={spotlight.bbox[3] - spotlight.bbox[1]} />
+                </g>
+              )}
             </svg>
           )}
         </div>
+      </div>
+      {/* Docked footer: a fluid rail — the controls cluster and the legend sit at
+          opposite ends and wrap gracefully while the split divider is dragged. */}
+      <div className="flex min-h-10 w-full shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line-strong/60 bg-surface px-3 py-1">
+        <span className="flex flex-wrap items-center gap-1 whitespace-nowrap">
+        <button className={btnSmCls} onClick={() => fit()} title={t('fit_tip')}>
+          <Maximize2 size={ICON_SM} aria-hidden />
+          {t('fit')}
+        </button>
+        <button className={btnSmCls} onClick={() => setView((v) => ({ ...v, scale: 1 }))} title={t('actual_size')}>
+          100%
+        </button>
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />
+        {/* Segmented control: which rendition of the page is shown. */}
+        <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('rendition_aria')}>
+          {(
+            [
+              ['processed', t('variant_processed')],
+              ['original', t('variant_original')],
+            ] as const
+          ).map(([val, label]) => (
+            <button
+              key={val}
+              className={`h-6 px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                variant === val ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
+              }`}
+              aria-pressed={variant === val}
+              title={val === 'processed' ? t('variant_processed_tip') : t('variant_original_tip')}
+              onClick={() => setVariant(val)}
+            >
+              {label}
+            </button>
+          ))}
+        </span>
+        <select
+          className={`${selectCls} h-6 shrink-0 text-xs`}
+          value={overlay}
+          onChange={(e) => setOverlay(e.target.value as OverlayMode)}
+          aria-label={t('overlay_aria')}
+          title={t('overlay_tip')}
+        >
+          <option value="confidence">{t('overlay_conf')}</option>
+          <option value="regions">{t('overlay_regions')}</option>
+          <option value="none">{t('overlay_none')}</option>
+        </select>
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />
+        {/* Loupe is icon-only: the glass is the label, the tooltip carries the words. */}
+        <button
+          className={`${iconBtnCls} shrink-0 ${loupeOn ? 'bg-primary-soft text-primary-strong' : ''}`}
+          onClick={() => setLoupeOn((l) => !l)}
+          aria-pressed={loupeOn}
+          aria-label={t('loupe')}
+          title={t('loupe_tip')}
+        >
+          <ZoomIn size={ICON_SM} aria-hidden />
+        </button>
+        </span>
+        {/* Dot-only legend: tooltips carry the meaning; visually silent. */}
+        {overlay === 'confidence' && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2" style={{ borderColor: PALETTE.high }} title={t('legend_high')} />
+            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed" style={{ borderColor: PALETTE.mid }} title={t('legend_mid')} />
+            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed" style={{ borderColor: PALETTE.low }} title={t('legend_low')} />
+          </span>
+        )}
       </div>
     </div>
   )

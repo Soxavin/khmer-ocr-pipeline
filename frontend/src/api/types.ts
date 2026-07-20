@@ -9,7 +9,7 @@ export type Meta = {
   backend_ready: boolean
 }
 
-export type DocStatus = 'queued' | 'running' | 'done' | 'error'
+export type DocStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
 
 export type DocSummary = {
   id: string
@@ -46,8 +46,10 @@ export type Issue = {
   table_id: string
   row: number
   col: number
-  conf: number
+  conf: number | null
   text: string
+  reason: string
+  reasons: string[]
 }
 
 export type TextBlock = { bbox: number[]; confidence?: number | null; label?: string }
@@ -70,3 +72,20 @@ export type Overview = {
 }
 
 export type RunSettings = Record<string, unknown>
+
+// GET /documents/{id}/suggest — advisory preprocessing suggestions. `suggested`
+// holds only toggles deviating from the defaults (usually empty); `rationale`
+// mirrors its keys with one plain-English sentence each.
+export type SuggestCheck = {
+  field: string
+  active: boolean // "this cleanup is useful for THIS document"
+  reason: string // stable key, localized by the frontend
+  detail: string // measured evidence (English, tooltip/fallback)
+}
+
+export type Suggestion = {
+  scores: { laplacian_var: number; contrast_std: number; skew_deg: number; stamp_ink_ratio: number }
+  suggested: Record<string, boolean>
+  rationale: Record<string, string>
+  checks: SuggestCheck[]
+}

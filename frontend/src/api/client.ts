@@ -1,4 +1,4 @@
-import type { DocSummary, Issue, Meta, Overview, PageData, RunSettings, RunStatus } from './types'
+import type { DocSummary, Issue, Meta, Overview, PageData, RunSettings, RunStatus, Suggestion } from './types'
 
 async function j<T>(req: Promise<Response>): Promise<T> {
   const res = await req
@@ -37,6 +37,7 @@ export const api = {
     ),
   cancel: (id: string) => j<{ cancelling: boolean }>(fetch(`/api/documents/${id}/cancel`, { method: 'POST' })),
   status: (id: string) => j<RunStatus>(fetch(`/api/documents/${id}/status`)),
+  suggest: (id: string) => j<Suggestion>(fetch(`/api/documents/${id}/suggest`)),
 
   overview: (id: string) => j<Overview>(fetch(`/api/documents/${id}/overview`)),
   putTable: (id: string, tableId: string, grid: string[][]) =>
@@ -79,6 +80,8 @@ export const api = {
   page: (id: string, n: number) => j<PageData>(fetch(`/api/documents/${id}/pages/${n}`)),
   pageImageUrl: (id: string, n: number, variant: 'processed' | 'original' = 'processed') =>
     `/api/documents/${id}/pages/${n}/image?variant=${variant}`,
+  // Raw page render BEFORE any run — analysts pick a page range by looking, not guessing.
+  previewImageUrl: (id: string, n: number) => `/api/documents/${id}/preview/${n}`,
   // `combine` joins tables that continue across pages into one — an export
   // choice, never an extraction one (extraction stays per-page for linking).
   exportZipUrl: (id: string, combine = true) => `/api/documents/${id}/export/zip?combine=${combine}`,

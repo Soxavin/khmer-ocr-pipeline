@@ -1,144 +1,315 @@
-import { X } from 'lucide-react'
-import type { RunSettings } from '../../api/types'
-import { iconBtnCls, selectCls } from '../../ui'
+import { useEffect, useRef, useState } from 'react'
+import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, X } from 'lucide-react'
+import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
+import { useT, type Key } from '../../i18n.tsx'
+import { scanWordingKey } from '../../lib/scan'
+import { iconBtnCls, inputCls } from '../../ui'
 
-const PREPROCESS_FLAGS: [string, string][] = [
-  ['deskew', 'Deskew'],
-  ['remove_stamps', 'Remove stamps'],
-  ['sharpen', 'Sharpen'],
-  ['normalise', 'Enhance contrast'],
-  ['normalise_table_backgrounds', 'Normalise table backgrounds'],
+const PREPROCESS_FLAGS: [string, Key, Key][] = [
+  ['deskew', 'flag_deskew', 'hint_deskew'],
+  ['remove_stamps', 'flag_stamps', 'hint_stamps'],
+  ['sharpen', 'flag_sharpen', 'hint_sharpen'],
+  ['normalise', 'flag_contrast', 'hint_contrast'],
+  ['normalise_table_backgrounds', 'flag_tablebg', 'hint_tablebg'],
 ]
 // NOTE: joining tables across pages is deliberately NOT here — it is an export
 // choice, not an extraction one. Extraction always keeps per-page tables so the
 // review panel can link every row to the page image it came from.
-const OUTPUT_FLAGS: [string, string, string][] = [
-  ['repair_tables', 'Repair table structure', 'Fills ragged rows the recogniser left uneven.'],
-  ['convert_numerals', 'Convert Khmer numerals to Arabic', 'Writes ១២៣ as 123 in exports.'],
+const OUTPUT_FLAGS: [string, Key, Key][] = [
+  ['repair_tables', 'flag_repair', 'hint_repair'],
+  ['convert_numerals', 'flag_numerals', 'hint_numerals'],
 ]
 
-const PREPROCESS_HINTS: Record<string, string> = {
-  deskew: 'Straightens a scan that was fed in crooked.',
-  remove_stamps: 'Erases signature stamps that sit over the numbers.',
-  sharpen: 'Crispens soft or faxed scans.',
-  normalise: 'Evens out faded or unevenly lit pages.',
-  normalise_table_backgrounds: 'Flattens coloured table shading so text reads cleanly.',
+/** A real switch, not a checkbox: the drawer's clearest "designed" signal.
+    36×20 track, 150ms knob travel, token colors, reduced-motion covered globally. */
+function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  const { checked, onChange, label } = props
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+        checked ? 'bg-primary' : 'bg-line-strong'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-raised transition-[left] duration-100 ${
+          checked ? 'left-[18px]' : 'left-0.5'
+        }`}
+      />
+    </button>
+  )
+}
+
+function SectionTitle(props: { icon: typeof Files; label: string }) {
+  const Icon = props.icon
+  return (
+    <h3 className="mb-2.5 flex items-center gap-1.5 text-[15px] font-semibold text-ink">
+      <Icon size={13} className="text-ink-3" aria-hidden />
+      {props.label}
+    </h3>
+  )
 }
 
 /** Advanced settings (summoned tier) — most analysts never open this; defaults do the work. */
 export function SettingsDrawer(props: {
   settings: RunSettings
   onChange: (s: RunSettings) => void
+  engines: EngineInfo[]
+  engine: string
+  onEngineChange: (key: string) => void
+  /** Scan-check assessment for the active document (empty until it loads). */
+  checks?: SuggestCheck[]
+  /** Raw scan scores backing the checks — pick the phrasing tier per finding. */
+  scores?: Suggestion['scores'] | null
+  /** Auto-suggested toggle key → rationale line (badge shown while present). */
+  auto?: Record<string, string>
+  /** The user changed a toggle: its Auto badge no longer applies. */
+  onAutoOverride?: (k: string) => void
+  /** Telemetry-bar jump target: scroll to + pulse this flag's row (n re-triggers). */
+  highlight?: { k: string; n: number } | null
   pageCount: number
   onClose: () => void
 }) {
-  const { settings, onChange, pageCount, onClose } = props
+  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, onClose } = props
+  const { t } = useT()
+  const rowRefs = useRef(new Map<string, HTMLDivElement>())
+  const [pulsing, setPulsing] = useState<string | null>(null)
+  useEffect(() => {
+    if (!highlight) return
+    const el = rowRefs.current.get(highlight.k)
+    if (!el) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+    setPulsing(highlight.k)
+    const id = setTimeout(() => setPulsing(null), 1600)
+    return () => clearTimeout(id)
+  }, [highlight])
   const set = (k: string, v: unknown) => onChange({ ...settings, [k]: v })
   const bool = (k: string) => Boolean(settings[k])
   const scope = String(settings.page_scope ?? 'all')
 
   return (
-    <div className="flex w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-        <span className="text-sm font-semibold text-slate-800">Extraction settings</span>
-        <button className={iconBtnCls} onClick={onClose} aria-label="Close settings">
+    <div className="flex h-full min-h-0 w-96 shrink-0 flex-col max-[1279px]:w-80">
+      <div className="flex h-10 shrink-0 items-center justify-between whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3">
+        <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
+          <span className="text-sm font-semibold text-ink">{t('extraction_settings')}</span>
+          <span className="truncate text-xs text-ink-2">{t('settings_subtitle')}</span>
+        </span>
+        <button className={iconBtnCls} onClick={onClose} aria-label={t('close_settings')}>
           <X size={14} aria-hidden />
         </button>
       </div>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 text-sm">
-        <label className="flex items-center justify-between">
-          <span>Scan quality (DPI)</span>
-          <select className={selectCls}
-                  value={Number(settings.dpi ?? 200)} onChange={(e) => set('dpi', Number(e.target.value))}>
-            {[150, 200, 300].map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </label>
+      {/* Solid, continuous scroll surface: every section carries its own explicit
+          spacing block (no parent-selector magic), last one pads the bottom radius. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface px-4 pb-8 pt-5 text-sm">
+        {/* The engine is a run-setup decision, not an every-minute control. */}
+        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
+          <SectionTitle icon={Sparkles} label={t('engine_section')} />
+          {/* Selection deck: each engine is a bounded option card; the chosen one
+              carries the ring + tint, unchosen cards stay quiet. */}
+          <div className="space-y-1.5" role="radiogroup" aria-label={t('engine_section')}>
+            {engines.map((e2) => {
+              const selected = e2.key === engine
+              return (
+                <button
+                  key={e2.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onEngineChange(e2.key)}
+                  className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
+                    selected
+                      ? 'border-primary/60 bg-primary-soft shadow-raised'
+                      : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
+                  }`}
+                >
+                  <span
+                    aria-hidden
+                    className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
+                      selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+                    }`}
+                  />
+                  <span className="min-w-0">
+                    <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
+                      {e2.label}
+                    </span>
+                    {e2.guidance && <span className="mt-0.5 block text-xs leading-4 text-ink-2">{e2.guidance}</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
 
-        <fieldset>
-          <legend className="mb-1 font-medium text-slate-600">Pages</legend>
+        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
+          <SectionTitle icon={Files} label={t('pages')} />
+          {/* Stacked rows with block labels — no jagged side-by-side alignment. */}
+          <div className="mb-3">
+            <span className="mb-1 block text-xs font-medium text-ink-2">{t('dpi')}</span>
+            {/* Segmented control, same pattern as the viewer's Cleaned⇄Original. */}
+            <span className="inline-flex overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('dpi')}>
+              {[150, 200, 300].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  aria-pressed={Number(settings.dpi ?? 200) === d}
+                  className={`h-6 px-2.5 text-xs font-medium transition-colors duration-75 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                    Number(settings.dpi ?? 200) === d
+                      ? 'bg-primary-soft text-primary-strong'
+                      : 'bg-surface text-ink-2 hover:bg-rail'
+                  }`}
+                  onClick={() => set('dpi', d)}
+                >
+                  {d}
+                </button>
+              ))}
+            </span>
+          </div>
+          <span className="mb-1 block text-xs font-medium text-ink-2">{t('pages')}</span>
           <div className="flex items-center gap-2">
-            <select className={selectCls}
+            <select className={`${inputCls} min-w-0 flex-1 pr-6`}
                     value={scope} onChange={(e) => set('page_scope', e.target.value)}>
-              <option value="all">All pages</option>
-              <option value="single">Single page</option>
-              <option value="range">Page range</option>
+              <option value="all">{t('all_pages')}</option>
+              <option value="single">{t('single_page')}</option>
+              <option value="range">{t('page_range')}</option>
+              {/* Appears only while the grid overview drives a disjoint selection;
+                  choosing any other option exits list mode normally. */}
+              {scope === 'list' && (
+                <option value="list">
+                  {t('scope_list_option', { n: ((settings.page_list as number[] | undefined) ?? []).length })}
+                </option>
+              )}
             </select>
             {scope === 'single' && (
-              <input type="number" min={1} max={Math.max(1, pageCount)} className="w-16 rounded border border-slate-300 px-1 py-0.5"
+              <input type="number" min={1} max={Math.max(1, pageCount)} className={`${inputCls} w-16 px-1`}
                      value={Number(settings.page_num ?? 1)} onChange={(e) => set('page_num', Number(e.target.value))} />
             )}
             {scope === 'range' && (
               <>
-                <input type="number" min={1} className="w-14 rounded border border-slate-300 px-1 py-0.5"
-                       aria-label="First page"
+                <input type="number" min={1} className={`${inputCls} w-14 px-1`}
+                       aria-label={t('first_page')}
                        value={Number(settings.page_start ?? 1)} onChange={(e) => set('page_start', Number(e.target.value))} />
                 <span>–</span>
-                <input type="number" min={1} className="w-14 rounded border border-slate-300 px-1 py-0.5"
-                       aria-label="Last page"
+                <input type="number" min={1} className={`${inputCls} w-14 px-1`}
+                       aria-label={t('last_page')}
                        value={Number(settings.page_end ?? 5)} onChange={(e) => set('page_end', Number(e.target.value))} />
               </>
             )}
           </div>
           {scope === 'range' && Number(settings.page_end ?? 5) < Number(settings.page_start ?? 1) && (
-            <p className="mt-1 text-xs font-medium text-red-700">The last page is before the first — fix the range before running.</p>
+            <p className="mt-1 text-xs font-medium text-danger-ink">{t('range_error')}</p>
           )}
           {scope === 'single' && pageCount > 0 && Number(settings.page_num ?? 1) > pageCount && (
-            <p className="mt-1 text-xs font-medium text-red-700">This document has only {pageCount} page{pageCount === 1 ? '' : 's'}.</p>
+            <p className="mt-1 text-xs font-medium text-danger-ink">{t('single_error', { n: pageCount })}</p>
           )}
-        </fieldset>
+        </section>
 
-        {/* Help lives where the decision is: one plain line under each control,
-            so a colleague inheriting this never has to guess or hover. */}
-        <fieldset>
-          <legend className="mb-1 font-medium text-slate-600">Page cleanup</legend>
-          {PREPROCESS_FLAGS.map(([k, label]) => (
-            <label key={k} className="flex gap-2 py-1">
-              <input type="checkbox" className="mt-0.5" checked={bool(k)} onChange={(e) => set(k, e.target.checked)} />
-              <span>
-                {label}
-                <span className="block text-xs text-slate-500">{PREPROCESS_HINTS[k]}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
+          <SectionTitle icon={Eraser} label={t('page_cleanup')} />
+          {/* What the scan check found — the permanent record of "what was done". */}
+          {checks.length > 0 && (
+            <div className="mb-1.5 rounded-md border border-line-strong/30 bg-rail/20 p-2">
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink">
+                <ScanSearch size={12} className="text-primary" aria-hidden />
+                {t('scan_check_title')}
+              </p>
+              {/* Items in the SAME order as the switches below, so each finding sits
+                  directly above the toggle it explains. */}
+              <ul className="space-y-0.5">
+                {[...checks]
+                  .sort((a, b) =>
+                    PREPROCESS_FLAGS.findIndex(([k]) => k === a.field) -
+                    PREPROCESS_FLAGS.findIndex(([k]) => k === b.field))
+                  .map((c) => (
+                  <li key={c.field} className="flex items-start gap-1.5 text-xs text-ink-2" title={c.detail}>
+                    {c.active ? (
+                      <Check size={12} className="mt-0.5 shrink-0 text-ok" aria-hidden />
+                    ) : (
+                      /* Neutral finding: a quiet dot, same optical slot as the check. */
+                      <span className="mx-[3px] mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-3/50" aria-hidden />
+                    )}
+                    <span className="min-w-0">{scores ? t(scanWordingKey(c, scores)) : c.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            {PREPROCESS_FLAGS.map(([k, labelKey, hintKey]) => (
+              <div
+                key={k}
+                ref={(el) => { if (el) rowRefs.current.set(k, el); else rowRefs.current.delete(k) }}
+                className={`flex items-start justify-between gap-3 rounded-md border p-2 transition-[box-shadow,border-color] duration-150 ${
+                  pulsing === k ? 'border-primary ring-2 ring-primary/40' : 'border-line-strong/30'
+                } bg-rail/20`}
+              >
+                <span className="min-w-0">
+                  <span className="text-sm font-semibold text-ink">
+                    {t(labelKey)}
+                    {/* Dynamic auto readout: the scan check either acted on this
+                        toggle (emerald) or measured it and left it alone (slate). */}
+                    {checks.length > 0 && (
+                      <span
+                        className={`ml-1.5 rounded px-1.5 py-0.5 text-2xs font-semibold ${
+                          k in auto ? 'bg-ok-soft text-ok-ink' : 'bg-rail text-ink-2'
+                        }`}
+                      >
+                        {t(k in auto ? 'auto_applied' : 'auto_not_applied')}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
+                </span>
+                <Switch
+                  checked={bool(k)}
+                  onChange={(v) => {
+                    set(k, v)
+                    onAutoOverride?.(k)
+                  }}
+                  label={t(labelKey)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <fieldset>
-          <legend className="mb-1 font-medium text-slate-600">Output</legend>
-          {OUTPUT_FLAGS.map(([k, label, hint]) => (
-            <label key={k} className="flex gap-2 py-1">
-              <input type="checkbox" className="mt-0.5" checked={bool(k)} onChange={(e) => set(k, e.target.checked)} />
-              <span>
-                {label}
-                <span className="block text-xs text-slate-500">{hint}</span>
-              </span>
-            </label>
-          ))}
-          <p className="mt-1 text-xs text-slate-500">
-            Joining tables that continue across pages is chosen when you export, not here — so review always
-            stays linked to the page each row came from.
-          </p>
-        </fieldset>
-
-        <fieldset>
-          <legend className="mb-1 font-medium text-slate-600">AI text correction</legend>
-          <label className="flex items-center gap-2 py-0.5">
-            <input type="checkbox" checked={bool('enable_qwen')} onChange={(e) => set('enable_qwen', e.target.checked)} />
-            Enable (slower; uses the local correction model)
-          </label>
+        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
+          <SectionTitle icon={ScanSearch} label={t('ai_correction')} />
+          <div className="flex items-start justify-between gap-3 rounded-md border border-line-strong/30 bg-rail/20 p-2">
+            <span className="min-w-0 text-sm font-semibold text-ink">{t('ai_enable')}</span>
+            <Switch checked={bool('enable_qwen')} onChange={(v) => set('enable_qwen', v)} label={t('ai_correction')} />
+          </div>
           {bool('enable_qwen') && (
-            <label className="flex items-center justify-between py-0.5">
-              <span>Anomaly threshold</span>
-              <input type="number" step={0.05} min={0} max={1} className="w-20 rounded border border-slate-300 px-1 py-0.5"
+            <label className="mt-2 flex items-center justify-between">
+              <span className="text-ink-2">{t('anomaly')}</span>
+              <input type="number" step={0.05} min={0} max={1} className={`${inputCls} w-20 px-1`}
                      value={Number(settings.anomaly_threshold ?? 0.15)}
                      onChange={(e) => set('anomaly_threshold', Number(e.target.value))} />
             </label>
           )}
-        </fieldset>
+        </section>
 
-        <p className="text-xs text-slate-500">
-          Changes apply to the next run. If results were made with different settings, a
-          “settings changed” notice appears until you re-run.
-        </p>
+        {/* Export settings close the drawer: the last decisions before files leave. */}
+        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
+          <SectionTitle icon={FileOutput} label={t('output')} />
+          <div className="space-y-1.5">
+            {OUTPUT_FLAGS.map(([k, labelKey, hintKey]) => (
+              <div key={k} className="flex items-start justify-between gap-3 rounded-md border border-line-strong/30 bg-rail/20 p-2">
+                <span className="min-w-0">
+                  <span className="text-sm font-semibold text-ink">{t(labelKey)}</span>
+                  <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
+                </span>
+                <Switch checked={bool(k)} onChange={(v) => set(k, v)} label={t(labelKey)} />
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-ink-2">{t('join_note')}</p>
+        </section>
       </div>
     </div>
   )

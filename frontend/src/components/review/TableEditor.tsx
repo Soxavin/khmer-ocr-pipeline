@@ -12,15 +12,27 @@ import { Check, Diff, Download, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
-import { btnSmCls } from '../../ui'
+import { useT } from '../../i18n.tsx'
+import { btnSmCls, menuCls, menuItemCls } from '../../ui'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
+// AG Grid tuned to the workspace tokens: rail-toned headers, hairline borders,
+// primary selection — so the grid reads as part of the app, not a widget.
+// CSS-variable references so the grid follows the token theme (incl. dark mode).
 const theme = themeQuartz.withParams({
-  accentColor: '#1565c0',
+  accentColor: 'var(--color-primary)',
+  backgroundColor: 'var(--color-surface)',
+  foregroundColor: 'var(--color-ink)',
   headerFontSize: 12,
+  headerFontFamily: "'Inter Variable', system-ui, sans-serif",
+  headerBackgroundColor: 'var(--color-rail)',
+  headerTextColor: 'var(--color-ink-2)',
+  borderColor: 'var(--color-line)',
+  rowHoverColor: 'color-mix(in oklab, var(--color-primary) 5%, transparent)',
+  selectedRowBackgroundColor: 'var(--color-primary-soft)',
   cellHorizontalPadding: 8,
-  wrapperBorderRadius: 6,
+  wrapperBorderRadius: 8,
 })
 
 // Calibrated per-cell buckets (model_config.py §2.33) — same palette as P1.
@@ -49,6 +61,7 @@ export function TableEditor(props: {
 }) {
   const { docId, table, focused, onFocus, flash, focusCell } = props
   const qc = useQueryClient()
+  const { t } = useT()
   const gridApi = useRef<GridApi | null>(null)
   const [verified, setVerified] = useState(table.verified)
   const [grid, setGrid] = useState<string[][]>(table.grid)
@@ -58,6 +71,8 @@ export function TableEditor(props: {
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [menu, setMenu] = useState<Menu | null>(null)
   const [edited, setEdited] = useState(table.edited)
+  // Marking a table verified is the payoff of the review loop — one earned pulse.
+  const [justVerified, setJustVerified] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   // New server data (page change, re-run) replaces local state.
@@ -72,9 +87,15 @@ export function TableEditor(props: {
   // Triage jump: scroll the exact cell into view and focus it.
   useEffect(() => {
     if (focusCell && focusCell.n > 0 && gridApi.current) {
-      gridApi.current.ensureIndexVisible(focusCell.row, 'middle')
-      gridApi.current.ensureColumnVisible(`c${focusCell.col}`)
-      gridApi.current.setFocusedCell(focusCell.row, `c${focusCell.col}`)
+      const go = () => {
+        gridApi.current?.ensureIndexVisible(focusCell.row, 'middle')
+        gridApi.current?.ensureColumnVisible(`c${focusCell.col}`)
+        gridApi.current?.setFocusedCell(focusCell.row, `c${focusCell.col}`)
+      }
+      go()
+      // autoHeight rows settle a frame later; re-center so wrap growth can't
+      // shift the just-focused cell out of view.
+      requestAnimationFrame(() => setTimeout(go, 50))
     }
   }, [focusCell])
 
@@ -163,6 +184,10 @@ export function TableEditor(props: {
         editable: true,
         minWidth: 60,
         flex: 1,
+        // Long Khmer values wrap and the row grows — nothing hides behind a
+        // truncation; reading never requires clicking into the cell.
+        wrapText: true,
+        autoHeight: true,
         cellClassRules: {
           'cell-diff': (p) => {
             if (!diffOn) return false
@@ -192,7 +217,11 @@ export function TableEditor(props: {
   return (
     <section
       ref={wrapRef}
-      className={`rounded-md ${focused ? 'ring-1 ring-primary/40' : ''}`}
+      // Depth + border encode focus: the table under review lifts and sharpens,
+      // the rest sit flat — hierarchy through commitment, not decoration.
+      className={`rounded-lg border bg-surface p-2 transition-[border-color,box-shadow] duration-150 ${
+        focused ? 'border-primary/50 shadow-overlay' : 'border-line'
+      }`}
       onFocusCapture={onFocus}
       onClickCapture={onFocus}
       onKeyDown={(e) => {
@@ -203,20 +232,24 @@ export function TableEditor(props: {
         }
       }}
     >
-      <div className="mb-1 flex min-h-7 items-center gap-2 text-xs">
-        <span className="min-w-0 max-w-56 truncate font-semibold text-slate-700" title={table.table_id}>
+      <div className="mb-1.5 flex min-h-7 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs">
+        <span
+          className={`min-w-0 max-w-56 truncate font-semibold ${focused ? 'text-primary-strong' : 'text-ink-2'}`}
+          title={table.table_id}
+        >
           {table.table_id}
         </span>
         <button
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
+          className={`inline-flex h-6 items-center gap-1 rounded-full px-2 font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
             verified
-              ? 'bg-green-100 text-green-800'
-              : 'border border-slate-300 text-slate-600 hover:bg-slate-50'
+              ? 'bg-ok-soft text-ok-ink'
+              : 'border border-line-strong text-ink-2 hover:bg-rail hover:text-ink'
           }`}
-          title={verified ? 'Marked verified — click to unmark' : 'Mark this table as reviewed'}
+          title={verified ? t('verify_tip_on') : t('verify_tip_off')}
           onClick={() => {
             const next = !verified
             setVerified(next)
+            if (next) setJustVerified(true)
             setSaveState('saved')
             api.review(docId, table.table_id, next).then(() => {
               qc.invalidateQueries({ queryKey: ['documents'] })
@@ -228,44 +261,50 @@ export function TableEditor(props: {
             })
           }}
         >
-          <Check size={12} aria-hidden />
-          {verified ? 'Verified' : 'Verify'}
+          <span
+            className={justVerified ? 'verify-pop inline-flex' : 'inline-flex'}
+            onAnimationEnd={() => setJustVerified(false)}
+          >
+            <Check size={12} aria-hidden />
+          </span>
+          {verified ? t('verified') : t('verify')}
         </button>
-        {edited && <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-800">Edited</span>}
-        {saveState === 'saving' && <span className="text-slate-500">saving…</span>}
+        {edited && <span className="rounded-full bg-primary-soft px-2 py-0.5 font-medium text-primary-strong">{t('edited')}</span>}
+        {/* Fixed-width slot so the toolbar doesn't jump as save state flickers. */}
+        {saveState === 'saving' && <span className="w-14 text-ink-3">{t('saving')}</span>}
         {saveState === 'error' && (
-          <span className="font-medium text-red-700">Not saved to the server — try that again</span>
+          <span className="font-medium text-danger-ink">{t('not_saved')}</span>
         )}
         {/* Contextual toolbar: only on the focused table (residency: contextual tier). */}
         {focused && (
-          <span className="ml-auto flex items-center gap-1">
+          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2">
             <button className={btnSmCls} onClick={undoEdit} disabled={!history.length}
-                    aria-label="Undo" title="Undo (Cmd-Z)">
+                    aria-label={t('undo')} title={t('undo_tip')}>
               <Undo2 size={13} aria-hidden />
             </button>
             <button className={btnSmCls} onClick={redoEdit} disabled={!redo.length}
-                    aria-label="Redo" title="Redo (Shift-Cmd-Z)">
+                    aria-label={t('redo')} title={t('redo_tip')}>
               <Redo2 size={13} aria-hidden />
             </button>
             <button className={`${btnSmCls} ${diffOn ? 'border-primary text-primary' : ''}`}
                     onClick={() => setDiffOn((d) => !d)} disabled={!edited}
-                    title="Highlight cells that differ from the OCR result">
+                    title={t('diff_tip')}>
               <Diff size={13} aria-hidden />
-              Diff
+              {t('diff')}
             </button>
-            <button className={btnSmCls} onClick={() => insertRow(grid.length)} title="Add a row at the end">
+            <button className={btnSmCls} onClick={() => insertRow(grid.length)} title={t('row_tip')}>
               <ListPlus size={13} aria-hidden />
-              Row
+              {t('row')}
             </button>
             <a className={btnSmCls} href={api.exportCsvUrl(docId, table.table_id)} download
-               title="Download just this table as CSV">
+               title={t('csv_tip')}>
               <Download size={13} aria-hidden />
               CSV
             </a>
             <button className={btnSmCls} onClick={reset} disabled={!edited}
-                    title="Discard all edits to this table">
+                    title={t('reset_tip')}>
               <RotateCcw size={13} aria-hidden />
-              Reset
+              {t('reset')}
             </button>
           </span>
         )}
@@ -278,7 +317,6 @@ export function TableEditor(props: {
           rowData={rows}
           getRowId={(p) => String((p.data as Row).__r)}
           domLayout="autoHeight"
-          rowHeight={38}
           headerHeight={26}
           stopEditingWhenCellsLoseFocus
           onGridReady={(e) => (gridApi.current = e.api)}
@@ -298,15 +336,14 @@ export function TableEditor(props: {
       {menu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }} />
-          <div className="fixed z-50 w-44 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
-               style={{ left: menu.x, top: menu.y }}>
-            <button className="block w-full px-3 py-1 text-left hover:bg-slate-50"
-                    onClick={() => { insertRow(menu.rowIndex); setMenu(null) }}>Insert row above</button>
-            <button className="block w-full px-3 py-1 text-left hover:bg-slate-50"
-                    onClick={() => { insertRow(menu.rowIndex + 1); setMenu(null) }}>Insert row below</button>
-            <button className="block w-full px-3 py-1 text-left text-red-600 hover:bg-red-50 disabled:opacity-40"
+          <div className={`${menuCls} fixed z-50 w-44`} style={{ left: menu.x, top: menu.y }}>
+            <button className={menuItemCls}
+                    onClick={() => { insertRow(menu.rowIndex); setMenu(null) }}>{t('insert_above')}</button>
+            <button className={menuItemCls}
+                    onClick={() => { insertRow(menu.rowIndex + 1); setMenu(null) }}>{t('insert_below')}</button>
+            <button className={`${menuItemCls} text-danger-ink hover:bg-danger-soft hover:text-danger-ink disabled:opacity-40`}
                     disabled={grid.length <= 1}
-                    onClick={() => { deleteRow(menu.rowIndex); setMenu(null) }}>Delete row</button>
+                    onClick={() => { deleteRow(menu.rowIndex); setMenu(null) }}>{t('delete_row')}</button>
           </div>
         </>
       )}
