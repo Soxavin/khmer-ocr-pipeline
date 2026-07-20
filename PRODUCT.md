@@ -22,22 +22,31 @@ The only tool that turns Khmer financial documents into verified, analyst-approv
 
 ## Brand Personality
 
-Calm, official, trustworthy. A quiet government-grade instrument: precision over flair, credibility over decoration. The data is the interface; chrome stays out of the way. Color is reserved for meaning (confidence, status), never for mood.
+A high-agency command deck: crisp, fluid, and laser-focused. Precision is our aesthetic. We build for professional speed and tactical focus, blending government-grade reliability with the ultra-responsive, spatial layout of modern developer tools (like Linear or Raycast). The interface feels like a finely tuned instrument—satisfying to use, deeply structured, and visually engaging.
 
 ## Anti-references
 
-- Flashy SaaS dashboards: gradient heroes, big metric cards, marketing chrome inside a work tool.
-- Dense legacy government portals: cramped tables, tiny type, 2005-era institutional web.
-- Playful consumer apps: rounded-everything, emoji-heavy, mascot energy.
+- **Bloated marketing dashboards:** Heavy gradients, useless hero illustrations, and empty card grids that waste screen real estate.
+- **Sterile legacy portals:** Cramped, flat tables, tiny unreadable type, and un-nested layout sheets that feel static and rigid.
+- **Playful consumer apps:** Rounded-everything, emoji-heavy, mascot energy.
 
 ## Design Principles
 
 1. **Trust is the product.** Every visual signal (confidence tints, diff view, verify marks) must be honest and calibrated — never decorate, never reassure falsely.
-2. **One obvious next step.** A single morphing primary action (Upload → Run → Export); everything else is contextual or summoned. The analyst never scans a toolbar wondering what to do.
+2. **Dynamic Workspace Layout.** The analyst is in a multi-step flow (Upload → Run → Export). The UI should actively adapt to these states—collapsing sidebars, pulling up resizable side-by-side comparison split views, and shifting panels smoothly to maximize the data density currently in focus.
 3. **Khmer text is first-class.** Stacked subscripts and diacritics render with room to breathe (dedicated face, generous line-height, adjustable size) — legibility is non-negotiable.
-4. **The page image is the ground truth.** Review always links back to the source region; the tool invites verification rather than asking for faith.
-5. **Calm density.** Data-rich but quiet: neutral chrome, meaning-only color, no motion or ornament that doesn't serve the review loop.
+4. **Interactive Ground Truth.** Review always links back to the source region on the page. Hover, click, and keyboard focus states must feel immediate, tactile, and highly responsive.
+5. **Polished Command Density.** High-density layout using spatial depth (subtle dark/light layer borders, modern translucent panel blurs, clean keyboard shortcut tags) to organize complex data without visual noise.
 
 ## Accessibility & Inclusion
 
 Solid basics as the working bar: body text ≥4.5:1 contrast, full keyboard operability (shortcuts are accelerators, never the only path), `prefers-reduced-motion` respected on all animation. No formal WCAG audit targeted.
+
+---
+
+## AI Implementation Mandate (Crucial)
+
+When Claude (or any AI engine) is generating UI components or modifying layouts for this workspace, you are explicitly authorized and expected to:
+1. **Take structural risks:** If a view is crowded, do not just shrink the padding. Propose layout shifts (e.g., converting static headers into collapsible command bars, nesting secondary tools inside contextual fly-out drawers, or implementing adjustable split-panes).
+2. **Utilize depth and polish:** Use subtle borders, layered container shadows, and keyboard command styling to make the interface feel like a premium, modern web instrument.
+3. **Design for motion:** Use snappy, hardware-accelerated micro-transitions (scale-downs on click, smooth drawer slide-ins, container height animations) to make the workspace feel alive and responsive.

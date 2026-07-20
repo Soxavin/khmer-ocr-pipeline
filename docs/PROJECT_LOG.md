@@ -1488,6 +1488,508 @@ cut list) in `~/.claude/plans/can-you-help-me-proud-quasar.md`; built P0→P5 wi
 - Deferred to backlog: dark mode (a half-themed UI reads worse than a consistent light one),
   paste-from-Excel, numeric sanity checks, EN/KH label toggle, disk-persisted sessions.
 
+### 2.56 Track A — layout detector: GO on stock Apache-2.0 PP-DocLayout, no training (2026-07-19)
+
+**The directive, reshaped by two constraints.** The mentor asked for a layout detector fine-tuned on
+our documents. Two things changed the shape:
+
+1. **Licence.** DocLayout-YOLO (the obvious pick, and what `experiments/layout_yolo/` was built for) is
+   an Ultralytics derivative; its exports carry **AGPL-3.0**, whose §13 network clause reaches software
+   served over a web UI — which is exactly this deliverable, for a government department. Every other
+   dependency we ship is Apache/MIT/BSD, so it would have been the only copyleft component in the tree.
+   Switched the default layout model to **`pp_doc_layoutv2`** (PaddlePaddle lineage, **Apache-2.0**),
+   already bundled with `rapid_layout` and working off the shelf. `doclayout_docstructbench` stays
+   reachable via `KHMER_LAYOUT_MODEL` for measurement only — never shipped. This also removed latent
+   AGPL exposure the `hybrid` engine already carried.
+2. **No local training.** DocLayout fine-tuning (`imgsz=1024`) froze the 24GB Mac (PyTorch + MLX
+   co-resident). Training was moved to a Colab notebook — but see the result below: it wasn't needed.
+
+**A bug the gate caught in my own integration.** The first wiring hooked the detector into
+`surya.py::_process_page` and claimed "one integration point serves all three engines." False:
+`surya_kiri` runs its OWN layout pass on the geometric-only frame and never sees `run_surya`'s boxes,
+so `KHMER_LAYOUT_WEIGHTS` silently no-opped on the ARDB production engine. The gate proved it —
+`surya_kiri/layout_on` was byte-identical to `layout_off` on all 7 pages. Fixed via
+`surya_kiri_engine._table_regions()`; both hooks now gate on the existing `KHMER_LAYOUT_DETECTOR`
+convention.
+
+**Result — stock PP, zero training, `experiments/layout_yolo/gate.py`, 3 runs/config, §2.42 aligner:**
+
+The effect is *engine-dependent*, which is itself the finding:
+- **`surya`** (feeds the layout box to its table-HTML VLM): **catastrophic** — a fragmented region
+  wrecks the parse (dims `23x9`→`83x5`/`67x5`, numacc collapses). This is §2.24's failure recurring.
+- **`surya_kiri`** (only needs a good table *region*; TableRec rebuilds structure): **better on 5/6
+  ARDB pages**, mean numeric-cell-accuracy **0.977 → 0.991 (+1.4pp)**, every config stable across 3
+  runs. On 15.06 p3 PP recovered a row Surya was dropping (dims 24×9 → **25×9**, numacc → 1.000).
+
+§2.24's "off-the-shelf detectors lose" was measured on ONE consumer (Surya's VLM) and does **not**
+generalise: the same detector helps or destroys depending on what consumes the box.
+
+**GO — stock PP-DocLayout as a documented option for the ARDB `surya_kiri` path.** Honest scope: this
+is an *accuracy* win (+1.4pp), NOT a stability win — `surya_kiri`'s TableRec structure was already
+deterministic; the §2.37 instability was plain `surya`'s VLM layout, a different engine. Small but
+consistent, licence-clean, and free. **Fine-tuning is unnecessary for the GO** — deferred as optional
+upside (would only help this single ARDB template, on top of an already-strong stock baseline).
+Artifacts: `experiments/layout_yolo/gate_pp_stock{,_x3}.json`. Integration is model-agnostic, so the
+Colab notebook + ONNX export tooling remain valid if a PP fine-tune is ever wanted.
+
+### 2.63 Stopped state machine + telemetry chips + taxonomy + header progress line (2026-07-20)
+
+- **Native 'stopped' state (TDD, 710 tests)**: `_doc_summary` maps a cancelled
+  `run_error` to status `stopped` (neutral slate dot + localized label in the rail,
+  `DocStatus` union extended) — never failure-red for a user-requested stop. runAll now
+  includes stopped docs as re-runnable. Closed the §2.56 cancel race for real:
+  runner no longer clears `cancel_requested` at run start (reset_run's fresh progress
+  already guarantees a clean flag; the old clear swallowed cancels landing in the
+  reset→start window). Stop button debounce already present (§2.56) — verified.
+- **Telemetry relocation**: the scan-check banner ROW is gone (vertical space back to
+  the document); the read-only chips now live in the canvas strips next to
+  [Single][Grid] — pre-run preview strip, post-run PageViewer strip (new `telemetry`
+  slot prop). Same click→open-drawer→scroll+pulse behavior; labels stay the localized
+  `tele_on/off` forms (the brief's English-only 'Contrast Mapping: Optimized' style
+  would break km — declined). scanNotice state/effects and undoScanCheck removed.
+- **Taxonomy**: 'Page cleanup' → 'Preprocessing' (km ការរៀបចំមុនដំណើរការ); 'Output' →
+  'Export settings' (km ការកំណត់នាំចេញ) and the section moved LAST (after AI
+  correction) as the closing export block; section rhythm unchanged
+  (`mt-5 border-t border-line-strong/30 pt-5`), titles `mb-2.5`.
+- **Header progress line**: ETA strings + the 56px mini progressbar removed from
+  RunControls (stage label + page x/y remain, aria-live kept); new 2px primary line on
+  the header's bottom edge driven by `useSmoothProgress` — stage-milestone ranges
+  (ingest 2–10, preprocess 10–30, OCR 30–80 riding the real page fraction, tidy 80–95,
+  export 95–99), value approaches each ceiling asymptotically (250ms tick + 500ms width
+  transition, monotonic, `motion-reduce:transition-none`), completes to 100 and clears
+  on finish.
+
+Server restarted (registry cleared). 710 pytest, tsc/build/detector clean; bundle
+`index-CVYaiZaA.js`.
+
+### 2.62 Hybrid canvas: single ⇄ grid overview + visual page-range selection (2026-07-20)
+
+The §2.61 preview completed into a full "pick pages by looking" workflow.
+
+- **Backend (TDD, 708 tests)**: `Settings` gained `page_scope: 'list'` + `page_list`
+  (1-based) — disjoint grid selections were unrepresentable before. `page_indices`
+  sorts/dedupes/clamps to 0-based (all-clamped-away or empty → defensively all pages);
+  `settings_key` gets a `list_…` part so a changed selection correctly stales results.
+- **State sync (the design's core)**: NO parallel selection state — the grid's checked
+  set is DERIVED from `runSettings` (`pagesFromSettings`) and toggles encode BACK to
+  the minimal scope (`encodePages`: full→all, one→single, contiguous→range via strict
+  numeric sort + `max−min+1===size`, else→list). Drawer reflects instantly; its scope
+  select shows "Selected pages ({n})" while list mode drives. Unchecking the last page
+  is a no-op (zero-page runs are meaningless).
+- **UI**: new `PageGrid.tsx` — responsive 2/3-col thumbnail grid (lazy PNGs), page
+  chips, hover ring, primary border when selected; corner checkbox on a blurred chip is
+  its own tab stop (`onChange` + propagation stops — Space toggles, never opens);
+  card click view-transitions back to single view on that page. `ViewToggle` segmented
+  control ([Single][Grid]) in both the pre-run preview strip and PageViewer's strip
+  (new optional `view`/`onViewChange` props — renamed on destructure; the pan/zoom
+  state already owned `view`). Post-run grid deliberately uses RAW previews: after a
+  ranged run processed images exist only for extracted pages, so raw is the only honest
+  full-document overview. 5 i18n keys en+km.
+
+Server restarted (registry cleared). 708 pytest, tsc/build/detector clean; bundle
+`index-QUqBOG3l.js`. §2.61 polish items re-verified in code (unchanged).
+
+### 2.61 Pre-run page preview + four micro-fixes (2026-07-20)
+
+**Pre-run viewing (workflow fix)**: analysts could not see a document before running,
+so choosing a page range was blind. New backend endpoint
+`GET /api/documents/{id}/preview/{n}` (api.py) — lazily `ingest`s the upload once,
+caches on `doc.ingest_result` (a later run simply replaces it), serves PNG; 422 on
+unreadable files, 404 past the end. TDD: 2 new tests (lazy-cache single-ingest
+assertion, 422 path) → 706 total. Frontend: the "Ready — press Run" placeholder is
+gone; a selected-but-unrun doc shows a preview sheet — h-10 page-nav strip
+(‹ page x/N ›, reuses `pageIdx`), scrollable raw page image on canvas, h-10 status
+footer carrying working/stopped/failed/`preview_hint` (en+km) lines.
+
+Micro-fixes: engine radio dot `mt-[3px]` (anchors to the title line); scan-check
+inactive items' Minus glyph → quiet 1.5px dot (matches the green-check language);
+Pages section stacked with block labels (DPI + page scope full-width select — no more
+jagged two-column row); tables-header conf legend un-truncated (`shrink-0` chain +
+label "…conf — check").
+
+Server restarted (registry cleared); live smoke: uploaded 10-page sample, preview/0
+→ 200 image/png 315KB pre-run. pytest 706, tsc/build/detector clean; bundle
+`index-wd7fxt55.js`.
+
+### 2.60 SettingsDrawer: the REAL spacing culprit was <legend> (2026-07-20)
+
+Fourth report of "titles choked against the divider" — after §2.59's classes provably
+put 20px on each side of the rule. True root cause: browsers render `<legend>` inside a
+`<fieldset>` specially — the legend is pulled up ONTO the fieldset's border line,
+bypassing the fieldset's own padding-top. With `border-t` group wrappers, every section
+title rendered straddling its divider regardless of any padding we wrote; the pt-5
+landed BELOW the title instead (title far from its controls). Every prior spacing patch
+was fighting UA fieldset/legend layout, not our CSS. Fix: `<fieldset>`→`<section>`,
+`<legend>`→`<h3>` (SectionTitle), headings keep the a11y structure; `mb-3` anchor.
+Spacing classes from §2.59 unchanged — they now actually apply. Build + tsc + detector
+clean; bundle `index-C-DX83DE.js`.
+
+### 2.59 SettingsDrawer semantic grouping fix (2026-07-20)
+
+The spacing was semantically inverted: bottom-borders + big top-padding on sections put
+the divider directly ABOVE each next title (title suffocated against the line, far from
+its own controls). Restructured: scroll container owns `px-4 pt-5 pb-8`; each fieldset
+is a true group wrapper — `mt-5 border-t border-line-strong/30 pt-5` with `first:` zero
+— so the divider belongs to the gap BETWEEN groups; legends `mb-2.5` clamp titles to
+their controls. Build + tsc + detector clean; bundle `index-C0Ukc5mZ.js`.
+
+### 2.58 Single-box drawer geometry + telemetry bar (2026-07-19)
+
+Root-cause session (plan mode) for the drawer artifact that survived three padding
+patches: the drawer was TWO nested boxes — an animated `overflow-hidden` wrapper with
+no chrome, and an inner rounded/bordered/shadowed deck. The wrapper clipped the deck's
+`shadow-overlay` along the bottom (dirty gray fringe) and let canvas show through the
+corner radii. Fix: **the wrapper IS the card** — it carries rounded-xl/border/
+bg-surface/shadow only while open (`w-0` state chrome-less), decks deshelled to plain
+full-height flex columns; applied to Settings AND Issues drawers.
+
+Also: section legends stepped to `text-[15px]` (they were identical to row titles —
+the "typography still matching" report was literal); scan-check ON/OFF pills replaced
+by **read-only telemetry badges** ("Sharpen — off (auto)", `tele_on/off/tip` en+km) —
+clicking one opens the Settings drawer and scrolls to + ring-pulses that flag's row
+(`highlight {k,n}` prop, rowRefs map, reduced-motion instant, 1.6s pulse). One writable
+surface per setting again. `pill_*` keys now unused.
+
+Build + tsc + detector clean; bundle `index-DoEuwG4b.js`.
+
+### 2.57 SettingsDrawer structural correction (2026-07-19)
+
+User: padding/headers/bottom edge STILL broken. Removed the parent-selector spacing
+(`divide-y` + `[&>*]:…` utilities) in favor of explicit per-section classes — every
+`<fieldset>` now carries `border-b border-line px-4 pb-4 pt-6 last:border-b-0 last:pb-8`
+and the scroll container is a solid `bg-surface` flex column. Section headers get real
+air below each divider (pt-6), the last card can't clip the panel's bottom radius
+(pb-8), and toggle-row titles stepped up to `text-sm font-semibold text-ink` (incl. the
+AI row) over `mt-1 text-xs text-ink-2` descriptions — full-opacity ink-2 kept over the
+requested /80 (12.5px text must hold ≥4.5:1). Build + tsc + detector clean; bundle
+`index-IJnqZsfP.js`.
+
+### 2.56 Bug pass: scan-check death, cancel UX, issue-row columns (2026-07-19)
+
+Plan-mode diagnosis then approved fixes (frontend-only scope):
+
+- **Scan-check autodetect death — root cause**: `upload_id = md5(content)[:12]`
+  (api.py:124) means a re-uploaded file KEEPS its id; the session-lifetime
+  `suggestSeenRef` then silently swallowed the scan check. Fixes: ref pruned on
+  document removal; ref upgraded to `Map<id,'queued'|'run'>` so a doc seen WITH results
+  that is queued again (new upload generation) speaks again — while merely re-selecting
+  a queued doc doesn't re-notify; stale-closure badge filter now reads via
+  `runSettingsRef`; duplicate re-add (server `setdefault` dedupe) surfaces a dismissible
+  notice (`dup_doc_notice` en+km) via an upload onMutate queue snapshot.
+- **Cancel**: backend was sound (lock released in finally; page-granular OCR cancel);
+  the jam was presentation. RunControls already had Stopping…; added: cancelled runs no
+  longer render failure copy — `wasCancelled` (single string-match point) shows a
+  neutral "Extraction stopped — press r or Run" banner + center-pane message
+  (`stopped_msg` en+km). Known remaining window: stages 2/4 are single io_bound calls,
+  cancel bites at the next checkpoint (documented, backend change deferred).
+- **Rail onSelect → `selectDoc`** (was an inline duplicate that skipped the
+  `dismissedIssues` reset — §2.55 oversight).
+- **Issues rows**: absolute Dismiss badge (+ magic `pr-[4.5rem]`, km-label overflow)
+  replaced by true two-column flex — content `flex-1 min-w-0`, right column stacks
+  conf% over the hover-revealed Dismiss badge. No overlap in en or km.
+- **Settings drawer**: sections `pt-6 pb-3` + `last:pb-6` (container pb dropped);
+  legends `mb-3`; scan-check block restyled to the switch-row primitive
+  (`bg-rail/20 border-line-strong/30 rounded-md p-2`) and its items sorted into
+  PREPROCESS_FLAGS order so each finding sits above the toggle it explains.
+
+Build + tsc + detector clean; bundle `index-klmjNHyr.js` live.
+
+### 2.55 Issue-dismiss goes global + settings geometry + scan-check pills (2026-07-17)
+
+- **Dismiss is App state now**: `dismissedIssues` Set lives in App; the filtered list
+  feeds the header Issues chip, drawer count, and n/p stepping identically (chip 12→11
+  on dismiss). Drawer keeps only the 150ms exit animation; `onDismiss` dispatches up.
+  `setIssueIdx(-1)` on dismissal since indexes renumber; set resets per document.
+  Control redesigned: hover-revealed "Dismiss" badge pill (✓ + label, ok-tint hover,
+  `active:scale-95`); new `dismiss_badge` key en+km.
+- **Settings geometry/type**: deck now opaque `bg-surface` full-height (`h-full
+  min-h-0`) — kills the gray bottom edge for good (the artifact was the translucent
+  raised tint over canvas); sections breathe `pt-5 pb-2`; section legends explicit
+  `text-sm font-semibold text-ink`; switch labels `font-medium`; hints `mt-1 text-xs
+  text-ink-2` (kept full ink-2 rather than the requested /80 — contrast floor).
+- **Scan-check ribbon**: prose sentence → control strip. Title + one micro-pill per
+  suggested adjustment showing live state ("Sharpen · OFF"), click flips that flag for
+  the next run and drops its Auto badge; the existing stale-settings notice then offers
+  one-click re-run (deliberately NOT auto-rerunning full OCR per pill click). New
+  `pill_on/pill_off/pill_toggle_tip` keys en+km; `scan_off_list` now unused.
+
+Build + tsc + detector clean; bundle `index-DHwTLZQt.js` live.
+
+### 2.54 Tightened canvas + dismissible issues + settings form overhaul (2026-07-17)
+
+- **6px spatial rhythm**: workbench `p-3`→`p-1.5`; rail `mr-1.5`; split divider `w-1.5`
+  (hairline `w-0.5` centered); drawer wrappers `ml-1.5` when open — more room for the
+  page and tables.
+- **Issues are triage-interactive**: each row grows a hover ✓ dismiss button (presentation
+  state only — Sets for `leaving`/`dismissed`, 150ms `issue-out` slide keyframe matching
+  the unmount timer, reduced-motion covered); the header count reflects visible rows
+  instantly. Tooltip copy states the semantics honestly: "the cell stays flagged until
+  fixed" (new `dismiss_issue` key en+km). n/p stepping still walks the full list — a
+  dismissed row is hidden, not renumbered.
+- **Settings drawer form pass**: deck root `h-full min-h-0` + scroll area `pb-6` (kills
+  the dead gray band at the bottom); every switch row boxed in `bg-rail/20 rounded-md
+  p-2 border border-line-strong/30` at a uniform `space-y-1.5` matrix (page cleanup,
+  output, AI); engine selector rebuilt as a selection deck — option cards with radio
+  dot, selected = `border-primary/60 bg-primary-soft shadow-raised`, unselected quiet
+  `bg-rail/20`.
+
+Build + tsc + detector clean; bundle `index-BgUXTBds.js` live.
+
+### 2.53 Macro-refactor: rigid viewport shell + unified card workbench (2026-07-17)
+
+User brief: stop micro-fixing; overhaul the layout shell. Logic untouched (hooks,
+handlers, i18n, `useSplit`, grids as black boxes).
+
+- **Rigid grid**: app root `h-screen overflow-hidden bg-canvas`; `<main>` is the padded
+  workbench (`p-3 overflow-hidden`, inner wrapper removed); only the page canvas and
+  grid bodies scroll. Uniform 12px card seams built explicitly (rail `mr-3`, w-3 split
+  divider, drawer `ml-3` when open) instead of `gap-3`, which would leave a phantom gap
+  beside the width-0 animated drawer wrappers.
+- **Queue rail is now a card**: rounded/bordered/shadowed like the sheets (w-64⇄w-11
+  collapse unchanged); new structural header ("Documents" — reuses `group_documents` —
+  + count badge left, collapse right); Add-documents is a full-width body row; row hover
+  fixed for the bg-surface card.
+- **One header spec on every card** (`h-10 bg-rail/30 border-b border-line-strong/50
+  px-3 justify-between whitespace-nowrap`): viewer page-nav strip, tables utility header
+  (facts cluster `min-w-0 overflow-hidden`, legend `hidden md:flex`, A± `shrink-0` —
+  truncation before collision), Settings header (title+subtitle inline-baseline,
+  truncating), Issues header.
+- **Viewer footer**: h-10 px-3; legend reduced to three dot-chips with tooltips only.
+
+Build + tsc + detector clean; bundle `index-DshBae6u.js` live. User visual gate pending.
+
+### 2.52 Responsive polish: docked viewer footer + strict single-line toolbars (2026-07-17)
+
+Follow-up user brief. (1) The floating bottom pill became a **docked footer bar**
+(`h-9 border-t border-line-strong/60 bg-surface`) at the foot of the viewer sheet —
+moved out of the pan/zoom canvas entirely; legend compacted to tooltip swatches with
+labels only ≥xl; `overflow-x-auto whitespace-nowrap` so it can never stack. (2) Tables
+utility header restructured to the spec row (`h-9 bg-rail/30 border-line-strong/50`,
+facts left, A± pinned right with `ml-auto shrink-0`). (3) Single-line rule enforced on
+all sub-toolbars: viewer top strip and table-card toolbar switched from wrap to
+sideways-scroll (`overflow-x-auto whitespace-nowrap`, toolbar `shrink-0`), all strips
+now h-9. Build + tsc + detector clean; bundle `index-DnAJa6pA.js`.
+
+### 2.51 Polish: unified viewer pill, anchored tables header, grounded toolbars (2026-07-17)
+
+User polish brief, three fixes: (1) the viewer's floating corner legend merged INTO the
+bottom-center control pill as micro-chips after a divider (shown only while the
+confidence overlay is active, `lg:` and up) — one floating island instead of two stacked
+bars; (2) the Tables panel utility header (facts + legend + A± size controls) anchored
+with `bg-rail/40` tint + `border-b border-line-strong/40`; (3) toolbar grounding — the
+viewer top strip matches the same `border-line-strong/40` seam, both at `min-h-10`, and
+the master header's bottom border stepped up to `border-line-strong/60`. Build + tsc +
+detector clean; bundle `index-BFR-Txv1.js` live.
+
+### 2.50 Overdrive: ⌘K palette + sheet-depth workbench + choreography (2026-07-17)
+
+`/impeccable overdrive`; user approved all three directions (palette, choreography, and
+their own sheet-depth brief) and supplied new `ui.ts` panel primitives by hand
+(`panelMainCls`/`panelFloatingCls`, 150ms ease-out baseline, shadowed primary button).
+
+- **Sheet Depth Framework**: the workspace is now a canvas workbench (`p-3` ground);
+  viewer + tables are lifted `panelMainCls` sheets (rounded-xl, border, shadow,
+  overflow-hidden); the split divider became the 12px gap between sheets (hairline only
+  on hover/drag). Loading pane shares the sheet geometry.
+- **Drawers as elevated decks**: Settings/Issues drawers stay mounted inside width-animated
+  wrappers (`w-0 ⇄ w-96/w-80`, 200ms expo-out, `motion-reduce:transition-none`,
+  `aria-hidden`+`inert` when closed) so the sheets compress smoothly instead of jumping;
+  deck chrome = rounded-xl `bg-raised/95 backdrop-blur-md shadow-overlay`. Fallback noted
+  by user if flexGrow reflow janks: absolute overlay glide (not needed so far).
+- **Engine selector de-cluttered**: big bordered cards → dense quiet radio rows
+  (12px dot, `py-1.5`, selected = primary dot + `text-primary-strong`).
+- **⌘K Command Palette** (`components/CommandPalette.tsx`): fuzzy subsequence scorer
+  (no deps), grouped results (Documents/Pages/Issues/Actions) covering doc switch, page
+  jump, issue jump, run, exports (xlsx/json/zip), settings/issues drawers, theme,
+  language, engine switch, all 7 preprocess/output flag toggles; combobox/listbox ARIA,
+  ↑/↓/Enter/Esc, kbd chips; opened via ⌘K/Ctrl-K, header Search button, listed in help.
+  ~20 new i18n keys en+km (km pending native review).
+- **Choreography**: fixed `menuCls` dead `animate-in` classes (tailwindcss-animate not
+  installed) by baking `scale(0.98)` into `overlay-in`; table cards stagger in on page
+  change (`sheet-in`, 25ms steps capped at 6, remount-keyed); morphing primary action
+  crossfades its label (`label-fade`). All new classes in the reduced-motion block.
+
+Build + tsc + detector clean; bundle `index-BOzvei8g.js` live. User visual gate pending.
+
+### 2.49 Command-deck pass under rewritten PRODUCT.md (2026-07-17)
+
+The user rewrote PRODUCT.md: personality is now a "high-agency command deck"
+(Linear/Raycast), with an AI Implementation Mandate authorizing structural risks,
+depth/translucency/kbd styling, and snappy micro-motion. Re-executed the §2.48
+four-part critique at that register:
+
+- **Adjustable split-pane** (the structural risk Principle 2 asks for): viewer⇄tables
+  seam is now draggable (`useSplit` in App.tsx — ratio 0.2–0.8 in
+  `localStorage('workspaceSplit')`, default 0.6, `flexGrow` on `basis-0` sections with
+  §2.48's 320/360px floors kept). Double-click resets; divider is `role="separator"`
+  with arrow-key nudge; hairline turns primary on hover/drag.
+- **Depth & materials**: floating viewer pill → `bg-raised/80 backdrop-blur-md`
+  (purposeful glass, now PRODUCT-authorized); Settings/Issues drawers get
+  `shadow-overlay` + z-10 so they float above the workspace; header gets `shadow-raised`
+  as its own layer; light `--color-canvas` darkened (0.936→0.916 L) so the
+  canvas/surface/raised layering reads.
+- **Kbd chips**: new `kbdCls` in ui.ts (mono 2xs bordered chip); help dialog key column
+  renders real `<kbd>` chips; ⋯-menu Help row shows `?`.
+- **Micro-timings**: ui.ts hover trans 100→75ms, overlay 100→90ms, drawer 140→120ms,
+  backdrop 100→75ms, engine/DPI hovers 75ms. Ease-out curves + reduced-motion kept;
+  switch knob (100ms) and rail collapse (150ms) unchanged — layout moves, not hovers.
+- **Authoritative selection**: engine card selected border `primary/50` → full primary.
+
+Build + tsc + detector clean; bundle `index-C4MqRjNE.js` live. User visual gate pending.
+
+### 2.48 Layout hardening: drawer containment, toolbar clamp, snappier motion (2026-07-17)
+
+Screenshots with the §2.47 drawer open exposed two containment regressions: the workspace
+sections (`flex-[3]`/`flex-[2] min-w-0`) had no width floor, so the drawer squeezed the
+tables panel into visual collapse; and the table card's no-wrap header row let the focused
+toolbar overflow, clipping Reset off-screen. Fixes:
+
+- **Containment**: viewer `min-w-[320px]`, tables panel `min-w-[360px]`, `<main>`
+  `overflow-x-auto` (very narrow windows scroll instead of crushing panels); drawer keeps
+  `w-96 shrink-0` but clamps to `w-80` below 1280px. (Rejected the suggested single
+  `min-w-[500px]` — it would starve the sibling panel at 1440px with the drawer open.)
+- **Toolbar clamp**: header row + `ml-auto` toolbar get `flex-wrap` (`gap-y-1`,
+  `justify-end`) so Reset wraps to a second line instead of clipping.
+- **Type rebalance**: engine cards get explicit `text-sm leading-5` labels vs
+  `mt-0.5 text-xs leading-4` guidance; card `py-2.5`; same `mt-0.5` on toggle hints.
+- **Snappier motion** (durations only — ease-out curves and reduced-motion kept; declined
+  the "75ms linear everywhere" ask as off-register): overlay 150→100ms, drawer 200→140ms,
+  backdrop 150→100ms, `ui.ts` hover trans 150→100ms, switch knob 150→100ms, rail collapse
+  200→150ms. Feedback animations (verify-pop, table-flash, zoom-fly) untouched.
+- **Bolder separation**: `--color-line` darkened one step (light 0.918→0.895 L, dark
+  0.32→0.35); the three panel seams (rail|viewer|tables|drawers) upgraded to
+  `border-line-strong` so the page's architecture reads authoritatively.
+
+Build clean, detector clean, served bundle `index-CWS4Qz7N.js`. User visual gate pending.
+
+### 2.47 Scan check gets a voice + Settings drawer redesign (2026-07-17)
+
+User: auto-suggest "doesn't even pop up and doesn't pick any options"; Settings drawer "ugly and
+unpolished". Diagnosis: not a wiring bug — `PreprocessConfig` defaults are all True and the two
+heuristics could only suggest turning sharpen/normalise OFF, deltas-only, surfaced solely as tiny
+badges inside a drawer nobody opens. The feature had no voice and half a brain.
+
+- **Backend (TDD, 698 tests, +6):** `suggest_preprocess_settings` gains two positive signals reusing
+  existing helpers — `skew_deg` (shared `_skew_angle`) and `stamp_ink_ratio` (factored
+  `_stamp_ink_mask` out of `_remove_stamps`; new `_SUGGEST_STAMP_INK_RATIO = 0.002`); skew/ink use
+  the per-doc MAX (one bad page matters). New backward-compatible `checks` list assesses ALL five
+  toggles with stable reason keys (`tilted`/`straight`/`stamps_found`/…) the frontend localizes,
+  plus an English `detail` with the measured evidence. `suggested` semantics unchanged.
+- **Frontend voice:** a **scan-check notice** appears once per document in the status region
+  (primary-soft, ScanSearch icon): "Scan check — turned off Sharpen · Enhance contrast for this
+  document." with **Details** (opens Settings) and **Undo** (reverts deltas, clears badges); when
+  nothing needed changing it says so and auto-hides after 6s. The Settings button pulses once when
+  deltas apply. Localized en+km.
+- **Settings drawer redesigned** (calm register, actually designed): real animated **toggle
+  switches** (36×20, role="switch") replace every checkbox; **engine as radio cards** with guidance;
+  **DPI segmented control**; a permanent **Scan check block** atop Page cleanup listing all five
+  assessments (✓/– + localized phrase, measured detail on hover); iconed section titles, header
+  subtitle, redundant footer dropped.
+- Live-verified on the 09.06.26 bulletin: crisp PDF → sharpen+normalise off, all five checks
+  correct (`skew 0.0°`, `ink 0.00%`, `sharpness 1402/500`, `contrast 69/60`).
+- Deliberate scope cut: the broader "nothing pops off" feeling gets its own accent pass later if
+  the drawer + notice don't settle it — kept out to protect the register.
+
+---
+
+### 2.46 Critique 33/40 + auto-suggest integration review + shaped fixes (2026-07-17)
+
+Dual-agent `/impeccable critique` re-scored the workspace **33/40** (29 → 32 → 33), detector fully
+clean for the first time. Reviewed the parallel session's **auto-suggest** work (`/suggest` endpoint,
+Auto badges w/ rationale in SettingsDrawer, `validate.py` failure-mode taxonomy in `/lowconf`) —
+found it correctly wired end-to-end (692 tests, +52). Then implemented the confirmed shape briefs +
+full P1–P3 fix round (`bolder` skipped by choice — the issues were overload/legibility, not blandness):
+
+- **Issue legibility:** the cryptic Latin badges (`sum`/`khmer`/`digits`/…) became **plain localized
+  phrases** (en+km, e.g. "Row total doesn't add up") with a severity dot (danger = validator finding,
+  warn = low confidence); multiple reasons join with "·".
+- **Header de-crowding (~11 → 6 targets):** engine picker moved into the Settings drawer as a
+  "Recognition engine" section with its guidance line; language/theme/help collapsed into one ⋯
+  overflow menu. Post-results header: Notes · Issues · Re-run · primary · Settings · ⋯.
+- **Mechanical fixes:** selection rect + spotlight-adjacent colors now `var(--color-primary)` (was
+  hard-coded light blue — wrong salience in dark mode); `text-[10px]` → `text-2xs` (both IssuesDrawer
+  and the Auto badge); last non-token border removed from ui.ts; progress bar got `role="progressbar"`
+  + `aria-valuenow` and the stage line `aria-live="polite"`; floating viewer pill wraps on narrow
+  canvases; triage focus re-centers after autoHeight rows settle; **`v` shortcut verifies/unverifies
+  the focused table** (the loop's most-repeated action was mouse-only); remove-button aria-label
+  localized.
+- Snapshot `.impeccable/critique/2026-07-17T03-16-47Z__frontend-src-app-tsx.md`. Remaining known
+  gaps (accepted for now): Notes "view page" regex depends on English server warning strings; server
+  rationale/engine names stay English; text-block rects not keyboard stops.
+
+---
+
+### 2.45 UX critiques + overdrive + dark mode + Khmer UI (2026-07-16)
+
+One arc, user-driven: four UX critiques, three approved `/impeccable overdrive` directions, and the
+two big deferred items (dark mode, Khmer localization) pulled forward. A control-placement
+architecture (documented in the plan) now governs where every button lives, by the scope it acts on.
+
+- **Critique fixes:** grid cells `wrapText/autoHeight` — long Khmer values wrap, rows grow, nothing
+  truncates behind a click; queue rail collapses to a 44px strip (localStorage, still a drop target)
+  so image+tables get the width; viewer controls moved off the top strip into a floating
+  bottom-center pill on the canvas (Fit · 100% · Cleaned⇄Original segmented · overlay select ·
+  Loupe), top strip = page nav only; the bland pipeline-warnings banner became a warn-soft **Notes
+  (N)** header chip opening a styled popover ("worth a look, not necessarily wrong") with per-page
+  jumps.
+- **Overdrive (all user-approved):** *zoom-to-evidence* — triage jumps rAF-fly the camera (380ms
+  expo-out, 3× cap) to the flagged table's bbox and spotlight it (surroundings dim ~1s; per-cell
+  bboxes don't exist, so the TABLE region is the target); *magnifier loupe* — 180px lens at fixed 3×
+  natural pixels, pure CSS transform of a second img, hidden while panning; *View Transitions
+  morphs* — help dialog and export menu morph from their triggers (`view-transition-name` swaps
+  trigger↔surface so names never duplicate; Firefox/reduced-motion fall back to the overlay
+  animations).
+- **Dark mode:** JS resolves light/dark/system (header Sun/Moon/Monitor cycle, localStorage,
+  media-query listener) and stamps the RESOLVED theme on `<html data-theme>`, so `index.css` needs
+  exactly one override block. Cell tints/diff became tokens with dark-safe washes; AG Grid params
+  switched to `var(--…)` strings so the grid follows; dark primary at L 0.62 keeps white button text
+  ≥4.5:1; the scan image stays light (it's evidence) on the recessed dark canvas.
+- **Khmer UI localization:** `frontend/src/i18n.tsx` — typed en+km dictionaries (~180 keys),
+  `LangProvider`/`useT`, header EN/ខ្មែរ toggle, `[data-lang="km"]` swaps the chrome face to Noto
+  Sans Khmer with raised line-heights token-level. All 8 components + App swept; stage matching
+  stays on the server's English labels (display-only translation); engine names/pipeline warning
+  text remain server-side English (out of scope). **User lifted the "no Khmer from me" rule for UI
+  copy** (it was an OCR-GT rule — a mis-read glyph poisons evaluation; UI strings carry no such
+  risk); km translations are mine, in administrative register, **pending the user's native review**.
+- Build clean per block; impeccable detector 0 findings; live bundle serving. User visual gate next.
+
+---
+
+### 2.44 Visual redesign — the "quiet instrument" pass (2026-07-16)
+
+The user asked to improve the frontend's look (Linear/Vercel craft bar) before Khmer localization and
+dark mode. Frontend-only; no behavior, API, or layout-skeleton changes. Their calls: bundle **Inter
+Variable** for chrome (`@fontsource-variable/inter`, offline); **layered-zones** light theme.
+
+- **Diagnosis of the old look:** border-soup (every seam a `border-slate-200` line), two competing
+  blues (brand `#1565c0` vs Tailwind `#2563eb` in focus/flash/selection), raw palette one-offs
+  (`blue-100`, `green-100`, `red-50`, amber), no type system or `tabular-nums`, control metrics drift
+  (5 icon sizes, 3 paddings), Bootstrap-era status pills, 5-pill stage stepper.
+- **Token layer** (`index.css`): semantic tokens in Tailwind `@theme` — surfaces
+  (`surface`/`rail`/`canvas`/`raised` — the zones separate by background step, not borders), ink ramp
+  (`ink`/`ink-2`/`ink-3`), lines (`line`/`line-strong`), ONE blue + `primary-soft`, semantic status
+  trios (`ok/warn/danger` + `-soft`/`-ink`), shadow scale (raised/overlay/modal). **Dark mode later is
+  a variable override, zero component edits.** Body gets `tabular-nums` globally; text-xs/sm re-tuned
+  to 12.5/13.5px; thin tokenized scrollbars; shared `overlay-in` motion (150ms expo-out, reduced-motion
+  safe).
+- **ui.ts v2:** one control height (h-7, small h-6), unified radius/border/focus/transition; new
+  `dangerBtnCls`, `chipCls`, `inputCls`, `menuCls`/`menuItemCls` — zero one-off control styling
+  remains (closes the critique's consistency finding).
+- **Chrome:** 48px header with primary monogram mark + ink title; stage pills → one determinate 2px
+  progress bar + stage label + tabular `page n/m · ETA`; queue rail loses the permanent dashed
+  dropzone (whole rail is the drop target), cards flatten, status = 6px dot + neutral text, verified
+  progress = 2px micro-bar; designed empty state (page-with-table SVG sketch in the product's own
+  vocabulary + numbered 3-step sequence).
+- **Review surfaces:** unified 40px panel headers; confidence legend merged into the tables header as
+  micro swatches; viewer canvas recessed (`canvas` token) with the page floating on an overlay shadow;
+  AG Grid re-themed to the tokens (rail headers, hairline borders, primary hover/selection); table
+  cards raised with a primary ring when focused; context/export menus on `menuCls`; drawers animate in;
+  contrast sweep killed the remaining load-bearing `slate-400`.
+- Verified: `npm run build` clean; impeccable detector **0 findings** (was 2 false positives); live
+  serve checked on :8600. User visual gate pending.
+
+---
+
 ### 2.43 Stitching becomes an export choice — verification-safe by construction (2026-07-16)
 
 Shaped via `/impeccable shape`; the user's challenge ("is stitch mode really a necessity?") overturned the
@@ -1614,6 +2116,52 @@ with a taller input can (arch change to the conv stem + CTC head; pretrained wei
 Logged, not built.
 
 ---
+
+### 2.64 Grid decoupling, metric-tiered scan wordings, stale toast, toolbar cleanup (§2.64)
+
+**Problem.** (1) The post-run grid overview rendered every document page, so pages
+excluded from a ranged run showed as broken/empty frames; it also used raw previews
+and passed document page indices to a viewer that indexes results (a latent
+wrong-page bug on ranged runs). (2) Scan-check wordings were binary — "will help"
+regardless of how bad the metric actually was. (3) The stale-settings banner stole a
+full-width row. (4) The viewer footer clipped instead of wrapping when the split
+divider was dragged, the Loupe carried a text label, and pre-run telemetry chips
+lingered in post-run review strips. No frontend unit-test runner existed at all.
+
+**Decision.** TDD-first: added **vitest** (`npm run test`) and extracted the pure
+logic into `frontend/src/lib/` — `pages.ts` (moved `pagesFromSettings`/`encodePages`
+out of App.tsx, new `gridPages(mode, pageCount, lastRun)` with a
+`CanvasMode = 'pre-upload' | 'post-analysis'` type) and `scan.ts`
+(`scanWordingKey(check, scores)` with severity cut points SEVERE_TILT_DEG=2.5°,
+HEAVY_STAMP_RATIO=5%, SEVERE_CONTRAST_STD=40 vs the backend's 60 threshold).
+19 tests written red first, then green.
+
+- **Post-analysis grid**: `PageGrid` now takes an explicit `pages: number[]`;
+  post-run it renders only the processed pages, as their *processed* renditions,
+  with result-index mapping (`processedPages.indexOf(n)`) for both image URLs and
+  open-page — fixing the latent ranged-run wrong-page bug. Checkbox selection still
+  speaks document-page indices into runSettings.
+- **Scan check**: tiered phrasings ('might help' / 'will help' / 'is recommended')
+  via new i18n keys (check_tilted_minor/major, check_stamps_minor/major,
+  check_contrast_minor/major; en+km, km pending native review). The static AUTO
+  badge became a dynamic per-row readout: emerald "Auto: Applied" when the scan
+  check acted, slate "Auto: Not applied" when it measured and left the toggle alone.
+  SettingsDrawer gains a `scores` prop.
+- **Stale toast**: the stale-settings banner left the notice chain; it is now a
+  bottom-left floating toast (fixed bottom-4 left-4, max-w-[320px], bg-surface/95
+  backdrop-blur, warn-tinted border, toast-in keyframe + reduced-motion). 10 s
+  auto-dismiss restarted by further settings edits, explicit ×, inline "Re-run now"
+  link, always-mounted aria-live="polite" wrapper. Token colors kept over the
+  brief's raw amber-500 (theme consistency).
+- **Toolbars**: telemetry chips purged from post-run strips (PageViewer `telemetry`
+  prop deleted; chips remain pre-run where they configure the upcoming run); Loupe
+  is icon-only (iconBtn + aria-label + loupe_tip tooltip); footer refactored to a
+  fluid two-cluster `flex flex-wrap justify-between` rail that wraps gracefully
+  under divider drags. The brief's `min-w-[400px]` floor was dropped — it conflicts
+  with the viewer panel's established 320 px minimum.
+
+**Outcome.** vitest 19/19, pytest 710, tsc/build clean, detector 0 findings; bundle
+`index-Bx8Rx1Mf.js` live without a server restart (frontend-only change).
 
 ## 3. Results Snapshot
 
