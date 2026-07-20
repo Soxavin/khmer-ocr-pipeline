@@ -126,14 +126,23 @@ handful — see the volume caveat).
 wc -l corrections/corrections.jsonl
 
 # 3b. VISUAL GATE — never skip before training on new crops
-uv run python scripts/verify_corrections.py --out corrections
+uv run python scripts/verify_corrections.py --inspect corrections
 open corrections/contact_sheet.html
 ```
 
-The contact sheet labels each crop `prediction → correction` and groups by layout
-path. **Scan it.** An off-by-origin bbox produces plausible-looking but shifted
-crops that would silently poison the fine-tune; a systematic drift is obvious in
-seconds here and invisible in the JSONL.
+> **Use `--inspect`, not `--out`.** `--inspect` is read-only over what analysts
+> actually captured. The script's *default* mode is a plumbing DEMO that fabricates
+> edits by appending a marker to the model's own output — those records reproduce
+> the model's errors and are **not** valid training data. The demo now refuses to
+> write into a directory that already has a `corrections.jsonl`, so it cannot
+> contaminate a real corpus, but point it at a throwaway dir regardless.
+
+The contact sheet labels each crop `prediction → correction`. **Scan it, and check
+two different things:**
+1. **Geometry** — glyphs centred and complete. A systematic shift means the bbox
+   origin math is wrong; it is obvious here and invisible in the JSONL.
+2. **Label truth** — the green text really is the correct reading of the pictured
+   cell. A wrong label is worse than no label: it actively teaches the error.
 
 ```bash
 # 4. build the trainset (optionally selecting error classes)

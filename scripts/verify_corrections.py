@@ -1,8 +1,18 @@
-"""Demonstrate the HITL loop end-to-end and visually verify the captured crops.
+"""Verify HITL correction crops, and demo the capture loop.
 
-Runs surya_kiri on a real GT page, synthesizes a realistic analyst correction,
-captures it via `corrections.capture_corrections`, and emits a self-contained HTML
-contact sheet of the crops.
+Two modes, deliberately separate:
+
+  --inspect <dir>   Render a contact sheet from an EXISTING corrections store.
+                    Read-only. This is the mode the retrain runbook uses before
+                    training on accumulated corrections.
+
+  (default)         DEMO the capture plumbing on a GT page. It synthesizes fake
+                    edits by appending a marker to the model's OWN output, so the
+                    resulting "corrections" carry the model's errors verbatim and
+                    are NOT valid training data — they exist only to prove the
+                    capture path works. The demo therefore REFUSES to write into a
+                    directory that already holds a corrections.jsonl, so synthetic
+                    records can never contaminate a real training corpus.
 
 The contact sheet is a HARD GATE, not a nicety: an off-by-origin bbox produces
 plausible-looking-but-shifted crops that would silently poison a fine-tune. Each
@@ -22,7 +32,7 @@ import argparse
 import base64
 import glob
 import html
-import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -77,11 +87,53 @@ def _contact_sheet(records: list[dict], out_dir: Path, layout_path: str) -> str:
     )
 
 
+def _write_sheet(records: list[dict], out_dir: Path, layout_path: str, note: str) -> Path:
+    sheet = _contact_sheet(records, out_dir, layout_path)
+    html_path = out_dir / "contact_sheet.html"
+    html_path.write_text(
+        '<!doctype html><meta charset="utf-8"><title>HITL crop verification</title>'
+        '<body style="font-family:system-ui;background:#fafafa;margin:24px">'
+        "<h1 style='font-size:18px'>HITL captured-crop verification</h1>"
+        f"<p style='color:#555;font:13px/1.6 system-ui;max-width:60ch'>{note}</p>"
+        f"{sheet}</body>", encoding="utf-8")
+    return html_path
+
+
+def _inspect(dir_: Path) -> None:
+    """Render a contact sheet from an existing corrections store. Read-only."""
+    jsonl = dir_ / "corrections.jsonl"
+    if not jsonl.exists():
+        sys.exit(f"no corrections.jsonl in {dir_}")
+    records = [json.loads(l) for l in jsonl.read_text(encoding="utf-8").splitlines() if l.strip()]
+    print(f"{len(records)} accumulated corrections in {dir_}")
+    path = _write_sheet(
+        records, dir_, "as captured",
+        "Each tile is a real analyst correction that would become a training pair. "
+        "Confirm the glyphs are centred and complete, and that the green text is the "
+        "TRUE value for the pictured cell — a wrong label here teaches the model the error.")
+    print(f"contact sheet → {path}")
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(description="HITL loop demo + crop visual gate.")
-    ap.add_argument("--out", type=Path, default=_REPO / "corrections_demo")
+    ap = argparse.ArgumentParser(description="HITL crop verification / capture demo.")
+    ap.add_argument("--inspect", type=Path, default=None,
+                    help="render a contact sheet from an existing corrections store (read-only)")
+    ap.add_argument("--out", type=Path, default=_REPO / "corrections_demo",
+                    help="demo output dir (must NOT be a real corrections store)")
     ap.add_argument("--page", default=None, help="GT page PNG (default: an ARDB page)")
     args = ap.parse_args()
+
+    if args.inspect:
+        _inspect(args.inspect if args.inspect.is_absolute() else _REPO / args.inspect)
+        return
+
+    # Demo mode writes synthetic, deliberately-wrong labels. Never let them land in
+    # a store that build_trainset.py might later read.
+    if (args.out / "corrections.jsonl").exists():
+        sys.exit(
+            f"{args.out} already holds corrections.jsonl — refusing to append synthetic "
+            f"demo records to a real training corpus.\n"
+            f"Use:  --inspect {args.out}   to visualise what is already captured.")
 
     png = args.page or sorted(
         f for f in glob.glob(str(_REPO / "eval/datasets/real/*p2.png")) if "ecution" not in f
@@ -125,16 +177,12 @@ def main() -> None:
     if not records:
         sys.exit("no pairs captured — check bbox persistence")
 
-    sheet = _contact_sheet(records, args.out, layout_path)
-    html_path = args.out / "contact_sheet.html"
-    html_path.write_text(
-        '<!doctype html><meta charset="utf-8"><title>HITL crop verification</title>'
-        '<body style="font-family:system-ui;background:#fafafa;margin:24px">'
-        "<h1 style='font-size:18px'>HITL captured-crop verification</h1>"
-        "<p style='color:#555;font:13px/1.6 system-ui;max-width:60ch'>Each tile is the exact "
-        "crop that would become a training pair. Confirm the glyphs are centred and complete — "
-        "a systematic shift means the bbox origin math is wrong.</p>"
-        f"{sheet}</body>", encoding="utf-8")
+    html_path = _write_sheet(
+        records, args.out, layout_path,
+        "DEMO DATA — the 'corrections' here are the model's own output plus a marker, so they "
+        "reproduce its errors and are NOT valid training data. This sheet only proves the capture "
+        "path works: check that glyphs are centred and complete (a systematic shift means the "
+        "bbox origin math is wrong).")
     print(f"contact sheet → {html_path}")
 
 
