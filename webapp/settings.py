@@ -15,10 +15,12 @@ from khmer_pipeline.model_config import ANOMALY_THRESHOLD
 @dataclass
 class Settings:
     dpi: int = 200
-    page_scope: str = "all"          # "all" | "single" | "range"
+    page_scope: str = "all"          # "all" | "single" | "range" | "list"
     page_num: int = 1
     page_start: int = 1
     page_end: int = 5
+    # Disjoint page picks from the grid overview (1-based, like the fields above).
+    page_list: list[int] = field(default_factory=list)
 
     remove_stamps: bool = True
     sharpen: bool = True
@@ -54,6 +56,10 @@ class Settings:
             start = max(0, int(self.page_start) - 1)
             end = min(int(self.page_end), doc_page_count) if doc_page_count else int(self.page_end)
             return list(range(start, max(start + 1, end)))
+        if self.page_scope == "list" and self.page_list:
+            limit = doc_page_count if doc_page_count else max(self.page_list)
+            picked = sorted({int(p) - 1 for p in self.page_list if 1 <= int(p) <= limit})
+            return picked or None  # every pick clamped away → defensively all pages
         return None
 
     def settings_key(self, upload_id: str) -> str:
@@ -63,6 +69,8 @@ class Settings:
             page_part = f"page_{self.page_num}"
         elif self.page_scope == "range":
             page_part = f"range_{self.page_start}_{self.page_end}"
+        elif self.page_scope == "list" and self.page_list:
+            page_part = "list_" + "_".join(str(p) for p in sorted(set(self.page_list)))
         else:
             page_part = "all"
         return "_".join(str(x) for x in (

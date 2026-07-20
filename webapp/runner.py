@@ -16,7 +16,7 @@ from typing import Callable
 from nicegui import run
 
 from khmer_pipeline.ingest import ingest
-from khmer_pipeline.preprocess import preprocess, PreprocessConfig
+from khmer_pipeline.preprocess import preprocess, suggest_preprocess_settings, PreprocessConfig
 from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export
 from khmer_pipeline.utils.memory import clear_device_cache
@@ -41,7 +41,9 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
     times: dict[str, float] = {}
     state.run_error = None
     state.progress.active = True
-    state.progress.cancel_requested = False
+    # NOTE: cancel_requested is deliberately NOT cleared here. `reset_run` already
+    # provides a fresh progress object; clearing again would silently swallow a
+    # cancel that lands in the reset→start window (§2.56 race).
 
     def _mark(stage: str) -> None:
         state.progress.stage = stage
@@ -111,6 +113,10 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
                 "normalise": s.normalise, "deskew": s.deskew,
                 "normalise_table_backgrounds": s.normalise_table_backgrounds,
             },
+            # Raw quality scores of the pages this run actually ingested — the
+            # basis of the Auto suggestions, logged for the project report.
+            "preprocess_scores": suggest_preprocess_settings(
+                state.ingest_result.page_images)["scores"],
             "stitch_pages": s.stitch_pages,
             "convert_numerals": s.convert_numerals,
             "repair_tables": s.repair_tables,

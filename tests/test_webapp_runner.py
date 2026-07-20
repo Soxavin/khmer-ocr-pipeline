@@ -79,3 +79,28 @@ def test_uncancelled_run_reports_stage_failure_not_cancel():
     assert ok is False
     assert "failed" in (doc.run_error or "")
     assert "cancelled" not in (doc.run_error or "").lower()
+
+
+def test_provenance_includes_preprocess_scores():
+    import numpy as np
+    from types import SimpleNamespace
+
+    doc = _doc()
+    captured = {}
+
+    def fake_export(pp, provenance=None, **kw):
+        captured["provenance"] = provenance
+        return "EXPORT"
+
+    flat = np.full((50, 50, 3), 128, dtype=np.uint8)
+    ok = _run_with({
+        "ingest": lambda *a, **kw: SimpleNamespace(page_images=[flat]),
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: lambda pre, on_page=None: "OCR",
+        "ACTIVE_CORRECTION_ENGINE": lambda *a, **kw: "POST",
+        "export": fake_export,
+    }, doc)
+    assert ok is True
+    scores = captured["provenance"]["preprocess_scores"]
+    assert set(scores) == {"laplacian_var", "contrast_std", "skew_deg", "stamp_ink_ratio"}
+    assert all(isinstance(v, float) for v in scores.values())

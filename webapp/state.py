@@ -40,6 +40,11 @@ class Document:
     postprocess_result: Any = None
     export_result: Any = None
 
+    # Cached auto-preprocess suggestion (scores/suggested/rationale) — derived
+    # from the upload bytes, so it survives reset_run; computed lazily by
+    # GET /api/documents/{id}/suggest.
+    preprocess_suggestion: dict | None = None
+
     stage_times: dict[str, float] = field(default_factory=dict)
     last_key: str | None = None
     run_error: str | None = None

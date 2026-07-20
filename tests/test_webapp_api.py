@@ -91,6 +91,52 @@ def test_meta_lists_engines_and_defaults(client):
 
 
 # ---------------------------------------------------------------------------
+# Preprocess suggestions
+# ---------------------------------------------------------------------------
+
+def test_suggest_unknown_document_404s(client):
+    assert client.get("/api/documents/nope/suggest").status_code == 404
+
+
+def test_suggest_ingests_lazily_and_caches(client):
+    with patch("webapp.api._probe_pages", return_value=1):
+        doc_id = _upload(client).json()["documents"][0]["id"]
+    flat = np.full((50, 50, 3), 128, dtype=np.uint8)
+    fake_ingest = SimpleNamespace(page_images=[flat])
+    with patch("webapp.api.ingest", return_value=fake_ingest) as m:
+        r1 = client.get(f"/api/documents/{doc_id}/suggest")
+        r2 = client.get(f"/api/documents/{doc_id}/suggest")
+    assert r1.status_code == 200
+    body = r1.json()
+    assert set(body) == {"scores", "suggested", "rationale", "checks"}
+    assert set(body["scores"]) == {"laplacian_var", "contrast_std", "skew_deg", "stamp_ink_ratio"}
+    assert body["suggested"] == {}  # flat gray page: defaults stand
+    assert r2.json() == body
+    assert m.call_count == 1  # cached on the doc — no second rasterization
+
+
+def test_suggest_returns_suggestions_for_high_contrast_pages(client):
+    with patch("webapp.api._probe_pages", return_value=1):
+        doc_id = _upload(client).json()["documents"][0]["id"]
+    # Smooth 0→255 gradient: well contrasted (normalise off) but not sharp.
+    row = np.arange(256, dtype=np.uint8).reshape(1, 256)
+    img = np.stack([np.tile(row, (256, 1))] * 3, axis=2)
+    with patch("webapp.api.ingest", return_value=SimpleNamespace(page_images=[img])):
+        body = client.get(f"/api/documents/{doc_id}/suggest").json()
+    assert body["suggested"] == {"normalise": False}
+    assert list(body["rationale"]) == ["normalise"]
+
+
+def test_suggest_unreadable_document_yields_empty_suggestion(client):
+    with patch("webapp.api._probe_pages", return_value=0):
+        doc_id = _upload(client).json()["documents"][0]["id"]
+    with patch("webapp.api.ingest", side_effect=ValueError("bad pdf")):
+        r = client.get(f"/api/documents/{doc_id}/suggest")
+    assert r.status_code == 200
+    assert r.json()["suggested"] == {}
+
+
+# ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
 
@@ -376,7 +422,7 @@ def test_lowconf_lists_cells_sorted_ascending(client):
     # Only the 0.4 cell is below CELL_CONF_LOW (0.80); 0.9 is fine.
     assert issues == [{
         "page": 0, "table_id": "p1_t1", "row": 0, "col": 1,
-        "conf": 0.4, "text": "B",
+        "conf": 0.4, "text": "B", "reason": "low_conf", "reasons": ["low_conf"],
     }]
 
 
@@ -389,6 +435,44 @@ def test_lowconf_skips_empty_cells(client):
     issues = client.get(f"/api/documents/{doc.upload_id}/lowconf").json()["issues"]
     assert all(i["text"].strip() for i in issues)
     assert len(issues) == 1  # only the 0.4-confidence "B" cell
+
+
+def test_lowconf_emits_validator_flags_with_reason(client):
+    doc = _completed_doc()
+    # Attach validator flags to the (high-confidence) "A" cell.
+    cells = doc.export_result.document_json["pages"][0]["tables"][0]["cells"]
+    cells[0]["flags"] = ["digit_mixed", "sequence_illegal"]
+    issues = client.get(f"/api/documents/{doc.upload_id}/lowconf").json()["issues"]
+    by_text = {i["text"]: i for i in issues}
+    # "A" is high-confidence but validator-flagged → issue with null conf.
+    a = by_text["A"]
+    assert a["conf"] == 0.9
+    assert a["reason"] == "sequence_illegal"  # higher priority than digit_mixed
+    assert set(a["reasons"]) == {"digit_mixed", "sequence_illegal"}
+    # Validator-flagged issue sorts before the low_conf-only "B" issue.
+    assert issues[0]["text"] == "A"
+    assert issues[-1]["reason"] == "low_conf"
+
+
+def test_lowconf_null_conf_for_validator_only_cell(client):
+    doc = _completed_doc()
+    cells = doc.export_result.document_json["pages"][0]["tables"][0]["cells"]
+    # A cell with no confidence key at all, only a validator flag.
+    cells.append({"row": 1, "col": 0, "text": "X", "flags": ["structure_ragged"]})
+    issues = client.get(f"/api/documents/{doc.upload_id}/lowconf").json()["issues"]
+    x = next(i for i in issues if i["text"] == "X")
+    assert x["conf"] is None
+    assert x["reason"] == "structure_ragged"
+
+
+def test_export_flags_csv_download(client):
+    doc = _completed_doc()
+    doc.export_result.flags_csv = "﻿table_id,page,row,col,text,confidence,flagged_reason\r\np1_t1,1,0,1,B,0.4,low_conf\r\n"
+    r = client.get(f"/api/documents/{doc.upload_id}/export/flags.csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "flags.csv" in r.headers["content-disposition"]
+    assert "low_conf" in r.text
 
 
 def test_replace_is_undoable(client):
@@ -549,3 +633,85 @@ def test_export_zip_with_non_latin1_filename(client):
     disp = r.headers["content-disposition"]
     assert "filename*=UTF-8''" in disp
     disp.encode("latin-1")  # must be header-safe
+
+
+def test_frontend_cache_headers(client):
+    """index.html must revalidate on every load (it names the hashed bundle);
+    the content-hashed assets are immutable and cache forever."""
+    from pathlib import Path
+
+    import webapp.api as api
+
+    dist = Path(api.__file__).resolve().parent.parent / "frontend" / "dist"
+    if not dist.is_dir():
+        pytest.skip("frontend not built")
+    api.mount_frontend()
+    r = client.get("/app/")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    asset = next(p for p in (dist / "assets").iterdir() if p.suffix == ".js")
+    r2 = client.get(f"/app/assets/{asset.name}")
+    assert r2.status_code == 200
+    assert "immutable" in r2.headers["cache-control"]
+
+
+def test_preview_image_before_run(client):
+    """A queued document's pages are viewable pre-run: /preview/{n} lazily ingests
+    once, caches on the doc, and serves PNG; bad page index 404s."""
+    with patch("webapp.api._probe_pages", return_value=1):
+        r = _upload(client, "raw.pdf", b"%PDF-raw")
+    doc_id = r.json()["documents"][0]["id"]
+    fake = SimpleNamespace(page_images=[np.zeros((8, 8, 3), dtype=np.uint8)])
+    with patch("webapp.api.ingest", return_value=fake) as ing:
+        assert client.get(f"/api/documents/{doc_id}/preview/0").headers["content-type"] == "image/png"
+        assert client.get(f"/api/documents/{doc_id}/preview/0").status_code == 200
+        ing.assert_called_once()  # cached after the first render
+    assert client.get(f"/api/documents/{doc_id}/preview/9").status_code == 404
+
+
+def test_preview_unreadable_upload_422(client):
+    with patch("webapp.api._probe_pages", return_value=1):
+        r = _upload(client, "junk.pdf", b"not a pdf at all")
+    doc_id = r.json()["documents"][0]["id"]
+    with patch("webapp.api.ingest", side_effect=ValueError("boom")):
+        assert client.get(f"/api/documents/{doc_id}/preview/0").status_code == 422
+
+
+def test_settings_list_scope():
+    """Grid page selection: 'list' scope carries disjoint 1-based pages; indices are
+    sorted, deduped, 0-based, clamped; empty list defensively means all pages."""
+    from webapp.settings import Settings
+    s = Settings(page_scope="list", page_list=[5, 2, 3, 2])
+    assert s.page_indices(10) == [1, 2, 4]
+    assert s.page_indices(3) == [1, 2]  # page 5 clamped away
+    assert Settings(page_scope="list", page_list=[]).page_indices(4) is None
+    key = Settings(page_scope="list", page_list=[5, 2, 3]).settings_key("id0")
+    assert "list_2_3_5" in key
+    # A different selection must change the key (stale-run guard).
+    assert key != Settings(page_scope="list", page_list=[2, 3]).settings_key("id0")
+
+
+def test_run_payload_accepts_list_scope():
+    from webapp.api import _settings_from
+    s = _settings_from({"page_scope": "list", "page_list": [2, 4]})
+    assert s.page_indices(9) == [1, 3]
+
+
+def test_cancelled_doc_reports_stopped_status(client):
+    """A user-cancelled run is not an error: the summary status must say 'stopped'
+    so the UI can show a neutral state instead of a red failure tag."""
+    doc = _completed_doc("stopcase00001")
+    doc.export_result = None  # no results
+    doc.run_error = "Extraction cancelled."
+    body = client.get("/api/documents").json()["documents"]
+    me = next(d for d in body if d["id"] == "stopcase00001")
+    assert me["status"] == "stopped"
+
+
+def test_failed_doc_still_reports_error_status(client):
+    doc = _completed_doc("failcase00001")
+    doc.export_result = None
+    doc.run_error = "Stage 3 — OCR failed: boom"
+    body = client.get("/api/documents").json()["documents"]
+    me = next(d for d in body if d["id"] == "failcase00001")
+    assert me["status"] == "error"

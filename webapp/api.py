@@ -22,6 +22,8 @@ from PIL import Image
 from nicegui import app
 
 from khmer_pipeline.export import grid_to_csv, tables_to_xlsx
+from khmer_pipeline.ingest import ingest
+from khmer_pipeline.preprocess import suggest_preprocess_settings
 from khmer_pipeline.model_config import CELL_CONF_LOW
 from khmer_pipeline.utils.backend_status import llama_server_running
 
@@ -80,6 +82,8 @@ def _doc_summary(doc: Document) -> dict:
         status = "running"
     elif doc.has_results:
         status = "done"
+    elif doc.run_error and "cancelled" in doc.run_error:
+        status = "stopped"  # user asked for the stop: neutral state, not a failure
     elif doc.run_error:
         status = "error"
     else:
@@ -158,6 +162,24 @@ def api_status(doc_id: str) -> dict:
         "run_error": doc.run_error,
         "last_run_settings": registry.last_run_settings(doc_id),
     }
+
+
+@app.get("/api/documents/{doc_id}/suggest")
+def api_suggest(doc_id: str) -> dict:
+    """Auto-preprocess suggestion for a document: cheap image-quality scores plus
+    suggested toggle values (advisory — the UI pre-fills, the user decides).
+    Rasterizes the upload lazily on first call (upload stores only bytes; ingest
+    normally happens at run time) and caches the result on the doc record."""
+    doc = _doc_or_404(doc_id)
+    if doc.preprocess_suggestion is None:
+        try:
+            pages = ingest(doc.upload_bytes, doc.upload_name).page_images
+        except Exception:
+            # Unreadable upload: the suggestion is advisory, so degrade to the
+            # empty (all-defaults) shape — the run itself will surface the error.
+            pages = []
+        doc.preprocess_suggestion = suggest_preprocess_settings(pages)
+    return doc.preprocess_suggestion
 
 
 # ---------------------------------------------------------------------------
@@ -301,10 +323,22 @@ def api_reset_table(doc_id: str, table_id: str) -> dict:
     return {"ok": True, "edited": False}
 
 
+# Failure-mode reason priority (highest first). A cell with several flags is
+# reported as one issue keyed on its most severe reason; `reasons` keeps them all.
+_REASON_PRIORITY = [
+    "numeric_mismatch", "sequence_illegal", "digit_mixed",
+    "numeric_unparseable", "structure_ragged", "low_conf",
+]
+_REASON_RANK = {r: i for i, r in enumerate(_REASON_PRIORITY)}
+
+
 @app.get("/api/documents/{doc_id}/lowconf")
 def api_lowconf(doc_id: str) -> dict:
-    """Triage index: every table cell under the calibrated CELL_CONF_LOW bucket,
-    sorted worst-first, with the page to jump to (None when stitched)."""
+    """Triage index: every table cell carrying a validator flag or under the
+    calibrated CELL_CONF_LOW confidence bucket. One issue per cell, keyed on its
+    highest-priority reason; validator issues first (priority order), then
+    low_conf worst-first. `page` is None when stitched; `conf` may be null for
+    cells flagged only by validators."""
     doc = _doc_with_results(doc_id)
     doc_json = doc.export_result.document_json
     if tables.is_stitched(doc_json):
@@ -315,18 +349,36 @@ def api_lowconf(doc_id: str) -> dict:
     for page_idx, blocks in page_iter:
         for block in blocks:
             tid, grid, conf = tables.block_to_table(block)
+            flags = tables.block_flags(block)
             grid = doc.edited_tables.get(tid, grid)
-            for r, row in enumerate(conf):
-                for c, v in enumerate(row):
-                    if v is not None and v < CELL_CONF_LOW:
-                        text = grid[r][c] if r < len(grid) and c < len(grid[r]) else ""
-                        # Blank cells are usually intentional table structure, not
-                        # OCR errors — flagging them floods triage with noise.
-                        if not text.strip():
-                            continue
-                        issues.append({"page": page_idx, "table_id": tid,
-                                       "row": r, "col": c, "conf": v, "text": text})
-    issues.sort(key=lambda i: i["conf"])
+            rows = max(len(grid), len(conf))
+            for r in range(rows):
+                width = max(len(grid[r]) if r < len(grid) else 0,
+                            len(conf[r]) if r < len(conf) else 0)
+                for c in range(width):
+                    text = grid[r][c] if r < len(grid) and c < len(grid[r]) else ""
+                    # Blank cells are usually intentional table structure, not
+                    # OCR errors — flagging them floods triage with noise.
+                    if not text.strip():
+                        continue
+                    v = conf[r][c] if r < len(conf) and c < len(conf[r]) else None
+                    reasons = list(flags.get((r, c), []))
+                    if v is not None and v < CELL_CONF_LOW and "low_conf" not in reasons:
+                        reasons.append("low_conf")
+                    if not reasons:
+                        continue
+                    reasons.sort(key=lambda x: _REASON_RANK.get(x, len(_REASON_PRIORITY)))
+                    issues.append({"page": page_idx, "table_id": tid, "row": r, "col": c,
+                                   "conf": v, "text": text,
+                                   "reason": reasons[0], "reasons": reasons})
+    # Validator-flagged issues first (by reason priority); low_conf-only issues
+    # after, worst confidence first. Deterministic tie-break on position.
+    def _key(i: dict):
+        rank = _REASON_RANK.get(i["reason"], len(_REASON_PRIORITY))
+        is_lowconf_only = i["reason"] == "low_conf"
+        conf = i["conf"] if i["conf"] is not None else 1.0
+        return (is_lowconf_only, rank, conf, i["table_id"], i["row"], i["col"])
+    issues.sort(key=_key)
     return {"issues": issues}
 
 
@@ -376,6 +428,25 @@ def api_put_page_text(doc_id: str, n: int, payload: dict) -> dict:
         raise ApiError(404, f"No page {n}")
     doc.edited_text[n] = str(payload.get("text", ""))
     return {"ok": True}
+
+
+@app.get("/api/documents/{doc_id}/preview/{n}")
+def api_preview_image(doc_id: str, n: int) -> Response:
+    """Raw page image BEFORE any run: lets the analyst see the document (and pick a
+    page range) pre-extraction. Rasterizes lazily on first call and caches the ingest
+    on the doc record; a later run simply replaces it."""
+    doc = _doc_or_404(doc_id)
+    if doc.ingest_result is None:
+        try:
+            doc.ingest_result = ingest(doc.upload_bytes, doc.upload_name)
+        except Exception as e:
+            raise ApiError(422, f"Cannot render a preview of this file: {e}")
+    imgs = doc.ingest_result.page_images
+    if not 0 <= n < len(imgs):
+        raise ApiError(404, f"No page {n}")
+    buf = io.BytesIO()
+    Image.fromarray(imgs[n]).save(buf, "PNG")
+    return Response(buf.getvalue(), media_type="image/png")
 
 
 @app.get("/api/documents/{doc_id}/pages/{n}/image")
@@ -438,6 +509,18 @@ def api_export_csv(doc_id: str, table_id: str) -> Response:
                     headers=_attachment(f"{table_id}.csv", "table.csv"))
 
 
+@app.get("/api/documents/{doc_id}/export/flags.csv")
+def api_export_flags(doc_id: str) -> Response:
+    """Document-level failure-mode flags CSV (one row per flagged cell/reason).
+    Header-only when nothing was flagged."""
+    doc = _doc_with_results(doc_id)
+    stem = Path(doc.upload_name).stem
+    flags_csv = getattr(doc.export_result, "flags_csv", "") or ""
+    data = flags_csv.encode("utf-8-sig")
+    return Response(data, media_type="text/csv",
+                    headers=_attachment(f"{stem}_flags.csv", "flags.csv"))
+
+
 @app.get("/api/documents/{doc_id}/export/{fmt}")
 def api_export_single(doc_id: str, fmt: str, combine: bool = True) -> Response:
     doc = _doc_with_results(doc_id)
@@ -478,4 +561,16 @@ def mount_frontend() -> None:
     dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if dist.is_dir():
         from fastapi.staticfiles import StaticFiles
-        app.mount("/app", StaticFiles(directory=dist, html=True), name="react-frontend")
+
+        class _FrontendFiles(StaticFiles):
+            # index.html must never be served stale (it names the hashed bundle);
+            # the content-hashed assets/* files are immutable and cache forever.
+            async def get_response(self, path, scope):  # type: ignore[override]
+                response = await super().get_response(path, scope)
+                if path.startswith("assets/"):
+                    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                else:
+                    response.headers["Cache-Control"] = "no-cache"
+                return response
+
+        app.mount("/app", _FrontendFiles(directory=dist, html=True), name="react-frontend")
