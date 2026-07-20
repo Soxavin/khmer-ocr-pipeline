@@ -17,6 +17,10 @@ class Progress:
     """Mutable holder the OCR page-callback (running in a worker thread) writes to and a
     UI timer reads from on the event loop. Simple scalar writes only — GIL-atomic."""
     stage: str = ""
+    # Sub-stage inside the current stage (e.g. "layout"/"text"/"tables" during
+    # OCR), reported by engines that expose an `on_step` hook. "" when unknown —
+    # the long OCR stage otherwise looks frozen for minutes at a time.
+    step: str = ""
     page: int = 0
     total: int = 0
     fraction: float = 0.0

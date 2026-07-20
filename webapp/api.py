@@ -155,6 +155,7 @@ def api_status(doc_id: str) -> dict:
     return {
         "active": p.active,
         "stage": p.stage,
+        "step": p.step,
         "page": p.page,
         "total": p.total,
         "fraction": p.fraction,

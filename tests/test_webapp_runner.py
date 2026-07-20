@@ -104,3 +104,57 @@ def test_provenance_includes_preprocess_scores():
     scores = captured["provenance"]["preprocess_scores"]
     assert set(scores) == {"laplacian_var", "contrast_std", "skew_deg", "stamp_ink_ratio"}
     assert all(isinstance(v, float) for v in scores.values())
+
+
+def _flat_ingest():
+    """Ingest stub with real page images — provenance scoring reads them."""
+    import numpy as np
+    from types import SimpleNamespace
+    return lambda *a, **kw: SimpleNamespace(page_images=[np.full((50, 50, 3), 128, dtype=np.uint8)])
+
+
+def test_engine_receives_on_step_when_it_accepts_one():
+    """Engines that expose an `on_step` hook get sub-stage telemetry wired in, so
+    the long OCR stage reports what it is doing inside each page."""
+    doc = _doc()
+    seen: list[str] = []
+
+    def engine_with_steps(result, on_page=None, on_step=None):
+        assert on_step is not None, "runner must pass on_step to a willing engine"
+        on_step("layout")
+        seen.append(doc.progress.step)
+        on_step("tables")
+        seen.append(doc.progress.step)
+        return "OCR"
+
+    ok = _run_with({
+        "ingest": _flat_ingest(),
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: engine_with_steps,
+        "ACTIVE_CORRECTION_ENGINE": lambda *a, **kw: "POST",
+        "export": lambda *a, **kw: "EXPORT",
+    }, doc)
+
+    assert ok is True
+    assert seen == ["layout", "tables"]
+    # The step is transient: it must not linger once the run is over.
+    assert doc.progress.step == ""
+
+
+def test_engine_without_on_step_is_called_unchanged():
+    """Engines predating sub-stage telemetry keep working — the runner must not
+    pass a keyword they cannot accept."""
+    doc = _doc()
+
+    def legacy_engine(result, on_page=None):
+        return "OCR"
+
+    ok = _run_with({
+        "ingest": _flat_ingest(),
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: legacy_engine,
+        "ACTIVE_CORRECTION_ENGINE": lambda *a, **kw: "POST",
+        "export": lambda *a, **kw: "EXPORT",
+    }, doc)
+
+    assert ok is True

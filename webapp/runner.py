@@ -9,6 +9,7 @@ reflect. Mirrors the run block of the Streamlit `app.py`.
 from __future__ import annotations
 
 import importlib.metadata
+from inspect import signature
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -88,11 +89,24 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
             state.progress.total = total
             state.progress.fraction = (idx + 1) / total if total else 0.0
 
+        def _on_step(step: str) -> None:
+            # Same worker-thread contract as _on_page: one scalar write.
+            state.progress.step = step
+
         engine = get_ocr_engine(s.ocr_engine_key)
+        # Sub-stage telemetry is opt-in per engine: only pass `on_step` to engines
+        # whose signature accepts it, so older engines keep working untouched.
+        extra = {}
+        try:
+            if "on_step" in signature(engine).parameters:
+                extra["on_step"] = _on_step
+        except (TypeError, ValueError):
+            pass  # builtin/C callable with no introspectable signature
         state.surya_result = await _stage(
             "Finding text & tables…", "Stage 3 — OCR",
-            engine, state.preprocess_result, on_page=_on_page,
+            engine, state.preprocess_result, on_page=_on_page, **extra,
         )
+        state.progress.step = ""
 
         state.postprocess_result = await _stage(
             "Tidying the text…", "Stage 4 — Post-process",

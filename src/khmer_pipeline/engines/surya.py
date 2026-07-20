@@ -80,9 +80,12 @@ def run_surya(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
     skip_tables: bool = False,
+    on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaResult:
     """Run Surya layout detection, OCR, and table recognition over every page image
-    in `result`. `on_page(idx, total)` is called before each page if given. Returns
+    in `result`. `on_page(idx, total)` is called before each page if given, and
+    `on_step(step)` at each sub-stage within a page ("layout"/"text"/"tables") —
+    OCR is the long stage, so callers need finer telemetry than per page. Returns
     a `SuryaResult` with per-page text blocks/tables and any warnings raised during
     processing. When `skip_tables=True`, Table regions are dropped before recognition
     (no table HTML is produced; `tables` will be empty) — for callers that rebuild
@@ -96,7 +99,8 @@ def run_surya(
         for idx, pil_img in enumerate(pil_images):
             if on_page is not None:
                 on_page(idx, total)
-            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred, skip_tables=skip_tables))
+            pages.append(_process_page(idx, pil_img, layout_pred, rec_pred,
+                                       skip_tables=skip_tables, on_step=on_step))
         collected_warnings = [str(w.message) for w in caught]
     return SuryaResult(source_name=result.source_name, pages=pages, warnings=collected_warnings)
 
@@ -260,8 +264,14 @@ def _process_page(
     layout_pred,
     rec_pred,
     skip_tables: bool = False,
+    on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaPageResult:
+    def _step(name: str) -> None:
+        if on_step is not None:
+            on_step(name)
+
     try:
+        _step("layout")
         _log(f"Page {page_index}: layout detection...")
         t0 = time.perf_counter()
         layout_result = layout_pred([pil_img])[0]
@@ -328,8 +338,10 @@ def _process_page(
         # Maps rounded table bbox → VLM-generated HTML (contains <table><tr><td> structure).
         # Populated from OCR blocks labelled "Table"; used later to fill cell text.
         table_html_map: dict[tuple, str] = {}
+        _step("tables")
 
         try:
+            _step("text")
             _log(f"Page {page_index}: OCR recognition...")
             t0 = time.perf_counter()
             page_ocr = rec_pred([pil_img], layout_results=[layout_result])[0]

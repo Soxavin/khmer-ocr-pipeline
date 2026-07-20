@@ -589,3 +589,29 @@ def test_no_layout_env_does_not_call_detector(monkeypatch):
     with patch("khmer_pipeline.engines.surya.detect_table_boxes") as dtb:
         _process_page(0, MagicMock(), layout_pred, rec_pred, skip_tables=False)
     dtb.assert_not_called()
+
+
+def test_run_surya_reports_sub_steps_per_page(monkeypatch):
+    """The OCR stage is the long one: `on_step` reports what it is doing inside a
+    page so the UI does not sit frozen on a single label for minutes."""
+    import numpy as np
+    from types import SimpleNamespace
+    from khmer_pipeline.engines import surya as surya_mod
+    from khmer_pipeline.models import PreprocessResult
+
+    steps: list[str] = []
+
+    def fake_process_page(idx, pil_img, layout_pred, rec_pred, skip_tables=False, on_step=None):
+        if on_step is not None:
+            on_step("layout")
+            on_step("tables")
+        return SimpleNamespace(page_index=idx, text_blocks=[], tables=[], ocr_text="")
+
+    monkeypatch.setattr(surya_mod, "_get_predictors", lambda: (object(), object()))
+    monkeypatch.setattr(surya_mod, "_process_page", fake_process_page)
+
+    page = np.full((20, 20, 3), 255, dtype=np.uint8)
+    result = PreprocessResult(source_name="x.pdf", page_images=[page], dpi=200, page_count=1)
+    surya_mod.run_surya(result, on_step=steps.append)
+
+    assert steps == ["layout", "tables"]

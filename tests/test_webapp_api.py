@@ -715,3 +715,12 @@ def test_failed_doc_still_reports_error_status(client):
     body = client.get("/api/documents").json()["documents"]
     me = next(d for d in body if d["id"] == "failcase00001")
     assert me["status"] == "error"
+
+
+def test_status_exposes_sub_step(client):
+    """The OCR sub-step reaches the UI so a long stage can narrate itself."""
+    doc_id = _upload(client).json()["documents"][0]["id"]
+    from webapp.api import registry
+    registry.get(doc_id).progress.step = "tables"
+    body = client.get(f"/api/documents/{doc_id}/status").json()
+    assert body["step"] == "tables"
