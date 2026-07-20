@@ -15,6 +15,9 @@ sample_data/
 # Dataset-factory corpus: PDFs stay local; only the README is tracked
 corpus/*
 !corpus/README.md
+# HITL analyst corrections: cell crops + text from REAL financial documents —
+# same sensitivity as corpus/, never commit
+corrections/
 
 # Generated benchmark / synthetic outputs
 eval/datasets/

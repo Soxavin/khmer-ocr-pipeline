@@ -137,12 +137,42 @@ def _hanuman_rows(n: int, out_dir: Path, rng: random.Random) -> list[dict]:
     return rows
 
 
+def _correction_rows(corrections_dir: Path, only_flags: set[str] | None = None) -> list[dict]:
+    """Rows from HITL-captured analyst corrections (src/khmer_pipeline/corrections.py).
+
+    These are the highest-value pairs in the set: verified human labels for real
+    long-tail failures. `only_flags` filters on the nested validate.py taxonomy
+    (e.g. {"sequence_illegal"}) — the reason provenance is stored structured."""
+    # Resolve here rather than trusting the caller: the emitted "image" paths are
+    # repo-relative, so a relative corrections_dir would break relative_to(_REPO).
+    corrections_dir = (corrections_dir if corrections_dir.is_absolute()
+                       else _REPO / corrections_dir)
+    jsonl = corrections_dir / "corrections.jsonl"
+    if not jsonl.exists():
+        print(f"corrections: none at {jsonl}")
+        return []
+    rows = []
+    for line in jsonl.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if only_flags and not (set(r.get("provenance", {}).get("flags", [])) & only_flags):
+            continue
+        rows.append({"image": str((corrections_dir / r["image"]).relative_to(_REPO)),
+                     "text": r["text"], "origin": "correction"})
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Assemble the Kiri fine-tune training set.")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--hanuman", type=int, default=15000, help="hanuman-100k subsample (0=skip)")
     parser.add_argument("--synthetic", type=int, default=3000, help="targeted synthetic lines")
     parser.add_argument("--empty", type=int, default=800, help="empty-cell negatives")
+    parser.add_argument("--corrections", type=Path, default=None,
+                        help="HITL corrections dir (contains corrections.jsonl + crops/)")
+    parser.add_argument("--corrections-flags", default=None,
+                        help="comma-separated validate.py flags to keep, e.g. sequence_illegal,digit_mixed")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     rng = random.Random(args.seed)
@@ -170,6 +200,14 @@ def main() -> None:
         han = _hanuman_rows(args.hanuman, out / "hanuman", rng)
         train_rows += han  # val stays real+targeted: that's what we're graded on
         print(f"hanuman: {len(han)}")
+    if args.corrections:
+        cdir = args.corrections if args.corrections.is_absolute() else _REPO / args.corrections
+        flags = set(args.corrections_flags.split(",")) if args.corrections_flags else None
+        cor = _correction_rows(cdir, flags)
+        # All corrections go to TRAIN: they are the errors we want fixed, and the
+        # val split must stay the fixed real+targeted set we are graded on.
+        train_rows += cor
+        print(f"corrections: {len(cor)}" + (f" (flags={sorted(flags)})" if flags else ""))
 
     rng.shuffle(train_rows)
     for name, rows in (("labels_train.jsonl", train_rows), ("labels_val.jsonl", val_rows)):
