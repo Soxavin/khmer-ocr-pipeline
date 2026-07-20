@@ -123,16 +123,97 @@ def _geometric_preprocess(img: np.ndarray, cfg: PreprocessConfig) -> np.ndarray:
     return np.ascontiguousarray(rgb)
 
 
-def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+# Above this variance-of-Laplacian the scan is already crisp, so software
+# sharpening adds ringing for no gain. Heuristic starting point pending
+# calibration on the GDDE corpus.
+_SUGGEST_SHARP_LAPLACIAN = 500.0
+# Above this grayscale std the page is already well contrasted, so CLAHE
+# mostly amplifies scan noise. Same caveat: heuristic pending calibration.
+_SUGGEST_CONTRAST_STD = 60.0
+# Above this fraction of saturated red/blue pixels a stamp/signature is likely
+# present (a typical circular stamp covers ~0.2–2% of an A4 page).
+_SUGGEST_STAMP_INK_RATIO = 0.002
 
+
+def suggest_preprocess_settings(page_images: list[np.ndarray]) -> dict:
+    """Cheap image-quality scores + conservative suggested PreprocessConfig toggles.
+
+    Scores blur (variance of Laplacian) and contrast (grayscale std) per page,
+    aggregated with the median (robust to one odd page). Returns
+    ``{"scores": {...}, "suggested": {field: bool}, "rationale": {field: str}}``
+    where `suggested` holds ONLY fields deviating from the dataclass defaults —
+    usually empty. Suggestions are advisory: the UI shows them, the user decides.
+    Note: with the surya_kiri engine these photometric toggles influence
+    layout/table detection only (recognition reads geometric-only frames).
+    """
+    if not page_images:
+        return {"scores": {"laplacian_var": 0.0, "contrast_std": 0.0,
+                           "skew_deg": 0.0, "stamp_ink_ratio": 0.0},
+                "suggested": {}, "rationale": {}, "checks": []}
+    blur_scores, contrast_scores, skews, ink_ratios = [], [], [], []
+    for img in page_images:
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        blur_scores.append(cv2.Laplacian(gray, cv2.CV_64F).var())
+        contrast_scores.append(float(gray.std()))
+        bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        skews.append(abs(_skew_angle(bgr)))
+        mask = _stamp_ink_mask(bgr)
+        ink_ratios.append(float(cv2.countNonZero(mask)) / mask.size)
+    laplacian_var = float(np.median(blur_scores))
+    contrast_std = float(np.median(contrast_scores))
+    # Skew/ink use the MAX: one tilted or stamped page is enough to matter.
+    skew_deg = float(np.max(skews))
+    stamp_ink_ratio = float(np.max(ink_ratios))
+
+    suggested: dict[str, bool] = {}
+    rationale: dict[str, str] = {}
+    if laplacian_var > _SUGGEST_SHARP_LAPLACIAN:
+        suggested["sharpen"] = False
+        rationale["sharpen"] = "The scan is already sharp, so extra sharpening would only add noise."
+    if contrast_std > _SUGGEST_CONTRAST_STD:
+        suggested["normalise"] = False
+        rationale["normalise"] = "The pages are already well contrasted, so contrast enhancement is unnecessary."
+
+    # Per-toggle assessment for the UI's "scan check" story. `active` means
+    # "this cleanup is useful for THIS document"; `reason` is a stable key the
+    # frontend localizes; `detail` keeps the measured evidence in English.
+    tilted = skew_deg >= _DESKEW_MIN_ANGLE_DEG
+    stamped = stamp_ink_ratio >= _SUGGEST_STAMP_INK_RATIO
+    soft = laplacian_var <= _SUGGEST_SHARP_LAPLACIAN
+    faded = contrast_std <= _SUGGEST_CONTRAST_STD
+    checks = [
+        {"field": "deskew", "active": tilted,
+         "reason": "tilted" if tilted else "straight",
+         "detail": f"largest page tilt {skew_deg:.1f}\u00b0"},
+        {"field": "remove_stamps", "active": stamped,
+         "reason": "stamps_found" if stamped else "no_stamps",
+         "detail": f"colored stamp ink on {stamp_ink_ratio * 100:.2f}% of the worst page"},
+        {"field": "sharpen", "active": soft,
+         "reason": "soft_scan" if soft else "already_sharp",
+         "detail": f"sharpness score {laplacian_var:.0f} (threshold {_SUGGEST_SHARP_LAPLACIAN:.0f})"},
+        {"field": "normalise", "active": faded,
+         "reason": "faded" if faded else "good_contrast",
+         "detail": f"contrast score {contrast_std:.0f} (threshold {_SUGGEST_CONTRAST_STD:.0f})"},
+        {"field": "normalise_table_backgrounds", "active": True,
+         "reason": "table_shading_default",
+         "detail": "always applied; harmless when tables have no shading"},
+    ]
+    return {"scores": {"laplacian_var": laplacian_var, "contrast_std": contrast_std,
+                       "skew_deg": skew_deg, "stamp_ink_ratio": stamp_ink_ratio},
+            "suggested": suggested, "rationale": rationale, "checks": checks}
+
+
+def _stamp_ink_mask(bgr: np.ndarray) -> np.ndarray:
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     mask_red1 = cv2.inRange(hsv, np.array([0, 100, 100]), np.array([10, 255, 255]))
     mask_red2 = cv2.inRange(hsv, np.array([160, 100, 100]), np.array([180, 255, 255]))
     mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-
     mask_blue = cv2.inRange(hsv, np.array([100, 100, 100]), np.array([130, 255, 255]))
+    return cv2.bitwise_or(mask_red, mask_blue)
 
-    combined = cv2.bitwise_or(mask_red, mask_blue)
+
+def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
+    combined = _stamp_ink_mask(bgr)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     dilated = cv2.dilate(combined, kernel, iterations=2)

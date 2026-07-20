@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 from khmer_pipeline.models import IngestResult, PreprocessResult
-from khmer_pipeline.preprocess import PreprocessConfig, preprocess, _deskew, _skew_angle, _normalise_table_backgrounds, _crop_margins, _cap_resolution, _geometric_preprocess
+from khmer_pipeline.preprocess import PreprocessConfig, preprocess, suggest_preprocess_settings, _deskew, _skew_angle, _normalise_table_backgrounds, _crop_margins, _cap_resolution, _geometric_preprocess
 
 
 def _make_ingest_result(n_pages: int = 1, h: int = 100, w: int = 100) -> IngestResult:
@@ -265,6 +265,79 @@ def test_preprocess_recognition_images_shapes_match_page_images():
         assert full.shape[:2] == geo.shape[:2]
 
 
+# --- suggest_preprocess_settings ---
+
+def _checkerboard(size: int = 100) -> np.ndarray:
+    """1px black/white checkerboard: extreme Laplacian variance AND contrast."""
+    tile = np.array([[0, 255], [255, 0]], dtype=np.uint8)
+    ch = np.tile(tile, (size // 2, size // 2))
+    return np.stack([ch, ch, ch], axis=2)
+
+
+def _flat_gray(size: int = 100) -> np.ndarray:
+    return np.full((size, size, 3), 128, dtype=np.uint8)
+
+
+def _full_gradient(size: int = 256) -> np.ndarray:
+    """Smooth 0→255 horizontal gradient: high contrast_std, ~zero Laplacian."""
+    row = np.arange(size, dtype=np.uint8).reshape(1, size)
+    ch = np.tile(row, (size, 1))
+    return np.stack([ch, ch, ch], axis=2)
+
+
+def test_suggest_empty_page_list():
+    out = suggest_preprocess_settings([])
+    # Shape extended in §2.47 with skew/stamp signals; zeros for unreadable uploads.
+    assert out["scores"] == {"laplacian_var": 0.0, "contrast_std": 0.0,
+                             "skew_deg": 0.0, "stamp_ink_ratio": 0.0}
+    assert out["suggested"] == {}
+    assert out["rationale"] == {}
+
+
+def test_suggest_flat_gray_suggests_nothing():
+    # Flat gray: LOW contrast and LOW sharpness — both defaults stay on.
+    out = suggest_preprocess_settings([_flat_gray()])
+    assert out["suggested"] == {}
+    assert out["rationale"] == {}
+
+
+def test_suggest_sharp_image_disables_sharpen():
+    out = suggest_preprocess_settings([_checkerboard()])
+    assert out["suggested"].get("sharpen") is False
+    assert out["scores"]["laplacian_var"] > 500
+
+
+def test_suggest_high_contrast_disables_normalise():
+    out = suggest_preprocess_settings([_full_gradient()])
+    assert out["suggested"] == {"normalise": False}
+    assert out["scores"]["contrast_std"] > 60
+    # Linear gradient has near-zero Laplacian: sharpen must NOT be suggested.
+    assert "sharpen" not in out["suggested"]
+
+
+def test_suggest_rationale_keys_mirror_suggested():
+    out = suggest_preprocess_settings([_checkerboard()])
+    assert set(out["rationale"]) == set(out["suggested"])
+    assert all(isinstance(v, str) and v for v in out["rationale"].values())
+
+
+def test_suggest_only_touches_v1_fields():
+    out = suggest_preprocess_settings([_checkerboard(), _full_gradient()])
+    assert set(out["suggested"]) <= {"sharpen", "normalise"}
+
+
+def test_suggest_aggregates_with_median():
+    # Two flat pages + one checkerboard: the median is the flat score, so the
+    # single extreme page must not trigger a suggestion.
+    out = suggest_preprocess_settings([_flat_gray(), _flat_gray(), _checkerboard()])
+    assert out["suggested"] == {}
+
+
+def test_suggest_scores_are_plain_floats():
+    out = suggest_preprocess_settings([_checkerboard()])
+    assert all(type(v) is float for v in out["scores"].values())
+
+
 def test_geometric_preprocess_skips_photometric_changes():
     """_geometric_preprocess must not apply photometric changes (normalise/sharpen/
     remove_stamps/normalise_table_backgrounds) even when those flags are on —
@@ -281,3 +354,65 @@ def test_geometric_preprocess_skips_photometric_changes():
     expected = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
     assert np.array_equal(geo, expected)
+
+
+def _tilted_stripes(size: int = 200) -> np.ndarray:
+    """White page with black bars rotated ~3°: clear skew signal."""
+    img = np.full((size, size), 255, dtype=np.uint8)
+    for y in range(30, size - 30, 24):
+        img[y:y + 6, 20:size - 20] = 0
+    m = cv2.getRotationMatrix2D((size / 2, size / 2), 3.0, 1.0)
+    img = cv2.warpAffine(img, m, (size, size), flags=cv2.INTER_NEAREST,
+                         borderValue=255)
+    return np.stack([img, img, img], axis=2)
+
+
+def _red_stamp_page(size: int = 200) -> np.ndarray:
+    """White page with a saturated red disc: stamp-ink signal."""
+    img = np.full((size, size, 3), 255, dtype=np.uint8)
+    cv2.circle(img, (size // 2, size // 2), 30, (220, 20, 20), -1)  # RGB red
+    return img
+
+
+def test_suggest_checks_cover_all_user_toggles():
+    out = suggest_preprocess_settings([_flat_gray()])
+    fields = [c["field"] for c in out["checks"]]
+    assert fields == ["deskew", "remove_stamps", "sharpen", "normalise",
+                      "normalise_table_backgrounds"]
+    for c in out["checks"]:
+        assert isinstance(c["active"], bool)
+        assert isinstance(c["reason"], str) and c["reason"]
+        assert isinstance(c["detail"], str) and c["detail"]
+
+
+def test_suggest_tilted_page_reports_tilt():
+    out = suggest_preprocess_settings([_tilted_stripes()])
+    deskew = next(c for c in out["checks"] if c["field"] == "deskew")
+    assert deskew["active"] is True
+    assert deskew["reason"] == "tilted"
+    assert out["scores"]["skew_deg"] > 0.5
+
+
+def test_suggest_straight_page_reports_straight():
+    out = suggest_preprocess_settings([_full_gradient()])
+    deskew = next(c for c in out["checks"] if c["field"] == "deskew")
+    assert deskew["reason"] in ("straight",)
+
+
+def test_suggest_stamp_ink_detected():
+    out = suggest_preprocess_settings([_red_stamp_page()])
+    stamps = next(c for c in out["checks"] if c["field"] == "remove_stamps")
+    assert stamps["active"] is True
+    assert stamps["reason"] == "stamps_found"
+    assert out["scores"]["stamp_ink_ratio"] > 0.002
+
+
+def test_suggest_clean_page_no_stamps():
+    out = suggest_preprocess_settings([_flat_gray()])
+    stamps = next(c for c in out["checks"] if c["field"] == "remove_stamps")
+    assert stamps["active"] is False
+    assert stamps["reason"] == "no_stamps"
+
+
+def test_suggest_empty_list_has_empty_checks():
+    assert suggest_preprocess_settings([])["checks"] == []
