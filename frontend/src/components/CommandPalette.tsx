@@ -120,7 +120,7 @@ export function CommandPalette(props: { commands: Command[]; onClose: () => void
             return (
               <div key={c.id}>
                 {header && (
-                  <p className="px-3 pb-0.5 pt-2 text-2xs font-semibold text-ink-3">{header}</p>
+                  <p className="px-3 pb-0.5 pt-2 text-2xs font-semibold text-ink-2">{header}</p>
                 )}
                 <button
                   id={`palette-${c.id}`}

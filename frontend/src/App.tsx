@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleHelp, Files, FileUp, Grid3x3, Languages, Monitor, Moon, MoreHorizontal, ScanSearch, Search, Settings2, ShieldCheck, Square, StickyNote, Sun, TriangleAlert, X } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api/client'
@@ -9,7 +9,10 @@ import { SettingsDrawer } from './components/run/SettingsDrawer'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { PageGrid, ViewToggle } from './components/viewer/PageGrid'
 import { PageViewer } from './components/viewer/PageViewer'
-import { TablesPanel } from './components/review/TablesPanel'
+// AG-Grid (~1 MB) lives entirely inside TablesPanel and is only ever rendered
+// once a run has results — lazy-load it so it stays out of the initial bundle
+// (the empty state and pre-run flow never pay for it).
+const TablesPanel = lazy(() => import('./components/review/TablesPanel').then((m) => ({ default: m.TablesPanel })))
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useRunStatus } from './hooks/useRunStatus'
 import { encodePages, gridPages, pagesFromSettings } from './lib/pages'
@@ -1067,19 +1070,21 @@ export default function App() {
             </div>
             <section className={`${panelMainCls} flex min-w-[360px] basis-0 flex-col overflow-hidden`} style={{ flexGrow: 1 - split.ratio }}>
               {page.data ? (
-                <TablesPanel
-                  docId={active.id}
-                  pageIdx={pageIdx}
-                  page={page.data}
-                  selectedTable={selectedTable}
-                  onSelectTable={setSelectedTable}
-                  flashToken={flashToken}
-                  focusCell={focusCell}
-                  showFind={showFind}
-                  onCloseFind={() => setShowFind(false)}
-                />
+                <Suspense fallback={<TablesSkeleton label={t('loading_tables')} />}>
+                  <TablesPanel
+                    docId={active.id}
+                    pageIdx={pageIdx}
+                    page={page.data}
+                    selectedTable={selectedTable}
+                    onSelectTable={setSelectedTable}
+                    flashToken={flashToken}
+                    focusCell={focusCell}
+                    showFind={showFind}
+                    onCloseFind={() => setShowFind(false)}
+                  />
+                </Suspense>
               ) : (
-                <p className="p-4 text-sm text-ink-2">{t('loading_tables')}</p>
+                <TablesSkeleton label={t('loading_tables')} />
               )}
             </section>
           </>
@@ -1183,6 +1188,30 @@ export default function App() {
           />
         </div>
       </main>
+    </div>
+  )
+}
+
+/** Content-shaped placeholder while the tables chunk loads (lazy import) or the
+    page's tables are still fetching — a skeleton, not a spinner-in-content. */
+function TablesSkeleton(props: { label: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4" aria-busy="true" aria-label={props.label}>
+      <span className="sr-only">{props.label}</span>
+      {[0, 1].map((card) => (
+        <div key={card} className="overflow-hidden rounded-lg border border-line-strong/50">
+          <div className="h-8 animate-pulse bg-rail/60" />
+          <div className="divide-y divide-line/70">
+            {[0, 1, 2, 3].map((row) => (
+              <div key={row} className="flex gap-3 p-2">
+                {[0, 1, 2].map((cell) => (
+                  <div key={cell} className="h-3.5 flex-1 animate-pulse rounded bg-rail/50" style={{ animationDelay: `${(row + cell) * 60}ms` }} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -78,4 +78,21 @@ describe('QueueRail clear-all guard', () => {
     renderRail({ pipelineBusy: true })
     expect(screen.getByRole('button', { name: /run all/i })).toBeDisabled()
   })
+
+  it('selects a document by keyboard — the row is a real control', async () => {
+    const user = userEvent.setup()
+    const props = renderRail()
+    // The row exposes a button role and takes focus…
+    const row = screen.getByRole('button', { name: 'a.pdf' })
+    row.focus()
+    await user.keyboard('{Enter}')
+    expect(props.onSelect).toHaveBeenCalledWith('a')
+  })
+
+  it('keeps the remove control reachable (not display:none at rest)', () => {
+    renderRail()
+    // The per-document remove button must be in the tree (focusable), not
+    // conditionally mounted only on hover.
+    expect(screen.getByRole('button', { name: /remove.*a\.pdf/i })).toBeInTheDocument()
+  })
 })

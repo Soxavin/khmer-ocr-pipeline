@@ -245,17 +245,32 @@ export function QueueRail(props: {
           return (
             <div
               key={d.id}
-              className={`group mb-0.5 cursor-pointer rounded-md p-2 text-sm transition-colors duration-150 ${
+              role="button"
+              tabIndex={0}
+              aria-label={d.name}
+              aria-current={selected ? 'true' : undefined}
+              className={`group mb-0.5 cursor-pointer rounded-md p-2 text-sm transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
                 selected ? 'bg-primary-soft' : 'hover:bg-rail'
               }`}
               onClick={() => onSelect(d.id)}
+              // Keyboard parity with the click: Enter/Space selects, but only when
+              // focus is on the row itself — not when it bubbles up from the
+              // nested remove button.
+              onKeyDown={(e) => {
+                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault()
+                  onSelect(d.id)
+                }
+              }}
             >
               <div className="flex items-center justify-between gap-1">
                 <span className={`truncate font-medium ${selected ? 'text-primary-strong' : 'text-ink'}`} title={d.name}>
                   {d.name}
                 </span>
+                {/* Quiet at rest, but always in the tab order — revealed by hover
+                    OR keyboard focus, never mouse-only. */}
                 <button
-                  className="hidden shrink-0 rounded-md p-0.5 text-ink-3 transition-colors duration-150 hover:bg-danger-soft hover:text-danger-ink group-hover:block"
+                  className="shrink-0 rounded-md p-0.5 text-ink-3 opacity-0 transition-[opacity,color,background-color] duration-150 hover:bg-danger-soft hover:text-danger-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-primary group-hover:opacity-100"
                   aria-label={`${t('remove_doc')}: ${d.name}`}
                   title={t('remove_doc')}
                   onClick={(e) => {

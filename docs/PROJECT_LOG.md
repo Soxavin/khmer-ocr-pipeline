@@ -2367,6 +2367,43 @@ all-fields diff; the badge still hides at zero. The auto-DPI default reads as un
 **Outcome.** pytest 749 (from 742), vitest 50 (from 45), `tsc -b` + build clean, detector
 0. Server restarted; `/api/meta` serves `auto` first with `dpi: "auto"` default.
 
+### 2.69 Audit remediation: keyboard a11y, code-split, polish (§2.69)
+
+**Problem.** `/impeccable audit frontend` scored 16/20 (Good) with a contained cluster
+of implementation-level gaps: two WCAG 2.1.1 Level-A keyboard violations, a 1.43 MB
+single JS bundle, and a few P3 items. Design language and theming already scored 4/4;
+nothing aesthetic needed changing.
+
+**Decision — ran all six recommended passes.**
+
+- *P1 keyboard (QueueRail).* The document row was a `<div onClick>` (no role, tabindex,
+  or key handler) and the remove button was `hidden … group-hover:block` (mouse-only).
+  Row is now `role="button" tabIndex=0` with an Enter/Space handler guarded to fire only
+  when focus is on the row itself (not bubbling from the nested remove button), plus a
+  stable `aria-label` and `aria-current`. Remove button is always in the tab order,
+  revealed by hover OR `focus-visible` (opacity, not display). 2 new component tests.
+- *P2 bundle (code-split).* `TablesPanel` — the sole AG-Grid consumer, only rendered
+  once a run has results — is now `React.lazy` behind `Suspense`. **Initial JS dropped
+  1.43 MB -> 340 KB (104 KB gzip)**; AG-Grid (1.06 MB) split into a chunk that loads on
+  first results, never on the empty state or pre-run flow.
+- *P2 keyboard (PageViewer).* The page canvas is now focusable with arrow-key pan, +/-
+  zoom toward centre (mirroring the wheel math), and 0-to-fit — mouse drag/wheel/loupe
+  stay as enhancements over that baseline. `role="group"` + aria-label.
+- *P3 polish.* Text "Loading tables..." replaced by a content-shaped `TablesSkeleton`
+  (aria-busy), reused as the Suspense fallback — one component covers both the lazy-chunk
+  load and the per-page tables fetch.
+- *P3 typeset.* The one meaningful 11 px `ink-3` label (command-palette group header)
+  lifted to `ink-2` for the small-text contrast floor.
+- *P3 colorize.* The PageViewer overlay palette (`PALETTE`/`LABEL_COLORS`) annotated as
+  deliberately theme-independent fixed hex drawn over the page photo, matched by hand to
+  `--color-conf-*` / `webapp/components.py`.
+
+Responsive stayed 2/4 by design — a desk-bound analyst tool + projected demo; mobile is
+explicitly out of scope, so no action (documented in DESIGN.md and the audit).
+
+**Outcome.** vitest 52 (from 50), `tsc -b` + build clean, detector 0. Frontend-only —
+no restart; the no-cache index.html serves the split chunks on refresh.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

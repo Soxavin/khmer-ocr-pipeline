@@ -9,8 +9,14 @@ import { ViewToggle } from './PageGrid'
 // Text-block confidence buckets (model_config.py: CONFIDENCE_LOW/MID).
 const CONF_LOW = 0.5
 const CONF_MID = 0.8
+// These are SVG stroke colors drawn OVER the page photograph, so they are
+// deliberately theme-independent fixed hex (a dark-mode swap would make the
+// overlay fight the scan, not the UI). They intentionally equal the
+// --color-conf-* / webapp components.py values so the page overlay and the grid
+// tints read as one system; keep the two in sync by hand if the tokens change.
 const PALETTE = { high: '#16a34a', mid: '#f59e0b', low: '#dc2626' }
-// Region-type colors, ported from webapp/components.py LABEL_COLORS.
+// Region-type colors, ported 1:1 from webapp/components.py LABEL_COLORS — same
+// rationale: fixed hex over the photo, matched to the Python side on purpose.
 const LABEL_COLORS: Record<string, string> = {
   Text: '#4A90D9',
   Table: '#E74C3C',
@@ -192,7 +198,34 @@ export function PageViewer(props: {
 
       <div
         ref={containerRef}
-        className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-canvas active:cursor-grabbing"
+        // The canvas is focusable so pan/zoom have a keyboard path (mouse drag +
+        // wheel are enhancements, not the only way in): arrows pan, +/− zoom
+        // toward centre, 0 refits.
+        tabIndex={0}
+        role="group"
+        aria-label={t('canvas_aria')}
+        className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary active:cursor-grabbing"
+        onKeyDown={(e) => {
+          const PAN = 60
+          if (e.key === 'ArrowLeft') setView((v) => ({ ...v, tx: v.tx + PAN }))
+          else if (e.key === 'ArrowRight') setView((v) => ({ ...v, tx: v.tx - PAN }))
+          else if (e.key === 'ArrowUp') setView((v) => ({ ...v, ty: v.ty + PAN }))
+          else if (e.key === 'ArrowDown') setView((v) => ({ ...v, ty: v.ty - PAN }))
+          else if (e.key === '0') fit()
+          else if (e.key === '+' || e.key === '=' || e.key === '-') {
+            // Zoom toward the canvas centre, mirroring the wheel-zoom math.
+            const el = containerRef.current
+            if (!el) return
+            const cx = el.clientWidth / 2
+            const cy = el.clientHeight / 2
+            setView((v) => {
+              const scale = Math.min(8, Math.max(0.05, v.scale * (e.key === '-' ? 1 / 1.2 : 1.2)))
+              const k = scale / v.scale
+              return { scale, tx: cx - k * (cx - v.tx), ty: cy - k * (cy - v.ty) }
+            })
+          } else return
+          e.preventDefault()
+        }}
         onMouseDown={(e) => {
           drag.current = { x: e.clientX - view.tx, y: e.clientY - view.ty }
         }}
