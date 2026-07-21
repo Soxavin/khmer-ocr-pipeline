@@ -338,7 +338,6 @@ def _process_page(
         # Maps rounded table bbox → VLM-generated HTML (contains <table><tr><td> structure).
         # Populated from OCR blocks labelled "Table"; used later to fill cell text.
         table_html_map: dict[tuple, str] = {}
-        _step("tables")
 
         try:
             _step("text")
@@ -349,6 +348,9 @@ def _process_page(
         except Exception as e:
             warnings.warn(f"Text OCR failed on page {page_index + 1}: {e}")
             page_ocr = None
+
+        # Recognition is done; everything below builds this page's tables.
+        _step("tables")
 
         if page_ocr is not None:
             for block in page_ocr.blocks:

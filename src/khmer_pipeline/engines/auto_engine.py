@@ -60,6 +60,7 @@ def _low_conf_fraction(result: SuryaResult) -> float:
 def run_auto(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
+    on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaResult:
     """Route a document to surya_kiri or surya by surya_kiri's own confidence.
 
@@ -67,12 +68,12 @@ def run_auto(
     ``_FALLBACK_LOW_CONF_FRACTION`` the document is re-run with surya and that
     result returned. Either way a machine-readable ``[AutoRouter] …`` note is
     appended to ``warnings`` recording the decision and the measured fraction."""
-    kiri = run_surya_kiri(result, on_page=on_page)
+    kiri = run_surya_kiri(result, on_page=on_page, on_step=on_step)
     frac = _low_conf_fraction(kiri)
     cutoff = _FALLBACK_LOW_CONF_FRACTION
 
     if frac > cutoff:
-        surya = run_surya(result, on_page=on_page)
+        surya = run_surya(result, on_page=on_page, on_step=on_step)
         surya.warnings.append(
             f"[AutoRouter] fallback surya_kiri->surya | frac={frac:.3f} cutoff={cutoff:.3f}"
         )

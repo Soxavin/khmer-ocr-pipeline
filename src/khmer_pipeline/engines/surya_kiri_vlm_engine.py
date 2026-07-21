@@ -61,6 +61,7 @@ def _cell_text(cell: dict) -> str:
 def run_surya_kiri_vlm(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
+    on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaResult:
     """Run plain Surya in full, then re-OCR Khmer-heavy table cells with Kiri.
 
@@ -71,7 +72,7 @@ def run_surya_kiri_vlm(
     reset_kiri_failure()
 
     # 1. Plain Surya, VLM included — structure, spans, and all text.
-    base = run_surya(result, on_page)
+    base = run_surya(result, on_page, on_step=on_step)
 
     manager = get_manager()
     from surya.table_rec import TableRecPredictor
@@ -93,6 +94,9 @@ def run_surya_kiri_vlm(
 
     pages: list[SuryaPageResult] = []
     for idx, page in enumerate(base.pages):
+        # Surya's own table phase is done; this loop re-OCRs Khmer-heavy cells.
+        if on_step is not None:
+            on_step("tables")
         img = raw_imgs[idx]
         h, w = img.shape[:2]
         new_tables: list[dict] = []

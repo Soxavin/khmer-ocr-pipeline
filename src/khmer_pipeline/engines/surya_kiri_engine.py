@@ -202,8 +202,13 @@ def _merge_spans(records: list[tuple], span_boxes: list[list[float]],
 def run_surya_kiri(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
+    on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaResult:
     """Run the Surya + Kiri hybrid pipeline over every page in *result*.
+
+    `on_step(step)` reports the sub-stage within a page ("layout"/"text"/"tables");
+    the layout/text steps come from the inner Surya pass, the table step from this
+    engine's own per-page table loop.
 
     Returns a ``SuryaResult`` whose tables are built from TableRecPredictor
     structure + Kiri CTC recognition instead of Surya's VLM HTML output.
@@ -221,7 +226,7 @@ def run_surya_kiri(
     # 1. Reuse Surya for page-level text blocks + ocr_text; skip_tables=True
     #    drops Table regions before recognition (we rebuild tables from
     #    raw-image structure below, so Surya's table VLM would be wasted work).
-    base = run_surya(result, on_page, skip_tables=True)
+    base = run_surya(result, on_page, skip_tables=True, on_step=on_step)
 
     # 2. Lazy-init predictors on Surya's shared inference manager. TableRec is
     #    only instantiated when it is the selected structure source — the slanet
@@ -261,6 +266,8 @@ def run_surya_kiri(
         )
 
     for idx, page in enumerate(base.pages):
+        if on_step is not None:
+            on_step("tables")
         img = raw_imgs[idx]
         h, w = img.shape[:2]
         page_low_conf_count = 0
