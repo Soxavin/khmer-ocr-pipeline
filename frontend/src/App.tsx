@@ -1036,6 +1036,7 @@ export default function App() {
                     pages={processedPages}
                     pageCount={Math.max(1, active.pages)}
                     imageUrl={(n) => api.pageImageUrl(active.id, processedPages.indexOf(n), 'processed')}
+                    fallbackUrl={(n) => api.previewImageUrl(active.id, n)}
                     selected={selectedPages}
                     onTogglePage={togglePage}
                     onOpenPage={(n) => openPageFromGrid(processedPages.indexOf(n))}

@@ -2442,6 +2442,31 @@ Clean >95%** — extracted to `frontend/src/lib/confidence.ts` (`confBand`,
 **Outcome.** vitest 60 (from 52), `tsc -b` + build clean, detector 0. Frontend-only —
 no restart; the no-cache index.html serves the new bundle on refresh.
 
+### 2.71 Grid thumbnail resilience during active extraction (§2.71)
+
+**Problem.** Toggling Grid → Single → Grid while an extraction is running left pages 3+
+as blank cards with the browser's broken-"?" glyph. Root cause is server-side and
+concrete: `api_preview_image` rasterizes lazily (`doc.ingest_result = ingest(...)` on
+first call). A grid remount fires one request per card at once; during extraction the
+runner saturates the process, so the first burst loses the race and those requests
+error before the ingest is cached. Not a blob-URL leak — the images are plain HTTP
+endpoints, so there is nothing to `revokeObjectURL` and view toggles leak nothing.
+
+**Decision.** Frontend resilience in a self-contained `GridThumb` (in `PageGrid.tsx`)
+rather than backend surgery. Each thumbnail: holds an `animate-pulse` skeleton while
+loading; on error tries a `fallbackSrc` once (post-analysis grid → raw preview via a new
+optional `fallbackUrl` prop), then retries up to 4× with a cache-busting `?retry=n` and
+250ms·n backoff — which *actually recovers* the image once the lazy ingest lands; and if
+still failing, drops the `<img>` for a calm skeleton so the broken glyph never shows. A
+`useEffect([src])` resets the whole lifecycle on src change, so a finished rendition or a
+document switch never bleeds a stale thumbnail. Page-number chip hardened
+`whitespace-nowrap` (clear of the top-left checkbox island — no clip).
+
+**Outcome.** 4 new `PageGrid.test.tsx` cases (fallback swap, cache-bust retry, skeleton
+on exhaustion). vitest 64 (from 60), `tsc -b` + build clean. Detector's 2 `broken-image`
+hits are the test's fixture URLs (`/proc/0`), not shipped UI — false positives. Frontend-
+only; plain refresh.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

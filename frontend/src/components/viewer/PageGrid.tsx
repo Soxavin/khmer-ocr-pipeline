@@ -1,4 +1,73 @@
+import { useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n.tsx'
+
+const MAX_THUMB_RETRIES = 4
+
+/** A single grid thumbnail that never shows the browser's broken-image glyph.
+    Page images are rasterized lazily server-side (see api_preview_image): the first
+    burst of card requests during an active extraction can lose the race and error.
+    So we hold a calm skeleton while loading, retry with backoff (the cached ingest
+    lands within a beat or two), optionally fall back to the raw preview rendition,
+    and — critically — reset the whole lifecycle whenever `src` changes so a stale
+    thumbnail never bleeds across a view toggle or a document switch. */
+function GridThumb(props: { src: string; fallbackSrc?: string; alt: string }) {
+  const { src, fallbackSrc, alt } = props
+  const [status, setStatus] = useState<'load' | 'ok' | 'fail'>('load')
+  const [current, setCurrent] = useState(src)
+  const attempt = useRef(0)
+  const usedFallback = useRef(false)
+  const timer = useRef<number | undefined>(undefined)
+
+  // New src → new rendition finished, or the active document changed: start over.
+  useEffect(() => {
+    attempt.current = 0
+    usedFallback.current = false
+    setStatus('load')
+    setCurrent(src)
+    return () => window.clearTimeout(timer.current)
+  }, [src])
+
+  function onError() {
+    // 1) One shot at the fallback rendition (post-analysis grid → raw preview).
+    if (fallbackSrc && !usedFallback.current) {
+      usedFallback.current = true
+      setCurrent(fallbackSrc)
+      return
+    }
+    // 2) Back off and retry with a cache-busting param so the browser refetches
+    //    rather than replaying its cached error once the lazy ingest is ready.
+    if (attempt.current < MAX_THUMB_RETRIES) {
+      attempt.current += 1
+      const base = usedFallback.current && fallbackSrc ? fallbackSrc : src
+      const n = attempt.current
+      timer.current = window.setTimeout(() => {
+        setCurrent(`${base}${base.includes('?') ? '&' : '?'}retry=${n}`)
+      }, 250 * n)
+      return
+    }
+    // 3) Out of retries: keep the skeleton, never the broken '?'.
+    setStatus('fail')
+  }
+
+  return (
+    <div className="relative aspect-[3/4] w-full">
+      {status !== 'ok' && (
+        <div className={`absolute inset-0 ${status === 'fail' ? 'bg-rail/40' : 'animate-pulse bg-rail/60'}`} aria-hidden />
+      )}
+      {status !== 'fail' && (
+        <img
+          src={current}
+          alt={alt}
+          loading="lazy"
+          draggable={false}
+          onLoad={() => setStatus('ok')}
+          onError={onError}
+          className={`aspect-[3/4] w-full object-contain transition-opacity duration-200 ${status === 'ok' ? 'opacity-100' : 'opacity-0'}`}
+        />
+      )}
+    </div>
+  )
+}
 
 /** [Single] [Grid] segmented control — same pattern as the Cleaned⇄Original segment. */
 export function ViewToggle(props: { view: 'single' | 'grid'; onChange: (v: 'single' | 'grid') => void }) {
@@ -37,11 +106,14 @@ export function PageGrid(props: {
   pages: number[]
   pageCount: number
   imageUrl: (n: number) => string
+  /** Optional secondary rendition tried once before retrying (post-analysis grid
+      falls back to the raw preview when a processed page isn't ready yet). */
+  fallbackUrl?: (n: number) => string
   selected: Set<number>
   onTogglePage: (n: number) => void
   onOpenPage: (n: number) => void
 }) {
-  const { pages, pageCount, imageUrl, selected, onTogglePage, onOpenPage } = props
+  const { pages, pageCount, imageUrl, fallbackUrl, selected, onTogglePage, onOpenPage } = props
   const { t } = useT()
   return (
     <div className="grid h-full grid-cols-2 gap-4 overflow-y-auto bg-rail/10 p-4 xl:grid-cols-3" style={{ gridAutoRows: 'min-content' }}>
@@ -54,16 +126,15 @@ export function PageGrid(props: {
             onClick={() => onOpenPage(n)}
             title={t('grid_tip')}
           >
-            <img
+            <GridThumb
               src={imageUrl(n)}
+              fallbackSrc={fallbackUrl?.(n)}
               alt={t('page_of', { a: n + 1, b: pageCount })}
-              loading="lazy"
-              draggable={false}
-              className="aspect-[3/4] w-full object-contain"
             />
           </button>
-          {/* Page number chip — bottom center, always readable over the thumbnail. */}
-          <span className="pointer-events-none absolute bottom-1.5 left-1/2 -translate-x-1/2 rounded-full border border-line bg-surface/90 px-2 text-2xs font-semibold text-ink">
+          {/* Page number chip — bottom center, always readable over the thumbnail.
+              Clear of the top-left checkbox island; nowrap so it never clips. */}
+          <span className="pointer-events-none absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-line bg-surface/90 px-2 text-2xs font-semibold leading-tight text-ink">
             {n + 1}
           </span>
           {/* Include-in-run checkbox: its own island; keyboard toggling (Space) must
