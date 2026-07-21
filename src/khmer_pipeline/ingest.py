@@ -13,6 +13,51 @@ DEFAULT_DPI = 200
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tiff", ".tif"}
 
+# Auto-DPI: a clean, high-density source needs no more than 200 DPI (enough for
+# Khmer table OCR, and faster / lighter on memory); a faint or low-resolution
+# scan is rendered at 300 so each glyph carries more pixels for the recognizer.
+# The threshold is the source's own native density (embedded-image px per inch).
+_AUTO_DPI_CLEAN = 200
+_AUTO_DPI_FALLBACK = 300
+# Below this native density a source reads as a low-res/faint scan. 250 sits
+# comfortably under a true 300-DPI scan and above the ~150-DPI faxed range.
+_AUTO_DPI_DENSITY_THRESHOLD = 250.0
+
+
+def _page_native_density(page) -> float | None:
+    """Native horizontal density (px per inch) of a PDF page's largest embedded
+    image, or None for a vector/born-digital page. Assumes a full-page scan image
+    (the ARDB/scanned-document case) — a partial image only skews the estimate
+    toward a lower density, which biases safely toward the higher render DPI."""
+    imgs = page.get_images(full=True)
+    if not imgs:
+        return None
+    page_w_in = page.rect.width / 72.0
+    if page_w_in <= 0:
+        return None
+    widest = max(img[2] for img in imgs)  # get_images tuple: (xref, smask, width, …)
+    return (widest / page_w_in) if widest else None
+
+
+def resolve_auto_dpi(source: bytes, source_name: str) -> int:
+    """Pick a render DPI for the 'auto' setting by inspecting the source.
+
+    200 for clean, high-density PDFs and for images (ingested at native pixels
+    regardless); 300 for faint/low-resolution scans, where more pixels per glyph
+    aids Khmer OCR. The worst (lowest-density) page drives the decision — one
+    faint page is enough to warrant the higher DPI. Unreadable metadata biases to
+    300 (accuracy over speed)."""
+    if Path(source_name).suffix.lower() != ".pdf":
+        return _AUTO_DPI_CLEAN
+    try:
+        with fitz.open(stream=source, filetype="pdf") as doc:
+            densities = [d for page in doc if (d := _page_native_density(page)) is not None]
+    except Exception:
+        return _AUTO_DPI_FALLBACK
+    if not densities:
+        return _AUTO_DPI_CLEAN  # vector/born-digital: nothing to upscale
+    return _AUTO_DPI_CLEAN if min(densities) >= _AUTO_DPI_DENSITY_THRESHOLD else _AUTO_DPI_FALLBACK
+
 
 def ingest(source: bytes, source_name: str, dpi: int = DEFAULT_DPI,
            page_indices: list[int] | None = None) -> IngestResult:

@@ -86,7 +86,7 @@ def test_meta_lists_engines_and_defaults(client):
     engine_keys = [e["key"] for e in body["engines"]]
     assert {"surya", "surya_kiri", "surya_kiri_vlm"} <= set(engine_keys)
     assert all("label" in e and "guidance" in e for e in body["engines"])
-    assert body["defaults"]["dpi"] == 200
+    assert body["defaults"]["dpi"] == "auto"
     assert body["backend_ready"] is False
 
 
@@ -724,3 +724,107 @@ def test_status_exposes_sub_step(client):
     registry.get(doc_id).progress.step = "tables"
     body = client.get(f"/api/documents/{doc_id}/status").json()
     assert body["step"] == "tables"
+
+
+# ── HITL correction capture (§2.67) ──────────────────────────────────────────
+# Verifying a table the analyst edited turns those fixes into training pairs.
+# Capture is strictly a side effect: it must never alter or break the save.
+
+def _doc_for_capture(client, tmp_path, monkeypatch):
+    """A document with one page, one table whose cell carries recognizer geometry,
+    plus an analyst edit of that cell. Returns (doc_id, table_id)."""
+    import numpy as np
+    from types import SimpleNamespace
+    from webapp import api as api_mod
+    from webapp.api import registry
+
+    doc_id = _upload(client).json()["documents"][0]["id"]
+    doc = registry.get(doc_id)
+    img = np.full((40, 40, 3), 255, dtype=np.uint8)
+    cell = {
+        "row_id": 0, "col_id": 0, "bbox": [1, 1, 20, 20],
+        "text_lines": [{"text": "១០០"}], "confidence": 0.4,
+    }
+    doc.surya_result = SimpleNamespace(pages=[SimpleNamespace(tables=[{"cells": [cell]}])])
+    doc.preprocess_result = SimpleNamespace(recognition_page_images=[img], page_images=[img])
+    doc.export_result = SimpleNamespace(document_json={
+        "pages": [{"tables": [{"table_id": "t1", "cells": [{"row": 0, "col": 0, "text": "១០០"}]}]}]
+    })
+    doc.edited_tables["t1"] = [["២០០"]]  # the analyst's fix
+    monkeypatch.setattr(api_mod, "_CORRECTIONS_DIR", tmp_path / "corrections")
+    return doc_id, "t1"
+
+
+def test_verifying_an_edited_table_captures_training_pairs(client, tmp_path, monkeypatch):
+    doc_id, tid = _doc_for_capture(client, tmp_path, monkeypatch)
+    r = client.put(f"/api/documents/{doc_id}/review/{tid}", json={"verified": True})
+    assert r.status_code == 200 and r.json()["verified"] is True
+
+    store = tmp_path / "corrections"
+    lines = (store / "corrections.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    import json
+    rec = json.loads(lines[0])
+    assert rec["text"] == "២០០"
+    assert (store / rec["image"]).exists()
+
+
+def test_unverifying_captures_nothing(client, tmp_path, monkeypatch):
+    doc_id, tid = _doc_for_capture(client, tmp_path, monkeypatch)
+    client.put(f"/api/documents/{doc_id}/review/{tid}", json={"verified": False})
+    assert not (tmp_path / "corrections" / "corrections.jsonl").exists()
+
+
+def test_reverifying_the_same_table_does_not_duplicate(client, tmp_path, monkeypatch):
+    doc_id, tid = _doc_for_capture(client, tmp_path, monkeypatch)
+    for verified in (True, False, True):  # toggling must not append twice
+        client.put(f"/api/documents/{doc_id}/review/{tid}", json={"verified": verified})
+    lines = (tmp_path / "corrections" / "corrections.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+
+
+def test_capture_failure_never_breaks_the_save(client, tmp_path, monkeypatch):
+    """An analyst's verification must land even if capture explodes."""
+    from webapp import api as api_mod
+    doc_id, tid = _doc_for_capture(client, tmp_path, monkeypatch)
+
+    def boom(**kwargs):
+        raise OSError("disk on fire")
+    monkeypatch.setattr(api_mod, "capture_corrections", boom)
+
+    r = client.put(f"/api/documents/{doc_id}/review/{tid}", json={"verified": True})
+    assert r.status_code == 200 and r.json()["verified"] is True
+    from webapp.api import registry
+    assert registry.get(doc_id).reviewed[tid] is True
+
+
+def test_auto_engine_is_offered_and_accepted(client):
+    """The validated `auto` router must be reachable from the UI (§2.57)."""
+    engines = client.get("/api/meta").json()["engines"]
+    assert "auto" in {e["key"] for e in engines}
+    doc_id = _upload(client).json()["documents"][0]["id"]
+    # A run payload naming it must pass validation (api.py `_settings_from`).
+    from webapp.settings import Settings
+    from webapp.api import _settings_from
+    assert _settings_from({"ocr_engine_key": "auto"}).ocr_engine_key == "auto"
+    assert Settings().ocr_engine_key == "auto"  # the out-of-the-box default
+    assert doc_id
+
+
+def test_auto_engine_is_first_in_the_picker(client):
+    """`auto` is the recommended default, so it leads the Recognition engine list."""
+    engines = client.get("/api/meta").json()["engines"]
+    assert engines[0]["key"] == "auto"
+
+
+def test_dpi_accepts_auto_and_rejects_garbage(client):
+    """`dpi` may be "auto" or a positive int; anything else is a 400, not a crash
+    deep in ingest (dpi/72)."""
+    from webapp.api import _settings_from
+    from webapp.state import Document
+    assert _settings_from({"dpi": "auto"}).dpi == "auto"
+    assert _settings_from({"dpi": 300}).dpi == 300
+    doc_id = _upload(client).json()["documents"][0]["id"]
+    assert doc_id
+    r = client.post(f"/api/documents/{doc_id}/run", json={"dpi": "medium"})
+    assert r.status_code == 400

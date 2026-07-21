@@ -194,3 +194,57 @@ def test_multiframe_tiff_over_limit_raises():
     data = _make_multiframe_tiff(MAX_PAGES + 1, size=(4, 4))
     with pytest.raises(ValueError, match="limit is"):
         ingest(data, "big.tiff")
+
+
+# ── Auto-DPI resolution (§2.68) ──────────────────────────────────────────────
+# "auto" picks a render DPI by inspecting the PDF's embedded-image density:
+# high-density/vector → 200 (enough, faster); faint/low-res scans → 300 (more
+# pixels per Khmer glyph, prioritising accuracy over speed).
+
+def _make_scanned_pdf(img_w: int, img_h: int, page_w: int = 595, page_h: int = 842) -> bytes:
+    """A one-page PDF whose full-page content is a raster image of img_w×img_h px.
+    Native density ≈ img_w / (page_w/72) DPI."""
+    doc = fitz.open()
+    page = doc.new_page(width=page_w, height=page_h)
+    pil = Image.new("RGB", (img_w, img_h), color=(180, 180, 180))
+    buf = io.BytesIO(); pil.save(buf, format="PNG")
+    page.insert_image(page.rect, stream=buf.getvalue())
+    return doc.tobytes()
+
+
+def test_auto_dpi_high_density_scan_uses_200():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # 595pt ≈ 8.26in; 2480px / 8.26in ≈ 300 DPI native → clean, 200 suffices.
+    pdf = _make_scanned_pdf(2480, 3508)
+    assert resolve_auto_dpi(pdf, "clean.pdf") == 200
+
+
+def test_auto_dpi_low_density_scan_falls_back_to_300():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # 850px / 8.26in ≈ 103 DPI native → faint/low-res, upscale to 300 for OCR.
+    pdf = _make_scanned_pdf(850, 1100)
+    assert resolve_auto_dpi(pdf, "faint.pdf") == 300
+
+
+def test_auto_dpi_born_digital_pdf_uses_200():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # Vector text, no embedded raster → nothing to upscale.
+    assert resolve_auto_dpi(_make_pdf(), "vector.pdf") == 200
+
+
+def test_auto_dpi_image_input_uses_200():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # Images ingest at native pixels regardless; dpi is not a render knob for them.
+    assert resolve_auto_dpi(_make_png(), "scan.png") == 200
+
+
+def test_auto_dpi_worst_page_drives_decision():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # One faint page among clean ones is enough to warrant the higher DPI.
+    doc = fitz.open()
+    for w, h in ((2480, 3508), (850, 1100)):
+        page = doc.new_page(width=595, height=842)
+        pil = Image.new("RGB", (w, h), color=(180, 180, 180))
+        buf = io.BytesIO(); pil.save(buf, format="PNG")
+        page.insert_image(page.rect, stream=buf.getvalue())
+    assert resolve_auto_dpi(doc.tobytes(), "mixed.pdf") == 300

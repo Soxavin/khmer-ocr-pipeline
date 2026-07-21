@@ -99,6 +99,25 @@ def _write_sheet(records: list[dict], out_dir: Path, layout_path: str, note: str
     return html_path
 
 
+def _check_geometry(records: list[dict], dir_: Path) -> list[str]:
+    """Every crop's pixel size must equal its recorded bbox. A mismatch means the
+    coordinate mapping drifted — the crop is not the cell the label describes, so
+    the pair would teach the recognizer a wrong association. Caught here, before
+    the data ever reaches training."""
+    problems = []
+    for rec in records:
+        box = (rec.get("provenance") or {}).get("bbox")
+        img_path = dir_ / rec.get("image", "")
+        if not box or len(box) != 4 or not img_path.exists():
+            problems.append(f"{rec.get('image')}: missing crop or bbox")
+            continue
+        expected = (int(box[2]) - int(box[0]), int(box[3]) - int(box[1]))
+        with Image.open(img_path) as im:
+            if im.size != expected:
+                problems.append(f"{rec['image']}: crop {im.size} != bbox {expected}")
+    return problems
+
+
 def _inspect(dir_: Path) -> None:
     """Render a contact sheet from an existing corrections store. Read-only."""
     jsonl = dir_ / "corrections.jsonl"
@@ -106,6 +125,13 @@ def _inspect(dir_: Path) -> None:
         sys.exit(f"no corrections.jsonl in {dir_}")
     records = [json.loads(l) for l in jsonl.read_text(encoding="utf-8").splitlines() if l.strip()]
     print(f"{len(records)} accumulated corrections in {dir_}")
+    problems = _check_geometry(records, dir_)
+    if problems:
+        print(f"GEOMETRY MISMATCH in {len(problems)} record(s) — do not train on this store:")
+        for p in problems[:10]:
+            print(f"  {p}")
+        sys.exit(1)
+    print("geometry OK: every crop matches its recorded bbox")
     path = _write_sheet(
         records, dir_, "as captured",
         "Each tile is a real analyst correction that would become a training pair. "

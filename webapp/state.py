@@ -59,6 +59,10 @@ class Document:
     edited_text: dict[int, str] = field(default_factory=dict)
     # table_id → analyst marked the table verified (React review workflow).
     reviewed: dict[str, bool] = field(default_factory=dict)
+    # table_ids whose corrections have already been captured as training pairs.
+    # capture_corrections APPENDS, so without this, toggling verified off and on
+    # again would duplicate every pair in the corpus.
+    captured: set[str] = field(default_factory=set)
     selected: tuple | None = None  # (table_id, row, col) currently linked cell↔box
 
     @property
@@ -88,6 +92,7 @@ class Document:
         self.current_page_idx = 0
         self.edited_tables = {}
         self.reviewed = {}
+        self.captured = set()
         self.edited_text = {}
         self.selected = None
 

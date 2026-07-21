@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import io
 import urllib.parse
+import warnings
 import zipfile
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -23,6 +24,7 @@ from nicegui import app
 
 from khmer_pipeline.export import grid_to_csv, tables_to_xlsx
 from khmer_pipeline.ingest import ingest
+from khmer_pipeline.corrections import capture_corrections
 from khmer_pipeline.preprocess import suggest_preprocess_settings
 from khmer_pipeline.model_config import CELL_CONF_LOW
 from khmer_pipeline.utils.backend_status import llama_server_running
@@ -49,7 +51,10 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     return JSONResponse(status_code=exc.status, content={"detail": exc.detail})
 
 # Task-language engine labels (no jargon in the UI; keys map to the registry).
+# `auto` leads: it is the recommended default and picks the right engine per doc.
 _ENGINES = [
+    {"key": "auto", "label": "Automatic",
+     "guidance": "Picks the best engine for each document. Recommended."},
     {"key": "surya", "label": "Standard",
      "guidance": "Best all-round, fastest. Use for number-heavy or wide tables."},
     {"key": "surya_kiri", "label": "Khmer-text specialist",
@@ -196,6 +201,9 @@ def _settings_from(payload: dict) -> Settings:
     s = Settings(**payload)
     if s.ocr_engine_key not in {e["key"] for e in _ENGINES}:
         raise ApiError(400, f"Unknown engine {s.ocr_engine_key!r}")
+    # dpi is "auto" or a positive int — anything else would blow up in ingest (dpi/72).
+    if s.dpi != "auto" and not (isinstance(s.dpi, int) and s.dpi > 0):
+        raise ApiError(400, f"Invalid dpi {s.dpi!r} (expected 'auto' or a positive integer).")
     if s.invalid_range:
         raise ApiError(400, "Page range end is before start.")
     return s
@@ -383,13 +391,79 @@ def api_lowconf(doc_id: str) -> dict:
     return {"issues": issues}
 
 
+# Where analyst corrections accumulate (gitignored — real document content).
+# Module-level so tests can redirect it away from the real store.
+_CORRECTIONS_DIR = Path("corrections")
+
+
+def _locate_table(document_json: dict, table_id: str) -> tuple[int, int] | None:
+    """(page_index, index_within_page) for `table_id`, or None if it cannot be
+    located. Fails soft by design: a malformed or stitched structure must never
+    crash an analyst's save — it just means there is nothing to capture."""
+    try:
+        if tables.is_stitched(document_json):
+            return None  # doc-level tables have no page alignment to crop against
+        for page_idx in range(len(document_json.get("pages", []))):
+            blocks = tables.page_table_blocks(document_json, page_idx)
+            for t_idx, block in enumerate(blocks):
+                if block.get("table_id") == table_id:
+                    return page_idx, t_idx
+    except Exception:
+        return None
+    return None
+
+
+def _capture_verified_table(doc: Document, doc_id: str, table_id: str) -> None:
+    """Turn an analyst's edits to a newly VERIFIED table into training pairs.
+
+    Strictly a side effect of verification: every failure is reported through the
+    warnings channel and swallowed, so a capture problem can never cost an analyst
+    their save."""
+    try:
+        if table_id in doc.captured or table_id not in doc.edited_tables:
+            return  # already captured, or nothing was edited to learn from
+        located = _locate_table(doc.export_result.document_json, table_id)
+        if located is None:
+            return
+        page_idx, t_idx = located
+        # Cells carrying geometry live on the OCR result; the export blocks hold
+        # only row/col/text, so cropping from those would capture nothing.
+        page_tables = doc.surya_result.pages[page_idx].tables
+        pre = doc.preprocess_result
+        # The frame the recognizer READ — a crop from the display frame would not
+        # match inference conditions (§2.30).
+        page_images = getattr(pre, "recognition_page_images", None) or pre.page_images
+        settings = registry.last_run_settings(doc_id) or {}
+        records = capture_corrections(
+            tables=page_tables,
+            edited_grids={str(t_idx): doc.edited_tables[table_id]},
+            page_images=page_images,
+            source_name=doc.upload_name,
+            out_dir=_CORRECTIONS_DIR,
+            engine=str(settings.get("ocr_engine_key", "surya_kiri")),
+            page_index=page_idx,
+        )
+        doc.captured.add(table_id)
+        if records:
+            warnings.warn(f"Captured {len(records)} correction(s) from {table_id}.")
+    except Exception as e:
+        # repr() keeps the cause distinguishable (permissions vs index mismatch vs
+        # serialization) instead of collapsing to a generic "capture failed".
+        warnings.warn(f"Correction capture skipped for {table_id}: {e!r}")
+
+
 @app.put("/api/documents/{doc_id}/review/{table_id}")
 def api_review(doc_id: str, table_id: str, payload: dict) -> dict:
     doc = _doc_with_results(doc_id)
     known = {tid for tid, _g, _c in tables.all_export_tables(doc.export_result.document_json)}
     if table_id not in known:
         raise ApiError(404, f"Unknown table {table_id!r}")
+    was_verified = bool(doc.reviewed.get(table_id))
     doc.reviewed[table_id] = bool(payload.get("verified"))
+    # Only the gold-standard transition earns capture: the model never learns from
+    # its own unverified output.
+    if doc.reviewed[table_id] and not was_verified:
+        _capture_verified_table(doc, doc_id, table_id)
     return {"ok": True, "verified": doc.reviewed[table_id]}
 
 

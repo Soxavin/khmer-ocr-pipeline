@@ -14,7 +14,9 @@ from khmer_pipeline.model_config import ANOMALY_THRESHOLD
 
 @dataclass
 class Settings:
-    dpi: int = 200
+    # "auto" inspects each document's density to pick 200 or 300 (see
+    # ingest.resolve_auto_dpi); an explicit int forces that render DPI.
+    dpi: "int | str" = "auto"
     page_scope: str = "all"          # "all" | "single" | "range" | "list"
     page_num: int = 1
     page_start: int = 1
@@ -28,7 +30,9 @@ class Settings:
     deskew: bool = True
     normalise_table_backgrounds: bool = True
 
-    ocr_engine_key: str = "surya"    # "surya" | "surya_kiri"
+    # "auto" routes per document (surya_kiri, falling back to surya on low
+    # confidence) and matched the best manual engine on all 7 GT pages (§2.57).
+    ocr_engine_key: str = "auto"     # "auto" | "surya" | "surya_kiri" | "surya_kiri_vlm"
     tables_only: bool = False
 
     enable_qwen: bool = False

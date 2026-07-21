@@ -16,7 +16,7 @@ from typing import Callable
 
 from nicegui import run
 
-from khmer_pipeline.ingest import ingest
+from khmer_pipeline.ingest import ingest, resolve_auto_dpi
 from khmer_pipeline.preprocess import preprocess, suggest_preprocess_settings, PreprocessConfig
 from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export
@@ -42,6 +42,9 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
     times: dict[str, float] = {}
     state.run_error = None
     state.progress.active = True
+    # "auto" DPI is resolved once here, from the actual document, into a concrete
+    # render DPI that ingest and the provenance record both see.
+    dpi = resolve_auto_dpi(state.upload_bytes, state.upload_name) if s.dpi == "auto" else int(s.dpi)
     # NOTE: cancel_requested is deliberately NOT cleared here. `reset_run` already
     # provides a fresh progress object; clearing again would silently swallow a
     # cancel that lands in the reset→start window (§2.56 race).
@@ -66,13 +69,15 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
     try:
         state.ingest_result = await _stage(
             "Reading the document…", "Stage 1 — Ingest",
-            ingest, state.upload_bytes, state.upload_name, dpi=s.dpi, page_indices=page_indices,
+            ingest, state.upload_bytes, state.upload_name, dpi=dpi, page_indices=page_indices,
         )
 
         config = PreprocessConfig(
             remove_stamps=s.remove_stamps, sharpen=s.sharpen, normalise=s.normalise,
             deskew=s.deskew, normalise_table_backgrounds=s.normalise_table_backgrounds,
-            with_recognition_images=(s.ocr_engine_key == "surya_kiri"),
+            # `auto` may route to surya_kiri, which reads the geometric-only frame;
+            # omitting it silently costs accuracy (§2.30), so both keys request it.
+            with_recognition_images=(s.ocr_engine_key in ("surya_kiri", "auto")),
         )
         state.preprocess_result = await _stage(
             "Cleaning the pages…", "Stage 2 — Preprocess",
@@ -121,7 +126,8 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
         provenance = {
             "engine": s.ocr_engine_key,
             "surya_ocr_version": surya_ver,
-            "dpi": s.dpi,
+            "dpi": dpi,
+            "dpi_auto": s.dpi == "auto",
             "preprocess": {
                 "remove_stamps": s.remove_stamps, "sharpen": s.sharpen,
                 "normalise": s.normalise, "deskew": s.deskew,
