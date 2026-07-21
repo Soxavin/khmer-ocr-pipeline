@@ -2268,6 +2268,105 @@ from the old configuration survives into the new review.
 detector 0 findings. Server restarted (backend touched; registry cleared); bundle
 `index-BoZU3nNU.js` live.
 
+### 2.67 Sub-stage telemetry fix, `auto` engine exposed, HITL capture wired (§2.67)
+
+**Problem.** (1) The §2.66 sub-stage telemetry did not work and was reported to the
+user as working. (2) The validated `auto` router was registered but unreachable from
+the UI. (3) `corrections.capture_corrections()` (built + tested, 11 tests) had no
+caller in the webapp.
+
+**Investigation — two defects, both from §2.66.** `on_step` was added to `run_surya`
+ONLY; `run_surya_kiri`, `run_surya_kiri_vlm` and `run_auto` all take `(result,
+on_page)`. Because the runner passes `on_step` only to engines whose signature accepts
+it, every Kiri-family engine silently reported nothing. Separately, even on `surya` the
+order was wrong: `_step("tables")` fired BEFORE `_step("text")`. The mechanism had been
+verified against one engine and the claim generalised without checking which engine was
+actually selected.
+
+**Decision.**
+
+*Part 0 — telemetry.* Step order corrected (layout → text → tables, "tables" now fires
+after the recognition block). `on_step` threaded through `surya_kiri` (forwarded to its
+inner `run_surya`, plus its own per-page table step), `surya_kiri_vlm` (same shape) and
+`auto` (forwarded to BOTH routed engines). The durable fix is the **regression guard**
+in `tests/test_engine_registry.py`: every engine in `_OCR_ENGINES` must accept `on_step`
+or appear in an explicit `_NO_SUBSTEP_ENGINES` set (`tesseract`, `hybrid`). This turns a
+silent, engine-dependent runtime failure into a static test failure — it named all three
+broken engines immediately.
+
+*Part A — `auto` exposed.* Added to `_ENGINES` as "Automatic" (matching the existing
+task-language register — "Standard", "Khmer-text specialist" — rather than an engine
+name). `with_recognition_images` now covers `("surya_kiri", "auto")`: `auto` may route to
+surya_kiri, which needs the geometric-only frame, and omitting it is a measured accuracy
+loss (§2.30) that surya_kiri only *warns* about. `Settings.ocr_engine_key` now defaults
+to `"auto"`; the frontend persists the last engine in localStorage, so only fresh
+profiles inherit the new default.
+
+*Part B — HITL capture.* Hooked into `api_review` on the `False → True` verification
+transition only (gold-standard rule). Two corrections to the handover sketch, found by
+reading the code: `tables=` must be `doc.surya_result.pages[n].tables` (export blocks
+carry `row`/`col`/`text` and NO geometry, so capture would have silently produced
+nothing), and the positional key mapping needs a `table_id → (page_idx, t_idx)` lookup
+derived from `document_json` via `tables.page_table_blocks`. Crops come from
+`recognition_page_images`. A `captured: set[str]` on `Document` prevents duplicate pairs
+when verification is toggled off and on (capture APPENDS). The whole call is wrapped so
+a failure can never cost an analyst their save.
+
+*Reviewer safeguards (user).* The `except` reports `repr(e)` so permissions vs index
+mismatch vs serialization stay distinguishable; `_locate_table` fails soft (returns
+`None`) on stitched or malformed structures; and `verify_corrections.py --inspect` gained
+a **geometry gate** asserting each crop's pixel size equals its recorded bbox, exiting
+non-zero on drift. Verified both ways against a generated store: clean data passes, a
+deliberately corrupted crop is caught.
+
+**Outcome.** pytest 742 (from 736), py_compile clean. Server restarted; `/api/meta` now
+serves four engines with `auto` as the default. Frontend untouched — the picker renders
+from `/api/meta`.
+
+### 2.68 Engine order, Auto-DPI, settings-badge override count (§2.68)
+
+**Problem.** (1) `auto` was added last in the picker (§2.67) but is the recommended
+default — it should lead. (2) Analysts had to guess a DPI; a faint scan at 200 loses
+glyph detail. (3) The Settings badge showed a persistent count the user read as "total
+settings", not overrides.
+
+**Investigation — item 3 was already diff-based.** The badge already computed
+`changedSettings` (fields differing from `/api/meta` defaults) and hid at zero, so the
+brief's stated fix was a no-op. The real defect: the diff ran over ALL ~19 dataclass
+fields, including ones the drawer never exposes (`show_layout`, `overlay_mode`,
+`tables_only`, `stitch_pages`) — a stale or seeded value on any of those inflated the
+number with no control the user could touch to clear it. Fixed by scoping the count to
+an explicit allowlist of the 11 controls the drawer presents (`countOverrides` in
+`frontend/src/lib/settings.ts`, 5 tests), which also collapses page sub-fields so one
+page-scope change counts once.
+
+**Decision.**
+
+*Item 1.* Moved `auto` to index 0 of `_ENGINES`; `Settings.ocr_engine_key` default
+already `"auto"` (§2.67). Guarded by `test_auto_engine_is_first_in_the_picker`.
+
+*Item 2 — Auto-DPI.* `Settings.dpi` now accepts `"auto"` (the new default) or a
+positive int; `_settings_from` validates the union and 400s on anything else (a bad dpi
+would otherwise blow up in ingest's `dpi/72`). New `ingest.resolve_auto_dpi(bytes, name)`
+inspects each PDF page's embedded-image density (widest image px ÷ page width in inches):
+≥250 native DPI, or vector/born-digital, or an image input → 200; below that → 300, so a
+faint/low-res scan is upsampled for more pixels per Khmer glyph. **Worst page wins** (one
+faint page warrants 300), and unreadable metadata biases to 300 (accuracy over speed).
+The runner resolves `"auto"` to a concrete DPI once, from the actual document, before
+ingest, and records both the resolved `dpi` and a `dpi_auto` flag in provenance. 6 tests.
+
+*Physical note.* Upsampling a low-native-DPI scan to 300 adds no new information, but
+larger glyphs help the recognizer (whose input has an optimal glyph height), and it never
+hurts a smooth bicubic upscale — so "faint → 300" is a sound accuracy/speed trade, not
+magic resolution recovery. 200 stays the default for clean/high-density work to keep the
+24 GB Mac's memory and runtime down.
+
+*Item 3.* `countOverrides(settings, defaults)` over the allowlist replaces the inline
+all-fields diff; the badge still hides at zero. The auto-DPI default reads as unchanged.
+
+**Outcome.** pytest 749 (from 742), vitest 50 (from 45), `tsc -b` + build clean, detector
+0. Server restarted; `/api/meta` serves `auto` first with `dpi: "auto"` default.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
