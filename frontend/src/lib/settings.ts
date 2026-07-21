@@ -29,6 +29,27 @@ export function mergeSuggestion(
   return next
 }
 
+// The settings the drawer actually exposes as distinct controls. The badge counts
+// deviations over THESE only, so seeded or stale non-UI fields (show_layout,
+// overlay_mode, tables_only, stitch_pages, ocr_engine_key) never inflate it. Page
+// sub-fields (page_num/start/end/list) are omitted so one page-scope change counts
+// once, not several times.
+const OVERRIDE_KEYS = [
+  'dpi', 'page_scope',
+  'remove_stamps', 'sharpen', 'normalise', 'deskew', 'normalise_table_backgrounds',
+  'enable_qwen', 'anomaly_threshold',
+  'repair_tables', 'convert_numerals',
+] as const
+
+/** How many user-facing controls deviate from their defaults — the number on the
+    Settings badge. 0 (badge hidden) when the configuration is untouched. */
+export function countOverrides(settings: RunSettings, defaults: RunSettings | undefined): number {
+  if (!defaults) return 0
+  return OVERRIDE_KEYS.filter(
+    (k) => k in defaults && k in settings && JSON.stringify(settings[k]) !== JSON.stringify(defaults[k]),
+  ).length
+}
+
 export type ScanSummary = { total: number; active: number; fields: string[] }
 
 /** One-line digest of a document's scan check, for the post-upload notice.

@@ -13,7 +13,7 @@ import { TablesPanel } from './components/review/TablesPanel'
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useRunStatus } from './hooks/useRunStatus'
 import { encodePages, gridPages, pagesFromSettings } from './lib/pages'
-import { mergeSuggestion, scanSummary } from './lib/settings'
+import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
 import { useT } from './i18n.tsx'
 import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
@@ -637,11 +637,9 @@ export default function App() {
   }, [active, activeId, status.data?.active, run, combineExport, cycleTheme, setLang, lang, issues, meta.data?.engines, engine, runSettings, documents, pageCount, pageIdx, jumpToIssue, selectDoc, t])
   const warnings = overview.data?.warnings ?? []
 
-  // How many settings differ from server defaults — surfaced on the Settings
-  // button so a tuned configuration is visible before it bites.
-  const changedSettings = defaults
-    ? Object.keys(defaults).filter((k) => k in runSettings && JSON.stringify(runSettings[k]) !== JSON.stringify(defaults[k])).length
-    : 0
+  // Deliberate overrides on the Settings button — deviations on the controls the
+  // drawer actually exposes, so seeded/stale non-UI fields never inflate it.
+  const changedSettings = countOverrides(runSettings, defaults)
 
   // Staleness: current form vs the settings the visible results were made with.
   // appliedConfiguration: the frozen snapshot the visible results were made with.

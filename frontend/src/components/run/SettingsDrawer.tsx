@@ -156,24 +156,27 @@ export function SettingsDrawer(props: {
           {/* Stacked rows with block labels — no jagged side-by-side alignment. */}
           <div className="mb-3">
             <span className="mb-1 block text-xs font-medium text-ink-2">{t('dpi')}</span>
-            {/* Segmented control, same pattern as the viewer's Cleaned⇄Original. */}
+            {/* Segmented control, same pattern as the viewer's Cleaned⇄Original.
+                'Auto' leads: it reads the document's density and picks 200 or 300. */}
             <span className="inline-flex overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('dpi')}>
-              {[150, 200, 300].map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  aria-pressed={Number(settings.dpi ?? 200) === d}
-                  className={`h-6 px-2.5 text-xs font-medium transition-colors duration-75 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                    Number(settings.dpi ?? 200) === d
-                      ? 'bg-primary-soft text-primary-strong'
-                      : 'bg-surface text-ink-2 hover:bg-rail'
-                  }`}
-                  disabled={disabled}
-                  onClick={() => set('dpi', d)}
-                >
-                  {d}
-                </button>
-              ))}
+              {(['auto', 150, 200, 300] as const).map((d) => {
+                const selected = (settings.dpi ?? 'auto') === d
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={selected}
+                    className={`h-6 px-2.5 text-xs font-medium transition-colors duration-75 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                      selected ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
+                    }`}
+                    title={d === 'auto' ? t('dpi_auto_tip') : undefined}
+                    disabled={disabled}
+                    onClick={() => set('dpi', d)}
+                  >
+                    {d === 'auto' ? t('dpi_auto') : d}
+                  </button>
+                )
+              })}
             </span>
           </div>
           <span className="mb-1 block text-xs font-medium text-ink-2">{t('pages')}</span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoBadge, mergeSuggestion, scanSummary } from './settings'
+import { autoBadge, countOverrides, mergeSuggestion, scanSummary } from './settings'
 import type { SuggestCheck } from '../api/types'
 
 describe('autoBadge (the badge means "automation touched this row")', () => {
@@ -55,5 +55,36 @@ describe('scanSummary (post-upload notification)', () => {
 
   it('is null-safe for a document with no checks yet', () => {
     expect(scanSummary([])).toBeNull()
+  })
+})
+
+describe('countOverrides (Settings badge — deliberate overrides only)', () => {
+  const defaults = {
+    dpi: 'auto', page_scope: 'all', remove_stamps: true, sharpen: true,
+    normalise: true, deskew: true, normalise_table_backgrounds: true,
+    enable_qwen: false, anomaly_threshold: 0.15, repair_tables: false,
+    convert_numerals: false,
+    // Non-UI fields that must never inflate the badge:
+    show_layout: true, overlay_mode: 'Region type', tables_only: false, stitch_pages: true,
+  }
+
+  it('is 0 when nothing deviates from defaults', () => {
+    expect(countOverrides({ ...defaults }, defaults)).toBe(0)
+  })
+
+  it('counts each changed user-facing control', () => {
+    expect(countOverrides({ ...defaults, sharpen: false, dpi: 300 }, defaults)).toBe(2)
+  })
+
+  it('ignores non-UI fields even when they differ (stale/seeded values)', () => {
+    expect(countOverrides({ ...defaults, show_layout: false, stitch_pages: false, tables_only: true }, defaults)).toBe(0)
+  })
+
+  it('the auto DPI default reads as unchanged', () => {
+    expect(countOverrides({ ...defaults, dpi: 'auto' }, defaults)).toBe(0)
+  })
+
+  it('is null-safe with no defaults yet', () => {
+    expect(countOverrides({ sharpen: false }, undefined)).toBe(0)
   })
 })
