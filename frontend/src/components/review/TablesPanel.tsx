@@ -1,13 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, Info, Undo2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Info, Search, Undo2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { TableEditor } from './TableEditor'
 import { useT } from '../../i18n.tsx'
-import { btnSmCls, iconBtnCls, inputCls } from '../../ui'
+import { bandCells, nextInBand, type Band } from '../../lib/confidence'
+import { btnSmCls, chipCls, iconBtnCls, inputCls } from '../../ui'
 
-const CONF_LOW = 0.5 // text-block bucket (model_config.py CONFIDENCE_LOW)
+// Triage bands, most-urgent first, with their semantic chip + dot styling.
+const BAND_ORDER: Band[] = ['check', 'skim', 'clean']
+const BAND_STYLE: Record<Band, { dot: string; chip: string }> = {
+  check: { dot: 'bg-danger', chip: 'bg-danger-soft text-danger-ink hover:bg-danger-soft/70' },
+  skim: { dot: 'bg-warn', chip: 'bg-warn-soft text-warn-ink hover:bg-warn-soft/70' },
+  clean: { dot: 'bg-ok', chip: 'bg-ok-soft text-ok-ink hover:bg-ok-soft/70' },
+}
 
 function useKhmerSize(): [number, (n: number) => void] {
   const [size, setSize] = useState(() => Number(localStorage.getItem('khmerSize') ?? 14))
@@ -27,9 +34,12 @@ export function TablesPanel(props: {
   flashToken: { tid: string; n: number } | null
   focusCell: { tid: string; row: number; col: number; n: number } | null
   showFind: boolean
+  onOpenFind: () => void
   onCloseFind: () => void
+  /** Focus a grid cell (triage-band jump): selects, flashes, scrolls + flies the page. */
+  onFocusCell: (tid: string, row: number, col: number) => void
 }) {
-  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onCloseFind } = props
+  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onOpenFind, onCloseFind, onFocusCell } = props
   const qc = useQueryClient()
   const { t } = useT()
   const findRef = useRef<HTMLInputElement>(null)
@@ -87,70 +97,103 @@ export function TablesPanel(props: {
     setTextSaved(true)
   }, [page])
 
-  const lowConfBlocks = page.text_blocks.filter((b) => (b.confidence ?? 0) < CONF_LOW).length
+  // Grid-cell confidence bands + a per-band jump cursor (§2.70). Clicking a chip
+  // cycles focus to the next cell in that band; the counter shows the position.
+  const bands = useMemo(() => bandCells(page.tables), [page.tables])
+  const [cursor, setCursor] = useState<Record<Band, number>>({ check: -1, skim: -1, clean: -1 })
+  // Band contents differ per page/doc — reset the cursors so they never index
+  // out of range on a page turn.
+  useEffect(() => setCursor({ check: -1, skim: -1, clean: -1 }), [docId, pageIdx])
+  const jumpBand = (b: Band) => {
+    const list = bands[b]
+    if (!list.length) return
+    const next = nextInBand(list.length, Math.min(cursor[b], list.length - 1))
+    setCursor((c) => ({ ...c, [b]: next }))
+    const cell = list[next]
+    onFocusCell(cell.table_id, cell.row, cell.col)
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Per-page quality banner + content size control. Numbers carry the weight;
-          labels recede — the banner should scan as facts, not a gray sentence. */}
-      {/* Utility header: facts anchored left, type-size controls right, one fixed row.
-          Overflow scrolls sideways — the header never grows a second line. */}
+      {/* Utility header, three zones: page facts (left) · interactive triage bands
+          (center) · grid utilities (right). One fixed row; overflow scrolls. */}
       <div className="flex h-10 shrink-0 items-center justify-between gap-3 whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3 text-xs">
-        <span className="flex min-w-0 items-center gap-4 overflow-hidden">
-        {/* Facts read as figures first: numbers a step larger and heavier than labels. */}
-        <span className="shrink-0 text-ink-2">
-          <strong className="text-sm font-semibold text-ink">{page.tables.length}</strong>{' '}
-          {page.tables.length === 1 ? t('tables_one') : t('tables_other')}
-        </span>
-        <span className="shrink-0 text-ink-2">
-          <strong className="text-sm font-semibold text-ink">{page.text_blocks.length}</strong>{' '}
-          {page.text_blocks.length === 1 ? t('blocks_one') : t('blocks_other')}
-        </span>
-        {lowConfBlocks > 0 && (
-          <span className="font-semibold text-danger-ink">{t('n_lowconf', { n: lowConfBlocks })}</span>
-        )}
-        {page.tables.length > 1 && page.tables.some((t) => !t.verified) && (
-          <button
-            className={btnSmCls}
-            title={t('verify_page_tip')}
-            onClick={() => {
-              const unverified = page.tables.filter((t) => !t.verified)
-              Promise.all(unverified.map((t) => api.review(docId, t.table_id, true)))
-                .then(() => {
-                  qc.invalidateQueries({ queryKey: ['documents'] })
-                  qc.invalidateQueries({ queryKey: ['page'] })
-                })
-                .catch(() => undefined)
-            }}
-          >
-            <Check size={12} aria-hidden />
-            {t('verify_page')}
-          </button>
-        )}
-        {/* Legend lives in the header as micro swatches — only when this page has tinted cells. */}
-        {page.tables.some((t) => t.confidence.some((row) => row.some((v) => v !== null && v < 0.95))) && (
-          <span className="hidden shrink-0 items-center gap-3 text-ink-2 md:flex">
-            <span className="flex shrink-0 items-center gap-1.5">
-              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px] border border-danger/25" style={{ background: 'var(--cell-low-bg)' }} aria-hidden />
-              <span className="whitespace-nowrap">
-                <span className="underline decoration-danger-ink decoration-dotted underline-offset-2">{t('legend_check_pct')}</span> {t('legend_check')}
-              </span>
-            </span>
-            <span className="flex shrink-0 items-center gap-1.5">
-              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px] border border-warn/25" style={{ background: 'var(--cell-mid-bg)' }} aria-hidden />
-              <span className="whitespace-nowrap">{t('legend_skim')}</span>
-            </span>
+        {/* ── Facts ── numbers first, then the page-level verify action. */}
+        <span className="flex min-w-0 shrink items-center gap-4 overflow-hidden">
+          <span className="shrink-0 text-ink-2">
+            <strong className="text-sm font-semibold text-ink">{page.tables.length}</strong>{' '}
+            {page.tables.length === 1 ? t('tables_one') : t('tables_other')}
           </span>
-        )}
+          <span className="hidden shrink-0 text-ink-2 sm:inline">
+            <strong className="text-sm font-semibold text-ink">{page.text_blocks.length}</strong>{' '}
+            {page.text_blocks.length === 1 ? t('blocks_one') : t('blocks_other')}
+          </span>
+          {page.tables.length > 1 && page.tables.some((t) => !t.verified) && (
+            <button
+              className={btnSmCls}
+              title={t('verify_page_tip')}
+              onClick={() => {
+                const unverified = page.tables.filter((t) => !t.verified)
+                Promise.all(unverified.map((t) => api.review(docId, t.table_id, true)))
+                  .then(() => {
+                    qc.invalidateQueries({ queryKey: ['documents'] })
+                    qc.invalidateQueries({ queryKey: ['page'] })
+                  })
+                  .catch(() => undefined)
+              }}
+            >
+              <Check size={12} aria-hidden />
+              {t('verify_page')}
+            </button>
+          )}
         </span>
-        <span className="flex shrink-0 items-center gap-1" title={t('size_tip')}>
-          <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label={t('size_smaller')}>
-            A−
+
+        {/* ── Triage ── clickable band chips; click cycles to the next cell in the
+            band and flies the page image. Colour is redundant: each chip shows the
+            band word + count (+ live position while cycling) and an aria-label. */}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {BAND_ORDER.map((b) => {
+            const total = bands[b].length
+            if (total === 0) return null
+            const style = BAND_STYLE[b]
+            const active = cursor[b] >= 0
+            return (
+              <button
+                key={b}
+                className={`${chipCls} ${style.chip}`}
+                onClick={() => jumpBand(b)}
+                aria-label={t(`triage_aria_${b}` as Parameters<typeof t>[0], { n: total })}
+                title={t('triage_tip')}
+              >
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden />
+                {active ? t('band_progress', { band: t(`band_${b}` as Parameters<typeof t>[0]), i: cursor[b] + 1, n: total })
+                        : <>{total} {t(`band_${b}` as Parameters<typeof t>[0])}</>}
+              </button>
+            )
+          })}
+        </span>
+
+        {/* ── Grid utilities ── Find + content size. */}
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            className={`${btnSmCls} ${showFind ? 'border-primary/50 bg-primary-soft text-primary-strong' : ''}`}
+            onClick={showFind ? onCloseFind : onOpenFind}
+            aria-pressed={showFind}
+            title={t('find_tip')}
+          >
+            <Search size={12} aria-hidden />
+            {t('find_btn')}
           </button>
-          <span className="text-ink-2">{size}px</span>
-          <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label={t('size_larger')}>
-            A+
-          </button>
+          <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
+          <span className="flex items-center gap-1" title={t('size_tip')}>
+            <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label={t('size_smaller')}>
+              A−
+            </button>
+            <span className="tabular-nums text-ink-2">{size}px</span>
+            <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label={t('size_larger')}>
+              A+
+            </button>
+          </span>
         </span>
       </div>
 

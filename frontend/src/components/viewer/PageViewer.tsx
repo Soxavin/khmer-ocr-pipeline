@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Maximize2, ZoomIn } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, Crosshair, Maximize2, Minus, Plus, ZoomIn } from 'lucide-react'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { useT } from '../../i18n.tsx'
-import { btnSmCls, ICON, ICON_SM, iconBtnCls, selectCls } from '../../ui'
+import { bucketCounts, confBand, type Band } from '../../lib/confidence'
+import { ICON, ICON_SM, iconBtnCls, selectCls } from '../../ui'
 import { ViewToggle } from './PageGrid'
 
-// Text-block confidence buckets (model_config.py: CONFIDENCE_LOW/MID).
-const CONF_LOW = 0.5
-const CONF_MID = 0.8
 // These are SVG stroke colors drawn OVER the page photograph, so they are
 // deliberately theme-independent fixed hex (a dark-mode swap would make the
 // overlay fight the scan, not the UI). They intentionally equal the
@@ -28,9 +26,18 @@ const LABEL_COLORS: Record<string, string> = {
 
 type OverlayMode = 'confidence' | 'regions' | 'none'
 
+// Segmented button inside the zoom cluster (shares the group's border).
+const zoomBtn =
+  'inline-flex h-6 items-center px-1.5 text-xs text-ink-2 transition-colors duration-150 ' +
+  'hover:bg-rail hover:text-ink disabled:opacity-40 disabled:pointer-events-none ' +
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary'
+
+// One vocabulary with the grid + count cluster (lib/confidence): Check / Skim /
+// Clean. A block with no confidence is unranked → drawn calm (green), never a
+// false red alarm.
+const BAND_COLOR: Record<Band, string> = { check: PALETTE.low, skim: PALETTE.mid, clean: PALETTE.high }
 function confColor(v: number | null | undefined): string {
-  const c = v ?? 0
-  return c < CONF_LOW ? PALETTE.low : c < CONF_MID ? PALETTE.mid : PALETTE.high
+  return BAND_COLOR[confBand(v) ?? 'clean']
 }
 
 export function PageViewer(props: {
@@ -52,12 +59,29 @@ export function PageViewer(props: {
   const [overlay, setOverlay] = useState<OverlayMode>('confidence')
   const [loupeOn, setLoupeOn] = useState(false)
   const [lensPos, setLensPos] = useState<{ x: number; y: number } | null>(null)
-  const LENS = 180 // lens diameter (px)
-  const LENS_MAG = 3 // magnification relative to the scan's natural pixels
+  const LENS = 200 // lens diameter (px) — roomy enough to read a coeng in context
+  const LENS_MAG = 2 // 2× is the sweet spot: doubles a 14px glyph, keeps ~6 in view
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
+  // Live mirror of view so callbacks (flyTo, keyboard/stepper zoom) read the
+  // current camera without re-binding on every pan.
+  const viewRef = useRef(view)
+  viewRef.current = view
   const containerRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number } | null>(null)
+
+  // Zoom toward the canvas centre, clamped — shared by the stepper and keyboard.
+  const zoomBy = useCallback((factor: number) => {
+    const el = containerRef.current
+    if (!el) return
+    const cx = el.clientWidth / 2
+    const cy = el.clientHeight / 2
+    setView((v) => {
+      const scale = Math.min(8, Math.max(0.05, v.scale * factor))
+      const k = scale / v.scale
+      return { scale, tx: cx - k * (cx - v.tx), ty: cy - k * (cy - v.ty) }
+    })
+  }, [])
 
   const fit = useCallback(
     (nat?: { w: number; h: number }) => {
@@ -102,19 +126,24 @@ export function PageViewer(props: {
 
   const bboxIndex = page?.table_bbox_index ?? {}
   const selectedBbox = selectedTable ? bboxIndex[selectedTable] : undefined
+  const pct = Math.round(view.scale * 100)
+  // Text-block confidence counts for the overlay legend (same bands as the grid).
+  const confCounts = useMemo(
+    () => bucketCounts((page?.text_blocks ?? []).map((b) => b.confidence ?? null)),
+    [page],
+  )
+  const BANDS: Band[] = ['check', 'skim', 'clean']
 
-  // Zoom-to-evidence: on a triage jump, fly the camera to the flagged table and
-  // spotlight it for a beat. The tool navigates the proof; the analyst just reads.
+  // Zoom-to-evidence: fly the camera to a table's bbox and spotlight it for a
+  // beat. Called on triage jumps (flyToken) AND from the Focus Table button.
   const flyAnim = useRef<number | null>(null)
   const lastFlown = useRef(0)
+  const flySeq = useRef(0)
   const [spotlight, setSpotlight] = useState<{ bbox: number[]; n: number } | null>(null)
-  useEffect(() => {
-    // Retriggers when page data arrives late (cross-page jumps load async).
-    if (flyToken === 0 || flyToken === lastFlown.current) return
+  const flyTo = useCallback((bbox: number[]) => {
     const el = containerRef.current
-    if (!el || !natural || !selectedBbox) return
-    lastFlown.current = flyToken
-    const [x0, y0, x1, y1] = selectedBbox
+    if (!el || !natural) return
+    const [x0, y0, x1, y1] = bbox
     const bw = Math.max(1, x1 - x0)
     const bh = Math.max(1, y1 - y0)
     // Frame the region at 90% of the canvas, capped at 3× so text stays crisp.
@@ -124,14 +153,15 @@ export function PageViewer(props: {
       tx: el.clientWidth / 2 - ((x0 + x1) / 2) * scale,
       ty: el.clientHeight / 2 - ((y0 + y1) / 2) * scale,
     }
-    const done = () => setSpotlight({ bbox: selectedBbox, n: flyToken })
+    const n = ++flySeq.current
+    const done = () => setSpotlight({ bbox, n })
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setView(target)
       done()
       return
     }
     if (flyAnim.current !== null) cancelAnimationFrame(flyAnim.current)
-    const from = { ...view }
+    const from = { ...viewRef.current }
     const t0 = performance.now()
     const DUR = 380
     const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t))
@@ -149,6 +179,13 @@ export function PageViewer(props: {
       }
     }
     flyAnim.current = requestAnimationFrame(step)
+  }, [natural])
+  useEffect(() => {
+    // Triage jump: retriggers when page data arrives late (cross-page jumps load async).
+    if (flyToken === 0 || flyToken === lastFlown.current) return
+    if (!containerRef.current || !natural || !selectedBbox) return
+    lastFlown.current = flyToken
+    flyTo(selectedBbox)
     return () => {
       if (flyAnim.current !== null) cancelAnimationFrame(flyAnim.current)
     }
@@ -314,9 +351,9 @@ export function PageViewer(props: {
                     fill="none"
                     stroke={overlay === 'confidence' ? confColor(b.confidence) : (LABEL_COLORS[b.label ?? ''] ?? '#95A5A6')}
                     strokeWidth={2 / view.scale}
-                    // Confidence must not be color-only: flagged blocks are dashed too.
+                    // Confidence must not be color-only: anything not Clean is dashed too.
                     strokeDasharray={
-                      overlay === 'confidence' && (b.confidence ?? 0) < CONF_MID
+                      overlay === 'confidence' && confBand(b.confidence) !== null && confBand(b.confidence) !== 'clean'
                         ? `${6 / view.scale} ${4 / view.scale}`
                         : undefined
                     }
@@ -378,13 +415,36 @@ export function PageViewer(props: {
           opposite ends and wrap gracefully while the split divider is dragged. */}
       <div className="flex min-h-10 w-full shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line-strong/60 bg-surface px-3 py-1">
         <span className="flex flex-wrap items-center gap-1 whitespace-nowrap">
-        <button className={btnSmCls} onClick={() => fit()} title={t('fit_tip')}>
-          <Maximize2 size={ICON_SM} aria-hidden />
-          {t('fit')}
-        </button>
-        <button className={btnSmCls} onClick={() => setView((v) => ({ ...v, scale: 1 }))} title={t('actual_size')}>
-          100%
-        </button>
+        {/* One zoom cluster: fit · step − 100% + · focus the active table. */}
+        <span className="flex shrink-0 items-center overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('zoom_group')}>
+          <button className={zoomBtn} onClick={() => fit()} aria-label={t('fit')} title={t('fit_tip')}>
+            <Maximize2 size={ICON_SM} aria-hidden />
+          </button>
+          <span className="h-4 w-px self-center bg-line" aria-hidden />
+          <button className={zoomBtn} onClick={() => zoomBy(1 / 1.2)} aria-label={t('zoom_out')} title={t('zoom_out')}>
+            <Minus size={ICON_SM} aria-hidden />
+          </button>
+          <button
+            className={`${zoomBtn} min-w-[3rem] justify-center font-medium tabular-nums`}
+            onClick={() => setView((v) => ({ ...v, scale: 1 }))}
+            title={t('zoom_reset')}
+          >
+            {pct}%
+          </button>
+          <button className={zoomBtn} onClick={() => zoomBy(1.2)} aria-label={t('zoom_in')} title={t('zoom_in')}>
+            <Plus size={ICON_SM} aria-hidden />
+          </button>
+          <span className="h-4 w-px self-center bg-line" aria-hidden />
+          <button
+            className={zoomBtn}
+            onClick={() => selectedBbox && flyTo(selectedBbox)}
+            disabled={!selectedBbox}
+            aria-label={t('focus_table')}
+            title={selectedBbox ? t('focus_table') : t('focus_table_none')}
+          >
+            <Crosshair size={ICON_SM} aria-hidden />
+          </button>
+        </span>
         <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />
         {/* Segmented control: which rendition of the page is shown. */}
         <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('rendition_aria')}>
@@ -430,12 +490,18 @@ export function PageViewer(props: {
           <ZoomIn size={ICON_SM} aria-hidden />
         </button>
         </span>
-        {/* Dot-only legend: tooltips carry the meaning; visually silent. */}
+        {/* Confidence counts, joined to the overlay selector — a legend that also
+            carries data. Colour is redundant: every item shows its count AND band
+            word, with an aria-label spelling it out (the Honest-Trust Rule). */}
         {overlay === 'confidence' && (
-          <span className="flex shrink-0 items-center gap-1.5">
-            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2" style={{ borderColor: PALETTE.high }} title={t('legend_high')} />
-            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed" style={{ borderColor: PALETTE.mid }} title={t('legend_mid')} />
-            <span className="inline-block h-2.5 w-3.5 rounded-[2px] border-2 border-dashed" style={{ borderColor: PALETTE.low }} title={t('legend_low')} />
+          <span className="flex shrink-0 items-center gap-2.5 text-2xs">
+            {BANDS.map((b) => (
+              <span key={b} className="inline-flex items-center gap-1 text-ink-2" aria-label={t(`band_aria_${b}` as Parameters<typeof t>[0], { n: confCounts[b] })}>
+                <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: BAND_COLOR[b] }} aria-hidden />
+                <span className="font-semibold text-ink">{confCounts[b]}</span>
+                <span aria-hidden>{t(`band_${b}` as Parameters<typeof t>[0])}</span>
+              </span>
+            ))}
           </span>
         )}
       </div>

@@ -2404,6 +2404,44 @@ explicitly out of scope, so no action (documented in DESIGN.md and the audit).
 **Outcome.** vitest 52 (from 50), `tsc -b` + build clean, detector 0. Frontend-only —
 no restart; the no-cache index.html serves the split chunks on refresh.
 
+### 2.70 Page Viewer & Table Editor UX refinement (6 items, §2.70)
+
+**Problem.** A design consultation on the Page Viewer + Table Editor surfaced six UX
+issues; decisions were locked with the user. Frontend-only.
+
+**Decision.** One confidence vocabulary everywhere — **Check <80% · Skim 80–95% ·
+Clean >95%** — extracted to `frontend/src/lib/confidence.ts` (`confBand`,
+`bucketCounts`, `bandCells`, `nextInBand`), 8 tests written first.
+
+- *Loupe (1).* `LENS_MAG 3→2`, `LENS 180→200` — 2× reads calm on dense coeng stacks
+  while keeping ~6 glyphs of context.
+- *Canvas strip (2&3).* Fit/100% replaced by one zoom cluster `[⛶] [−] {pct}% [+] [🎯]`:
+  Fit icon-only, a −/+ stepper toward centre with a live % that clicks to reset, and a
+  Focus Table button that frames the selected table's bbox. The fly-to-evidence camera
+  was extracted to a reusable `flyTo(bbox)` (via a `viewRef` mirror) and now serves both
+  the triage `flyToken` effect and the button. Focus Table tooltip: "Focus table" /
+  "No table selected" when disabled.
+- *Confidence legend (4).* Loose dotted rects → a count cluster joined to the overlay
+  selector (`● {n} Check · Skim · Clean`), counts from `text_blocks` via the bucketer.
+  `confColor` + the dash rule realigned to the shared bands (a null-confidence block now
+  reads Clean, not a false red). Colour is redundant: visible count + band word +
+  aria-label.
+- *Find + shortcuts modal (5).* Find is page-scoped, so a `[🔍 Find]` button lives in the
+  Tables panel header (right utilities), toggling the existing bar via a new `onOpenFind`
+  prop; ⌘F still works. The help modal's key column is re-modelled as combos-of-atomic-
+  keys rendered as non-wrapping caps with a fixed `w-32` column — fixing the inconsistent
+  `' / '` split and the overflow into descriptions.
+- *Triage header (6).* The Tables header is now three zones — facts · interactive triage
+  chips · grid utilities. The static legend became clickable band chips
+  (`🔴 {n} Check` …); a click cycles to the next cell in that band via a new App helper
+  `focusGridCell` (mirrors `jumpToIssue`; drives both grid scroll and the page fly), with
+  a live `Check 1/3` progress counter. Per-band cursors reset on `[docId, pageIdx]` and
+  re-clamp if a band shrinks (out-of-range guard). No "Section Tabs" (would be reinvented
+  chrome). Redundant word+count+aria on every chip.
+
+**Outcome.** vitest 60 (from 52), `tsc -b` + build clean, detector 0. Frontend-only —
+no restart; the no-cache index.html serves the new bundle on refresh.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

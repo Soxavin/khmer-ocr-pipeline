@@ -302,6 +302,15 @@ export default function App() {
     [issues],
   )
 
+  // Focus one grid cell on the current page: select its table, flash it, scroll
+  // the editor to the cell AND fly the page image to the table (the focusCell
+  // token also drives PageViewer's flyToken). Used by the triage-band chips.
+  const focusGridCell = useCallback((tid: string, row: number, col: number) => {
+    setSelectedTable(tid)
+    setFlashToken((f) => ({ tid, n: (f?.n ?? 0) + 1 }))
+    setFocusCell((f) => ({ tid, row, col, n: (f?.n ?? 0) + 1 }))
+  }, [])
+
   // Clearing the last low-confidence cell is the document-level payoff:
   // the Issues chip pulses once when the count crosses to zero.
   const [issuesCleared, setIssuesCleared] = useState(false)
@@ -1080,7 +1089,9 @@ export default function App() {
                     flashToken={flashToken}
                     focusCell={focusCell}
                     showFind={showFind}
+                    onOpenFind={() => setShowFind(true)}
                     onCloseFind={() => setShowFind(false)}
+                    onFocusCell={focusGridCell}
                   />
                 </Suspense>
               ) : (
@@ -1132,29 +1143,38 @@ export default function App() {
               <h2 className="mb-3 text-sm font-semibold text-ink">{t('shortcuts')}</h2>
               <table className="w-full text-sm text-ink-2">
                 <tbody>
+                  {/* Each shortcut is a list of combos; each combo a list of atomic
+                      keys. Keys render as adjacent caps that never wrap mid-combo,
+                      alternatives joined by a thin "/". Fixed key column keeps the
+                      descriptions aligned regardless of combo length. */}
                   {(
                     [
-                      ['Cmd-K', t('ks_palette')],
-                      ['r', t('ks_run')],
-                      ['← / →', t('ks_pages')],
-                      ['n / p', t('ks_issue')],
-                      ['v', t('ks_verify')],
-                      ['Ctrl/Cmd-F', t('ks_find')],
-                      ['Cmd-Z / Shift-Cmd-Z', t('ks_undo')],
-                      [t('ks_rowmenu_key'), t('ks_rowmenu')],
-                      ['Esc', t('ks_esc')],
-                      ['?', t('ks_overlay')],
+                      [[['⌘', 'K']], t('ks_palette')],
+                      [[['R']], t('ks_run')],
+                      [[['←'], ['→']], t('ks_pages')],
+                      [[['N'], ['P']], t('ks_issue')],
+                      [[['V']], t('ks_verify')],
+                      [[['⌘', 'F']], t('ks_find')],
+                      [[['⌘', 'Z'], ['⇧', '⌘', 'Z']], t('ks_undo')],
+                      [[[t('ks_rowmenu_key')]], t('ks_rowmenu')],
+                      [[['Esc']], t('ks_esc')],
+                      [[['?']], t('ks_overlay')],
                     ] as const
-                  ).map(([k, desc]) => (
-                    <tr key={k} className="border-b border-line last:border-0">
-                      <td className="py-1.5 pr-3">
-                        <span className="flex flex-wrap gap-1">
-                          {k.split(' / ').map((part) => (
-                            <kbd key={part} className={kbdCls}>{part}</kbd>
+                  ).map(([combos, desc], i) => (
+                    <tr key={i} className="border-b border-line last:border-0">
+                      <td className="w-32 py-1.5 pr-3 align-top">
+                        <span className="flex flex-wrap items-center gap-1">
+                          {combos.map((keys, ci) => (
+                            <span key={ci} className="flex items-center gap-1 whitespace-nowrap">
+                              {ci > 0 && <span className="px-0.5 text-ink-3">/</span>}
+                              {keys.map((part, ki) => (
+                                <kbd key={ki} className={kbdCls}>{part}</kbd>
+                              ))}
+                            </span>
                           ))}
                         </span>
                       </td>
-                      <td className="py-1.5">{desc}</td>
+                      <td className="py-1.5 align-top">{desc}</td>
                     </tr>
                   ))}
                 </tbody>
