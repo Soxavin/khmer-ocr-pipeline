@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { TableEditor } from './TableEditor'
+import { PageTextPanel } from './PageTextPanel'
 import { useT } from '../../i18n.tsx'
 import { bandCells, nextInBand, type Band } from '../../lib/confidence'
 import { btnSmCls, chipCls, iconBtnCls, inputCls } from '../../ui'
@@ -263,27 +264,18 @@ export function TablesPanel(props: {
         ))}
 
         {(page.corrected_text || text) && (
-          <details className="rounded-lg border border-line bg-surface p-2 shadow-raised">
-            <summary className="cursor-pointer text-sm font-medium text-ink-2">
-              {t('page_text')}{textSaved ? '' : t('unsaved_suffix')}
-            </summary>
-            <textarea
-              className="khmer-content mt-2 w-full rounded-md border border-line-strong p-2 text-ink"
-              rows={8}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value)
-                setTextSaved(false)
-              }}
-            />
-            <button
-              className={`${btnSmCls} mt-1`}
-              disabled={textSaved}
-              onClick={() => api.putPageText(docId, pageIdx, text).then(() => setTextSaved(true))}
-            >
-              {t('save_text')}
-            </button>
-          </details>
+          <PageTextPanel
+            docId={docId}
+            pageIdx={pageIdx}
+            page={page}
+            text={text}
+            onTextChange={(v) => {
+              setText(v)
+              setTextSaved(false)
+            }}
+            saved={textSaved}
+            onSaved={() => setTextSaved(true)}
+          />
         )}
       </div>
     </div>

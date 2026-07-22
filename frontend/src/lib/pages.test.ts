@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodePages, gridPages, pagesFromSettings } from './pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex } from './pages'
 
 describe('gridPages (post-analysis filtering)', () => {
   it('pre-upload mode shows every document page', () => {
@@ -41,5 +41,23 @@ describe('pagesFromSettings ⇄ encodePages round trip', () => {
   it('list scope decodes back to the same set', () => {
     const s = pagesFromSettings({ page_scope: 'list', page_list: [1, 3] }, 5)
     expect(Array.from(s).sort((a, b) => a - b)).toEqual([0, 2])
+  })
+})
+
+describe('processedIndex — mid-run rendition mapping', () => {
+  it('returns -1 before stage 2 has produced anything', () => {
+    expect(processedIndex(0, undefined)).toBe(-1)
+    expect(processedIndex(0, [])).toBe(-1)
+  })
+
+  it('maps a document page to its POSITION, not its number, for a page-scoped run', () => {
+    // Pages 3 and 7 were selected: result 0 is page 3, result 1 is page 7.
+    expect(processedIndex(3, [3, 7])).toBe(0)
+    expect(processedIndex(7, [3, 7])).toBe(1)
+    expect(processedIndex(5, [3, 7])).toBe(-1)
+  })
+
+  it('is identity for a whole-document run', () => {
+    expect(processedIndex(2, [0, 1, 2, 3])).toBe(2)
   })
 })

@@ -69,30 +69,48 @@ function GridThumb(props: { src: string; fallbackSrc?: string; alt: string }) {
   )
 }
 
-/** [Single] [Grid] segmented control — same pattern as the Cleaned⇄Original segment. */
-export function ViewToggle(props: { view: 'single' | 'grid'; onChange: (v: 'single' | 'grid') => void }) {
-  const { view, onChange } = props
-  const { t } = useT()
+/** The workspace's one segmented control: a small set of exclusive choices shown
+    inline (Single⇄Grid, Cleaned⇄Original, Blocks⇄Raw). Generic over the value so
+    every segment in the app shares one set of states and one focus treatment —
+    a second hand-rolled copy is how vocabularies drift apart. */
+export function SegmentedToggle<T extends string>(props: {
+  value: T
+  options: readonly (readonly [T, string])[]
+  onChange: (v: T) => void
+  label: string
+}) {
+  const { value, options, onChange, label } = props
   return (
-    <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('grid_tip')}>
-      {(
-        [
-          ['single', t('view_single')],
-          ['grid', t('view_grid')],
-        ] as const
-      ).map(([val, label]) => (
+    <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={label}>
+      {options.map(([val, text]) => (
         <button
           key={val}
           className={`h-6 px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-            view === val ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
+            value === val ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
           }`}
-          aria-pressed={view === val}
+          aria-pressed={value === val}
           onClick={() => onChange(val)}
         >
-          {label}
+          {text}
         </button>
       ))}
     </span>
+  )
+}
+
+/** [Single] [Grid] — the canvas's view segment. */
+export function ViewToggle(props: { view: 'single' | 'grid'; onChange: (v: 'single' | 'grid') => void }) {
+  const { t } = useT()
+  return (
+    <SegmentedToggle
+      value={props.view}
+      onChange={props.onChange}
+      label={t('grid_tip')}
+      options={[
+        ['single', t('view_single')],
+        ['grid', t('view_grid')],
+      ] as const}
+    />
   )
 }
 

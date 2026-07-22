@@ -30,6 +30,9 @@ export type RunStatus = {
   total: number
   fraction: number
   has_results: boolean
+  /** Document pages whose cleaned rendition is already servable (from stage 2, so
+      well before the run ends). Result index k addresses processed_pages[k]. */
+  processed_pages: number[]
   run_error: string | null
   last_run_settings: Record<string, unknown> | null
 }
@@ -54,7 +57,19 @@ export type Issue = {
   reasons: string[]
 }
 
-export type TextBlock = { bbox: number[]; confidence?: number | null; label?: string }
+/** One layout region from Surya. The backend has always sent `text`, `reading_order`
+    and `region_label` (engines/surya.py builds them, api.py passes them through) —
+    they were simply undeclared here, which is why Page Text could only be rendered
+    as one undifferentiated blob. */
+export type TextBlock = {
+  bbox: number[]
+  confidence?: number | null
+  label?: string
+  text?: string
+  reading_order?: number
+  region_label?: string
+  polygon?: number[][]
+}
 
 export type PageData = {
   corrected_text: string

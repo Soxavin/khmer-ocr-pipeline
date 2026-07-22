@@ -15,7 +15,7 @@ import { PageViewer } from './components/viewer/PageViewer'
 const TablesPanel = lazy(() => import('./components/review/TablesPanel').then((m) => ({ default: m.TablesPanel })))
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useRunStatus } from './hooks/useRunStatus'
-import { encodePages, gridPages, pagesFromSettings } from './lib/pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex } from './lib/pages'
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
 import { useT } from './i18n.tsx'
@@ -994,7 +994,16 @@ export default function App() {
               <PageGrid
                 pages={gridPages('pre-upload', Math.max(1, active.pages), null)}
                 pageCount={Math.max(1, active.pages)}
-                imageUrl={(n) => api.previewImageUrl(active.id, n)}
+                /* Cleaned renditions land at stage 2, so during a run the grid
+                   upgrades each page the moment its processed image exists and
+                   falls back to the raw preview until then. */
+                imageUrl={(n) => {
+                  const k = processedIndex(n, status.data?.processed_pages)
+                  return k >= 0
+                    ? api.pageImageUrl(active.id, k, 'processed')
+                    : api.previewImageUrl(active.id, n)
+                }}
+                fallbackUrl={(n) => api.previewImageUrl(active.id, n)}
                 selected={selectedPages}
                 onTogglePage={togglePage}
                 onOpenPage={openPageFromGrid}

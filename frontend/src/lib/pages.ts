@@ -34,6 +34,17 @@ export function encodePages(picked: Set<number>, pageCount: number): Partial<Run
   return { page_scope: 'list', page_list: a.map((i) => i + 1) }
 }
 
+/** Result index of document page `n`'s cleaned rendition, or -1 if it has none yet.
+
+    Preprocessing finishes at stage 2, so cleaned pages exist long before the run
+    ends and the grid can upgrade thumbnails mid-run. A page-scoped run only
+    rasterizes the selected pages, so the mapping is positional in
+    `processedPages` — never `n` itself. */
+export function processedIndex(n: number, processedPages: number[] | undefined): number {
+  if (!processedPages) return -1
+  return processedPages.indexOf(n)
+}
+
 /** The 0-based document pages the grid overview renders, sorted ascending.
     Pre-upload shows the whole document; post-analysis shows ONLY the pages the
     finished run actually processed (its recorded settings), so pages excluded
