@@ -2657,6 +2657,52 @@ passthrough), backend stage-string enum (API contract change).
 the `GridThumb` call site pattern-matched as a raw `<img>`). New keys `page_load_failed`,
 `retry`, `copy_failed` are en-only — km placeholders flagged for the next native review.
 
+### 2.75 The router's confidence signal cannot be retuned — the classes overlap (2026-07-22)
+
+§2.73 established that `auto` fails on moc_gas (`frac=0.231`, below the `0.400` cutoff, so it keeps a
+confidently-wrong surya_kiri) and deferred the fix as "needs its own measurement". This is that
+measurement, and it closes off the cheap option.
+
+**The obvious fix — lower the cutoff — is provably unavailable.** Measuring the same signal
+(`frac` of table cells below `CELL_CONF_LOW`) across every page where we know the right answer:
+
+| page | `frac<0.80` | is surya_kiri the right engine? |
+|---|---|---|
+| ARDB 09.06/15.06 p2 | 0.029 | **yes** |
+| ARDB 09.06/15.06 p3 | 0.213 | **yes** |
+| ARDB 09.06/15.06 p1 | **0.222** | **yes** |
+| **moc_gas p1** | **0.231** | **NO** (costs 0.518 cell accuracy) |
+| budget p3 | 0.539 | no — correctly caught today |
+
+The worst page where surya_kiri is *correct* (0.222) and the page where it is *catastrophically
+wrong* (0.231) are **0.009 apart**. Any cutoff low enough to catch moc_gas fires on ARDB p1 — and
+§2.73 measured what that costs: falling back to surya on ARDB loses ~0.33 cell accuracy *and*
+imports Surya's multi-page non-determinism. The two populations are not separable by this signal at
+any threshold; the budget-p3 success at 0.539 was a comfortable margin that simply does not
+generalize.
+
+**So the design conclusion is stronger than "add a second signal would be nice".** A self-reported
+confidence cannot detect a recognizer being confidently wrong — that is a property of the quantity,
+not of its calibration. This was documented as an accepted ceiling in `auto_engine.py:21-23` when the
+router was built on two document classes; the third class falsified it. A genuinely independent
+signal is *required* (cross-checking a cell sample against a second engine, or unit-token
+plausibility), and `moc_gas_p1` is the regression case any candidate must pass.
+
+**Method note, and a caution for the report.** The moc_gas GT this rests on was drafted by Gemini
+from the page image and verified against pixels. Its **table** GT is sound (one correction applied:
+r5c1). Its **prose** GT was deliberately withheld — two independent Gemini runs of the same page
+disagreed on 8/8 sampled non-date lines (an inter-ministerial reference number, a $/barrel threshold
+90 vs 50, a tax rate 4% vs 45%, the exchange rate, and the office address — two entirely different
+Phnom Penh streets, *neither* matching the page). A first run had also silently shifted every date
+from 2026 to 2023, rewriting the Buddhist-era year, zodiac year, sak ordinal and CE year in
+coordinated fashion with zero uncertainty flagged; naming that failure in the prompt fixed the dates
+and nothing else. **LLM-drafted GT was confidently wrong in ways only pixel-level checking caught** —
+the concrete argument for the human-in-the-loop discipline, and the reason `text_gt_available: false`
+now exists so an unscoreable page reports blank text metrics instead of a fabricated
+`Document_CER = 1.0`.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
