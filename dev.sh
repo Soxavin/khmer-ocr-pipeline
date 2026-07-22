@@ -3,6 +3,9 @@
 #
 #   ./dev.sh          backend (:8600) + Vite HMR (:5173/app/)  <- normal UI work
 #   ./dev.sh build    rebuild frontend/dist so :8600/app serves the real bundle
+#   ./dev.sh restart  force a fresh backend  <- REQUIRED after editing webapp/ or
+#                     src/khmer_pipeline/, because plain `./dev.sh` reuses the
+#                     running process and would silently serve the OLD Python code.
 #
 # Why HMR instead of `npm run build`: the built bundle is served statically from
 # frontend/dist, so every edit would need a rebuild + hard refresh. Vite proxies
@@ -21,9 +24,17 @@ if [ "${1:-}" = "build" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "restart" ]; then
+  # Backend code is loaded once at import; reuse would keep serving the OLD module.
+  pkill -f "webapp.main" 2>/dev/null || true
+  sleep 2
+  echo "→ stopped the running backend; starting fresh"
+fi
+
 backend_pid=""
 if lsof -ti:8600 >/dev/null 2>&1; then
   echo "→ backend already on :8600 — reusing it (models stay loaded)"
+  echo "  NOTE: edited webapp/ or src/khmer_pipeline/? run ./dev.sh restart"
 else
   echo "→ starting backend on :8600 (first run loads models, give it a moment)"
   uv run python -m webapp.main &

@@ -2467,6 +2467,65 @@ on exhaustion). vitest 64 (from 60), `tsc -b` + build clean. Detector's 2 `broke
 hits are the test's fixture URLs (`/proc/0`), not shipped UI — false positives. Frontend-
 only; plain refresh.
 
+### 2.72 Honest stamp removal, Page Text blocks, grid cache (§2.72)
+
+**Problem.** Three findings from one review. (1) Stamp removal was destructive and
+dishonestly labelled: `_stamp_ink_mask` thresholded red+blue across the whole page and
+`_remove_stamps` dilated it 7×7 ×2 (~14px halo) before inpainting, so blue body text,
+red figures and blue rules were erased — **on by default**, while the UI promised it
+only "erases signature stamps that sit over the numbers" and the scan check actively
+*recommended* it based on a colour ratio that blue text trivially exceeds. (2) Page Text
+was one monolithic `<textarea>`, discarding hierarchy. (3) The §2.71 grid fix treated a
+symptom: the image endpoints sent **no cache headers**, so every Grid↔Single toggle
+refetched every thumbnail — the request burst that broke thumbnails in the first place.
+
+**Measured, not argued** (`scripts/probe_stamp_mask.py`, deterministic — chosen over an
+OCR ablation because Surya's run-to-run variance would drown the signal). On the real MoC
+gas notification: colour mask 1.66% of the page → **8.61% of pixels destroyed** (5.18×
+blow-up), visibly wiping blue paragraphs and blue table figures.
+
+**Decision — gate on SHAPE, and never destroy what we cannot identify.**
+`_stamp_regions_mask` keeps a colour component only if it survives a 3px opening, its
+bbox clears `_STAMP_MIN_BOX_FRAC` of the page's shorter side in *both* dimensions, its
+aspect is within `_STAMP_MAX_ASPECT`, and it is not multi-line text. Nothing qualifies ⇒
+image returned unchanged. Two findings shaped it:
+- **Fill density cannot be the gate.** A hollow ring seal scores ~0.05 extent — *below* a
+  merged text block (~0.1–0.2) — so a density floor rejects real stamps and a ceiling
+  misses the text. Density is used only as a fast-accept for solid seals
+  (`_STAMP_SOLID_EXTENT`). The actual guard is `_has_text_line_gaps`: multi-line text
+  alternates dense rows with blank bands, a ring has ink on its arcs in every row.
+- **A 5px opening erased the seal's own ring** (measured: the 333×334 component vanished),
+  so the kernel is 3px; and because a seal fragments into ring + inner text + emblem, a
+  confirmed stamp's whole bbox is treated as stamp territory (colour filtering stays
+  *localized* to a region already proven to be a stamp).
+
+Result on the same page: **8.61% → 2.28%**, stamp fully removed, every blue paragraph and
+table figure intact. `suggest_preprocess_settings` now scores the shape-gated mask, so the
+UI stops recommending removal on documents that merely contain coloured text.
+
+**Copy (via `/impeccable clarify`).** `hint_stamps` now states the limit ("Coloured text is
+left alone; anything inside the stamp outline is erased too"), and `check_stamps_major`
+dropped "is recommended" for a consequence, matching its sibling checks. PRODUCT.md
+principle 1 — *never reassure falsely* — is the governing rule.
+
+**Page Text Phase 1.** The API already sent `text`/`reading_order`/`region_label` per block
+(surya.py:371 → api.py:306); only the TS type under-declared it, so this was frontend-only.
+New `PageTextPanel` gives a **Blocks** audit view (one card per region in reading order,
+type + confidence chip, colour never the sole signal) and a **Raw** edit view. Blocks are
+deliberately **read-only**: they carry raw OCR text while the textarea edits
+`corrected_text`, so an editable block list would silently overwrite the correction pass.
+
+**Grid root cause.** `ETag` + `Cache-Control: no-cache` on both image endpoints, 304 on
+`If-None-Match` (verified live: 304, 0 bytes — the PNG encode is skipped). `no-cache` +
+validator, never `max-age`: a re-run replaces the image at the same URL. Processed pages
+are now served from stage 2 rather than after full results, with `processed_pages` in
+`/status` mapping result index → document page (a page-scoped run makes those differ).
+
+**Outcome.** 785 backend tests, 74 frontend; `tsc -b`, build, detector clean. `ViewToggle`
+generalized to `SegmentedToggle` rather than copy-pasted for the new panel. `dev.sh` gained
+`restart` after this work hit the stale-backend trap the reuse behaviour creates.
+**Khmer for the changed/new strings is untranslated and flagged in `i18n.tsx`.**
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
