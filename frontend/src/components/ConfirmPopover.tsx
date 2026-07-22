@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { btnSmCls, dangerBtnCls } from '../ui'
+import { btnCls, dangerBtnCls } from '../ui'
 
 /** The workspace's one destructive-action guard: an anchored popover that names
     the consequence, never fires on the first click, and closes on Escape or an
@@ -10,6 +10,11 @@ import { btnSmCls, dangerBtnCls } from '../ui'
 export function ConfirmPopover(props: {
   title: string
   body: string
+  /** The subject of the action (a filename), shown in its own bounded slot above
+      the consequence. Interpolating it into `body` instead would let one long
+      unbroken name blow out the card — and truncating `body` would cut the
+      sentence, not the name. Omitted for actions with no single subject. */
+  subject?: string
   actionLabel: string
   cancelLabel: string
   /** Viewport point to anchor at — pass the trigger's bounding rect corner. */
@@ -17,7 +22,7 @@ export function ConfirmPopover(props: {
   onConfirm: () => void
   onClose: () => void
 }) {
-  const { title, body, actionLabel, cancelLabel, anchor, onConfirm, onClose } = props
+  const { title, body, subject, actionLabel, cancelLabel, anchor, onConfirm, onClose } = props
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -41,7 +46,9 @@ export function ConfirmPopover(props: {
 
   const W = 240
   const left = Math.max(8, Math.min(anchor.x - W, window.innerWidth - W - 8))
-  const top = Math.min(anchor.y + 4, window.innerHeight - 140)
+  // Bottom reserve covers the tallest the card can get: title + a two-line subject
+  // + body + buttons. Under-reserving pushed the actions off-screen for long names.
+  const top = Math.min(anchor.y + 4, window.innerHeight - (subject ? 200 : 140))
 
   return (
     <div
@@ -52,9 +59,19 @@ export function ConfirmPopover(props: {
       style={{ left, top }}
     >
       <p className="text-sm font-semibold text-ink">{title}</p>
+      {/* break-all, not truncate: a filename has no spaces to wrap at, so only
+          mid-token breaking bounds the width. line-clamp caps the height, and
+          `title` keeps the full name reachable on hover. */}
+      {subject && (
+        <p className="mt-1 line-clamp-2 break-all text-xs font-medium leading-4 text-ink" title={subject}>
+          {subject}
+        </p>
+      )}
       <p className="mt-1 text-xs leading-4 text-ink-2">{body}</p>
-      <div className="mt-3 flex justify-end gap-2">
-        <button data-cancel className={btnSmCls} onClick={onClose}>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        {/* btnCls (h-7), not btnSmCls (h-6) — the danger button is h-7, and two
+            confirm actions at different heights read as a layout accident. */}
+        <button data-cancel className={btnCls} onClick={onClose}>
           {cancelLabel}
         </button>
         <button

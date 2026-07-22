@@ -113,7 +113,9 @@ const en = {
   status_error: 'error',
   verified_count: '{a}/{b} verified',
   remove_doc: 'Remove document',
-  remove_confirm: 'Remove “{name}”? Its results and any edits will be discarded.',
+  // Split from the old one-sentence form so the filename gets its own bounded
+  // slot: interpolated mid-sentence, a long name could only overflow the card.
+  remove_confirm: 'Its results and any edits will be discarded.',
   queue_count_tip: '{n} document(s) in the queue',
 
   page_n_of: 'Page {i} / {n}',
@@ -467,7 +469,9 @@ const km: Record<Key, string> = {
   status_error: 'បញ្ហា',
   verified_count: 'បានផ្ទៀងផ្ទាត់ {a}/{b}',
   remove_doc: 'លុបឯកសារ',
-  remove_confirm: 'លុប “{name}”? លទ្ធផល និងការកែប្រែទាំងអស់នឹងបាត់បង់។',
+  // Split from the verified one-sentence form at its own seam — this is that
+  // string's second clause verbatim, so no new Khmer is authored here.
+  remove_confirm: 'លទ្ធផល និងការកែប្រែទាំងអស់នឹងបាត់បង់។',
   queue_count_tip: 'ឯកសារ {n} ក្នុងជួរ',
 
   page_n_of: 'ទំព័រ {i} / {n}',
