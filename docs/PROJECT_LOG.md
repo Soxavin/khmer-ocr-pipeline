@@ -2588,6 +2588,7 @@ documents that could had only **per-page** GT, which the document-only A/B harne
 | budget_p3 | 1 | 0.000 (bit-identical) |
 | moc_gas_p1 | 1 | 0.000 (bit-identical) |
 | ardb0 | 3 | 0.630 / 0.721 / 0.643 → **0.091** |
+| ardb1 | 3 | 0.520 / 0.633 / 0.578 → **0.113** |
 
 Surya's layout/table_rec generation runs through a spawned **llama.cpp server** at
 `temperature=0.0, top_p=0.1` — but with `--parallel 8` slots fed by a `ThreadPoolExecutor`
