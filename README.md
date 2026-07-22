@@ -62,7 +62,12 @@ uv run python -m webapp.main            # one process serves BOTH UIs (no separa
                                         #   NiceGUI UI (fallback)      → http://localhost:8600/
 # After changing frontend code: `cd frontend && npm run build`, then hard-refresh the
 # browser tab (Cmd+Shift+R / Safari Cmd+Option+R) — the server picks up dist/ as-is.
-# Live-reload development instead: `cd frontend && npm run dev` (Vite, proxies /api to :8600).
+
+./dev.sh                                # UI development: backend + Vite hot-reload in one command
+                                        #   → http://localhost:5173/app/ (edits apply instantly, no rebuild)
+                                        # Reuses an already-running :8600 backend instead of restarting it
+                                        # (a restart reloads the multi-GB models AND drops uploaded documents).
+./dev.sh build                          # rebuild dist/ so http://localhost:8600/app serves the new bundle
 uv run streamlit run app.py             # (legacy) older single-file Streamlit review UI
 uv run streamlit run lab.py             # (optional) researcher lab — compare engines + inspect pipeline stages
 

@@ -42,7 +42,9 @@ See `CONTEXT.md` for architecture/data-flow orientation.
   `Settings` (the API validates run payloads against its fields and it feeds
   `/api/meta` defaults), a control in `frontend/src/components/run/
   SettingsDrawer.tsx`, and (if it affects output) to `Settings.settings_key`.
-  Rebuild with `cd frontend && npm run build`. Mirror the flag in the NiceGUI
+  Iterate with `./dev.sh` (backend + Vite hot reload at :5173/app/, no rebuild
+  per edit); run `./dev.sh build` when :8600/app must serve the new bundle.
+  Mirror the flag in the NiceGUI
   fallback (`webapp/main.py` widget) and the legacy Streamlit `app.py` only if
   you're touching them anyway.
 - Pipeline issues (low OCR confidence, phantom table cells, OCR/table

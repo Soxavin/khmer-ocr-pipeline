@@ -16,7 +16,7 @@ Streamlit UI (`app.py`, legacy), and a CLI batch processor
 - PyMuPDF (`fitz`) — PDF ingestion
 - `surya-ocr` (pinned `>=0.20.0,<0.21`) — layout detection, OCR, table recognition. Device is auto-selected by `utils/device.py` (`configure_runtime()` sets `TORCH_DEVICE` → CUDA on NVIDIA, MPS on Apple Silicon, else CPU). On Apple Silicon, `setup-metal-macos.sh` opts into the faster built-in llamacpp Metal backend (`SURYA_INFERENCE_BACKEND=llamacpp`), which `utils/device.py` respects. `mlx-lm` is a Mac-only (marker-gated) dependency; see `Dockerfile` for the Linux/GPU lane.
 - `mlx-lm` + `transformers` (pinned, see pyproject.toml) — Qwen2.5-7B-Instruct-4bit text correction
-- React 19 + Vite + TypeScript + Tailwind 4 + AG Grid community + TanStack Query (`frontend/`) — primary review workspace, served at `/app` from the built `frontend/dist` (build: `cd frontend && npm run build`; dev: `npm run dev` proxies `/api` to :8600)
+- React 19 + Vite + TypeScript + Tailwind 4 + AG Grid community + TanStack Query (`frontend/`) — primary review workspace, served at `/app` from the built `frontend/dist` (build: `cd frontend && npm run build`, or `./dev.sh build`; dev: `./dev.sh` starts backend + Vite HMR at :5173/app/, proxying `/api` to :8600)
 - NiceGUI (pinned `>=2.0,<3.0`) — fallback review UI (`webapp/main.py`) AND the FastAPI host for the REST layer (`webapp/api.py` registers routes on `nicegui.app`, a FastAPI subclass — one process, models load once); Streamlit >=1.35 — legacy UI (`app.py`)
 - pytest — tests
 
@@ -215,7 +215,8 @@ definitions.
 - **Change correction rules / Qwen behavior** -> `postprocess.py`.
 - **Change export format / CSV/JSON shape** -> `export.py` +
   `models.py` (`ExportResult`).
-- **UI changes** -> `frontend/` (React, primary; rebuild with `npm run build`)
+- **UI changes** -> `frontend/` (React, primary; iterate with `./dev.sh` for
+  hot reload, `./dev.sh build` when :8600/app must serve the new bundle)
   + `webapp/api.py` if the server must expose new data (TDD in
   `tests/test_webapp_api.py`); `webapp/main.py` (NiceGUI fallback) or `app.py`
   (Streamlit legacy) only when keeping them in sync matters.
