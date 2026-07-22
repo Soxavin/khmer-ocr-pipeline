@@ -2727,6 +2727,62 @@ now exists so an unscoreable page reports blank text metrics instead of a fabric
 
 ---
 
+### 2.76 Block↔canvas linking, and making "Auto" state its outcome (2026-07-22)
+
+Three UI items; two of them turned out to have a shared shape — *the workspace knew something
+it never said out loud*.
+
+**Bidirectional block linking.** Page Text listed the blocks and the canvas drew their boxes,
+but nothing connected the two: matching a card to its region on the scan was manual eye-work.
+Now hover or click a card and its box gets a primary halo; click a box and its card surfaces.
+
+Three design points worth keeping:
+
+*Identity is the source index into `text_blocks`, never the card's position.* `orderedBlocks`
+filters empty layout regions **and** sorts by reading order, so the two genuinely disagree —
+a position-keyed link would silently halo the wrong region on any page whose reading order is
+not array order. `orderedBlockEntries` carries the source index alongside each block; the test
+reverses the array *and* drops a block so a position-keyed implementation fails outright.
+
+*Only the side that did NOT initiate scrolls.* `blockSel` carries `from: 'canvas' | 'text'`
+and lives in `App` — the nearest common owner. Without that discriminator the two panes chase
+each other's scroll.
+
+*`panTo` centres at UNCHANGED zoom, deliberately not reusing `flyTo`.* The existing fly re-frames
+to 3× because triage jumps want the evidence filling the canvas. The block link is a "look here",
+not a "zoom in": re-framing the page on every card click would throw away the reading scale the
+analyst chose. The halo also renders independently of the overlay mode — the link has to work
+with boxes turned off, or it is a feature that quietly stops existing.
+
+Two edge cases outside the brief: a pan ending over a block registered as a click on it (guarded
+with a 4 px slop threshold), and page/document switches now clear the link so a stale index cannot
+halo an unrelated region.
+
+**The DPI segment's "broken container" was one word.** `SegmentedToggle` was `display: flex`,
+which is *block-level*, so the track filled its container. In the viewer footer it is a flex item
+and shrinks correctly; in the settings drawer's block container it stretched full-width and read
+as a text-input frame. `inline-flex` fixes every segment at once. (`self-start` was briefly added
+alongside and removed — as a flex item it would have top-aligned the track inside the viewer's
+`items-center` rail, trading one bug for another.)
+
+**"Auto" now states what it chose** — and this needed new backend truth, not new UI. Auto DPI and
+the Auto engine router both decide at run time from the document itself, and *neither outcome was
+exposed anywhere*. `webapp/effective.py` derives both from what the run already records: the
+concrete render DPI from `ingest_result`, and the engine key parsed from the `[AutoRouter]` note
+`run_auto` appends to `warnings`.
+
+The rule that shaped it: **`auto` with no router note resolves to `None`, and the badge stays
+hidden.** A badge that guessed would assert a routing decision that has not happened yet — worse
+than no badge, because the whole point is auditability. Same reason `[AutoRouter]` is parsed rather
+than the decision re-derived: the router's own record is the only thing that cannot drift from what
+actually ran.
+
+Verified: `npx tsc -b` clean, 86 frontend tests (5 new), 797 backend tests (8 new), build clean.
+The six new `km` strings carry user-verified Khmer (provided 2026-07-22) — per the standing rule,
+Khmer is never authored here, only mapped in from verified text.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
