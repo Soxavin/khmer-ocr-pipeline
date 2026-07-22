@@ -144,7 +144,7 @@ export const PageGrid = memo(function PageGrid(props: {
   const { t } = useT()
   return (
     <div className="grid h-full grid-cols-2 gap-4 overflow-y-auto bg-rail/10 p-4 xl:grid-cols-3" style={{ gridAutoRows: 'min-content' }}>
-      {pages.map((n) => (
+      {pages.map((n, i) => (
         <div key={n} className="group relative">
           <button
             className={`block w-full overflow-hidden rounded-lg border bg-surface text-left shadow-raised transition-[border-color,box-shadow] duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
@@ -160,9 +160,16 @@ export const PageGrid = memo(function PageGrid(props: {
             />
           </button>
           {/* Page number chip — bottom center, always readable over the thumbnail.
-              Clear of the top-left checkbox island; nowrap so it never clips. */}
+              Clear of the top-left checkbox island; nowrap so it never clips.
+
+              Counts the card's POSITION in this grid, not its document page index:
+              a run scoped to 3 of 7 pages produces 3 result pages, and the viewer
+              already numbers those "Page 1 / 3" (overview.pages is the result
+              count). Numbering by document page made the two panes disagree. The
+              alt text and the include-checkbox below keep the true page identity,
+              so assistive tech and the run scope stay exact. */}
           <span className="pointer-events-none absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-line bg-surface/90 px-2 text-2xs font-semibold leading-tight text-ink">
-            {n + 1}
+            {i + 1}
           </span>
           {/* Include-in-run checkbox: its own island; keyboard toggling (Space) must
               never bubble into the card's open action. */}

@@ -9,10 +9,18 @@ export type CanvasMode = 'pre-upload' | 'post-analysis'
 export function pagesFromSettings(s: RunSettings, pageCount: number): Set<number> {
   const scope = String(s.page_scope ?? 'all')
   const all = new Set(Array.from({ length: pageCount }, (_, i) => i))
-  if (scope === 'single') return new Set([Math.min(Math.max(0, Number(s.page_num ?? 1) - 1), pageCount - 1)])
+  // Settings outlive the document they were set on (they persist across uploads),
+  // so a scope can address pages this document does not have. Every branch clamps
+  // to real pages: a phantom index renders a grid card with no image behind it and
+  // encodes back into a run scope for a page that cannot be rasterized.
+  if (pageCount <= 0) return new Set()
+  const last = pageCount - 1
+  if (scope === 'single') return new Set([Math.min(Math.max(0, Number(s.page_num ?? 1) - 1), last)])
   if (scope === 'range') {
-    const start = Math.max(0, Number(s.page_start ?? 1) - 1)
+    const start = Math.min(Math.max(0, Number(s.page_start ?? 1) - 1), last)
     const end = Math.min(Number(s.page_end ?? pageCount), pageCount)
+    // max(1, …) keeps an inverted range (end < start) meaning "just the start
+    // page" rather than nothing — but start is now guaranteed to be a real page.
     return new Set(Array.from({ length: Math.max(1, end - start) }, (_, i) => start + i))
   }
   if (scope === 'list') {

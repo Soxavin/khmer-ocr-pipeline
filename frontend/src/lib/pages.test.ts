@@ -25,6 +25,36 @@ describe('gridPages (post-analysis filtering)', () => {
   })
 })
 
+describe('pagesFromSettings never invents a page the document does not have', () => {
+  it('a range starting past the end clamps to the last real page', () => {
+    // The bug: start=2, end=min(5,1)=1, then Math.max(1, end-start) FORCED one
+    // entry — page index 2 of a one-page document. The grid then rendered a card
+    // for a page that does not exist.
+    const s = { page_scope: 'range', page_start: 3, page_end: 5 }
+    expect(Array.from(pagesFromSettings(s, 1))).toEqual([0])
+  })
+
+  it('a range running past the end keeps only the pages that exist', () => {
+    expect(Array.from(pagesFromSettings({ page_scope: 'range', page_start: 2, page_end: 99 }, 3)))
+      .toEqual([1, 2])
+  })
+
+  it('an inverted range still yields one real page, never a phantom', () => {
+    expect(Array.from(pagesFromSettings({ page_scope: 'range', page_start: 4, page_end: 2 }, 6)))
+      .toEqual([3])
+  })
+
+  it('a single page past the end clamps instead of going negative', () => {
+    expect(Array.from(pagesFromSettings({ page_scope: 'single', page_num: 9 }, 3))).toEqual([2])
+  })
+
+  it('a document with no pages yields nothing at all (never index -1)', () => {
+    expect(Array.from(pagesFromSettings({ page_scope: 'single', page_num: 1 }, 0))).toEqual([])
+    expect(Array.from(pagesFromSettings({ page_scope: 'range', page_start: 1, page_end: 3 }, 0)))
+      .toEqual([])
+  })
+})
+
 describe('pagesFromSettings ⇄ encodePages round trip', () => {
   it('contiguity uses strict numeric sort (pages 9,10,11 collapse to a range)', () => {
     expect(encodePages(new Set([8, 9, 10]), 20)).toEqual({ page_scope: 'range', page_start: 9, page_end: 11 })
