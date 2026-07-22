@@ -2655,7 +2655,31 @@ passthrough), backend stage-string enum (API contract change).
 **Outcome.** vitest 80 (from 74; new `TablesPanel.test.tsx` + `TableEditor.test.tsx`),
 `tsc -b` + build clean. Detector: 3 hits, all classified false positives (test fixtures ×2;
 the `GridThumb` call site pattern-matched as a raw `<img>`). New keys `page_load_failed`,
-`retry`, `copy_failed` are en-only — km placeholders flagged for the next native review.
+`retry`, `copy_failed` landed en-only and were translated straight after in `207b1f3`.
+
+**⚠️ Commit-hygiene correction (parallel sessions).** `a16109a` — whose message describes only
+UI work — **also carries backend evaluation changes**: `+105` lines in
+`src/khmer_pipeline/evaluation/evaluate_structure.py` and `+143` in
+`tests/test_evaluate_structure.py`. Those files were already staged in the shared index when
+the commit was made, and `git commit` commits the index, not just the freshly-added paths.
+The swept-in content is two different authors' work: `_is_khmer_text` / `khmer_cell_accuracy`
+(this session's, belonging to the migrated engine investigation) **and**
+`_is_unit_token` / `_strip_unit_affixes` (the engine session's in-flight work — `git log -S`
+confirms `a16109a` is the only commit introducing them).
+
+*Deliberately NOT reverted.* The engine session still held uncommitted edits in those exact
+files in the shared working tree; a revert rewrites the working copy and would likely destroy
+them, and `a16109a` was already pushed. Nothing is lost or broken —
+`tests/test_evaluate_structure.py` passes at HEAD — so the correct remedy was this record, not
+a file operation.
+
+*Consequence for the engine session:* the `evaluate_structure.py` baseline moved forward at
+`a16109a`; commit the remaining delta, not the full diff.
+
+*Lesson:* in a shared tree, verify `git diff --cached` (not just `git status`) before
+committing, or scope the commit with `git commit -- <paths>`. Verified clean in the other
+direction: no other session's commit touches `frontend/`, `webapp/`, or `dev.sh`, and this
+session's other nine commits contain no eval/benchmark files.
 
 ### 2.75 The router's confidence signal cannot be retuned — the classes overlap (2026-07-22)
 
