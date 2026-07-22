@@ -671,8 +671,79 @@ def test_is_numeric_rejects_non_numbers():
 
 def test_is_numeric_rejects_digit_duplication_artifact():
     # "7,800" -> "7,8000" is the known Kiri duplication artifact; the malformed
-    # thousands grouping means it is NOT a well-formed number
+    # thousands grouping means it is NOT a well-formed number. Bare ASCII digits
+    # carry no locale signal, so the comma-decimal reading (under which "7,8000"
+    # would be valid) stays disabled here — this guard must survive that widening.
     assert _is_numeric("7,8000") is False
+
+# --- Cambodian financial number forms: unit affixes + comma decimal separator ---
+
+def test_is_numeric_unit_suffix_khmer():
+    # MoC gas bulletin money cells: Khmer digits, comma decimal, unit word
+    assert _is_numeric("០,៧១១៧ ដុល្លារ") is True
+    assert _is_numeric("០,២០ ដុល្លារ") is True
+    assert _is_numeric("១,១៤ ដុល្លារ") is True
+
+def test_is_numeric_unit_suffix_with_space_grouped_thousands():
+    # "៤ ៦០០ រៀល" — space-grouped thousands AND a unit token
+    assert _is_numeric("៤ ៦០០ រៀល") is True
+
+def test_is_numeric_unit_suffix_latin():
+    assert _is_numeric("1.14 USD") is True
+    assert _is_numeric("12.5 kg") is True
+
+def test_is_numeric_currency_symbol_prefix():
+    # Unicode currency-symbol category (Sc): "$" and the Khmer riel sign "៛"
+    assert _is_numeric("$1.14") is True
+    assert _is_numeric("៛4,600") is True
+
+def test_is_numeric_parenthesised_negative():
+    # Accounting convention for negatives, common in budget/TOFE tables
+    assert _is_numeric("(1,234)") is True
+    assert _is_numeric("(3.85%)") is True
+
+def test_is_numeric_comma_decimal_needs_locale_signal():
+    # Khmer digits are a locale signal → comma reads as a decimal separator
+    assert _is_numeric("០,៧១១៧") is True
+    # A unit affix is also a locale signal
+    assert _is_numeric("0,7117 ដុល្លារ") is True
+    # Bare ASCII with no signal keeps the strict period-decimal grammar
+    assert _is_numeric("0,7117") is False
+
+def test_is_numeric_comma_decimal_with_period_thousands():
+    assert _is_numeric("១.២៣៤,៥៦") is True
+
+def test_is_numeric_rejects_alphabetic_prefix_label():
+    # "Gasoline 92" is a column label, not a numeric cell: the leading token is
+    # alphabetic, so it is not a strippable affix and the core fails to parse.
+    assert _is_numeric("Gasoline 92") is False
+    assert _is_numeric("Gasoil 10ppm") is False
+
+def test_is_numeric_rejects_multiple_number_cores():
+    # A Khmer sentence quoting several percentages stays a label cell.
+    assert _is_numeric("៣០% មក ១៥%") is False
+    # A merged cell holding two values must not be scored as one number.
+    assert _is_numeric("០,០៧៨៥ ដុល្លារ ០,០០០០ ដុល្លារ") is False
+
+def test_is_numeric_rejects_long_trailing_token():
+    # The unit affix is one SHORT token; a sentence that happens to end in a word
+    # after a number is not a numeric cell.
+    assert _is_numeric("១ ថ្លៃប្រេងអន្តរជាតិជាមធ្យម") is False
+
+def test_is_numeric_unit_affix_alone_is_not_numeric():
+    # No number core at all — the existing riel-unit header case, restated for
+    # the affix path (regression guard for the widened classifier).
+    assert _is_numeric("៛/គ.ក") is False
+    assert _is_numeric("ដុល្លារ") is False
+
+def test_khmer_and_numeric_classes_stay_disjoint_for_unit_suffixed_money():
+    # A unit-suffixed money cell is Khmer-heavy by character ratio, but it is a
+    # NUMBER: it must move to the numeric class, not be counted twice.
+    from khmer_pipeline.evaluation.evaluate_structure import _is_khmer_text
+    assert _is_numeric("០,៧១១៧ ដុល្លារ") is True
+    assert _is_khmer_text("០,៧១១៧ ដុល្លារ") is False
+    # A genuine Khmer label is unaffected.
+    assert _is_khmer_text("ថ្លៃប្រេងអន្តរជាតិជាមធ្យម") is True
 
 def test_has_khmer_digit():
     assert _has_khmer_digit("១") is True
@@ -752,6 +823,75 @@ def test_numeric_additions_do_not_perturb_existing_metrics():
     assert result["cells_correct"] == 6
 
 
+# --- Khmer_Cell_Accuracy scoring in evaluate_table ---
+# Mirrors the numeric metric for the other half of a financial table: numbers vs
+# Khmer labels degrade independently per engine (Kiri is strong on Khmer text and
+# weak on numerals), and a single aggregate accuracy hides which one moved.
+# The two classes are deliberately DISJOINT — see the Khmer-digit test below.
+
+# 2 Khmer-heavy GT cells ("ចេក", "៛/គ.ក"); the other 4 are numeric.
+def test_khmer_cells_exact_match():
+    pred_table = _make_table_from_grid(_NUMERIC_GT)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["khmer_cells_total"] == 2
+    assert result["khmer_cells_correct"] == 2
+    assert result["khmer_cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_khmer_cells_wrong_text():
+    # Swap the two Khmer labels between rows: a realistic misread, and it uses
+    # only Khmer strings already present in this fixture.
+    pred_grid = [
+        ["1", "៛/គ.ក", "7,800"],
+        ["2", "ចេក", "-3.85%"],
+    ]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["khmer_cells_total"] == 2
+    assert result["khmer_cells_correct"] == 0
+    assert result["khmer_cell_accuracy"] == pytest.approx(0.0)
+    # The numerals were untouched — the split is what proves it.
+    assert result["numeric_cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_khmer_digit_numerals_count_as_numeric_not_khmer():
+    # "១២៣" is Khmer script but semantically a number: it must land in the
+    # numeric class only, so the two classes never double-count a cell.
+    gt_grid = [["h1", "h2"], ["១២៣", "ចេក"]]
+    pred_table = _make_table_from_grid(gt_grid)
+    result = evaluate_table([pred_table], gt_grid)
+    assert result["numeric_cells_total"] == 1
+    assert result["khmer_cells_total"] == 1  # only "ចេក", not "១២៣"
+
+
+def test_khmer_cells_dropped_row_counts_against_denominator():
+    # GT row 2 has no pred pair → its Khmer cell misses, mirroring the numeric rule.
+    pred_grid = [["1", "ចេក", "7,800"]]
+    pred_table = _make_table_from_grid(pred_grid)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["khmer_cells_total"] == 2
+    assert result["khmer_cells_correct"] == 1
+    assert result["khmer_cell_accuracy"] == pytest.approx(0.5)
+
+
+def test_khmer_cells_none_gt_grid():
+    result = evaluate_table([], None)
+    assert result["khmer_cells_total"] == 0
+    assert result["khmer_cells_correct"] == 0
+    assert result["khmer_cell_accuracy"] == 0.0
+
+
+def test_khmer_additions_do_not_perturb_existing_metrics():
+    # PIN: the Khmer metric must not move cell_accuracy / recall / table_cer / numeric.
+    pred_table = _make_table_from_grid(_NUMERIC_GT)
+    result = evaluate_table([pred_table], _NUMERIC_GT)
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+    assert result["cell_content_recall"] == pytest.approx(1.0)
+    assert result["table_cer"] == pytest.approx(0.0)
+    assert result["cells_total"] == 6
+    assert result["numeric_cell_accuracy"] == pytest.approx(1.0)
+
+
 # --- Empty-cell precision (phantom text in empty GT cells, e.g. Kiri's "|") ---
 
 def test_empty_cell_precision_counts_phantom_text():
@@ -777,3 +917,4 @@ def test_empty_cell_precision_none_when_gt_has_no_empty_cells():
     m = evaluate_table([pred_table], gt_grid)
     assert m["empty_gt_cells_total"] == 0
     assert m["empty_cell_precision"] is None
+

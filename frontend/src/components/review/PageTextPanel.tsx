@@ -39,14 +39,35 @@ export function PageTextPanel(props: {
   const { docId, pageIdx, page, text, onTextChange, saved, onSaved } = props
   const { t } = useT()
   const [mode, setMode] = useState<'blocks' | 'raw'>('blocks')
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   const blocks = useMemo(() => orderedBlocks(page.text_blocks), [page.text_blocks])
 
   async function copyAll() {
-    await navigator.clipboard.writeText(mode === 'raw' ? text : mergedText(blocks))
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
+    const payload = mode === 'raw' ? text : mergedText(blocks)
+    let ok = false
+    // navigator.clipboard is absent on non-secure origins (a LAN demo over
+    // http://<ip>:8600) and can reject even where present — fall back to the
+    // selection-based path, and never fail silently either way.
+    try {
+      await navigator.clipboard.writeText(payload)
+      ok = true
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = payload
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        ok = document.execCommand('copy')
+      } catch {
+        ok = false
+      }
+      ta.remove()
+    }
+    setCopyState(ok ? 'copied' : 'failed')
+    window.setTimeout(() => setCopyState('idle'), 1500)
   }
 
   return (
@@ -75,7 +96,10 @@ export function PageTextPanel(props: {
           <Copy size={14} aria-hidden />
         </button>
       </div>
-      <span aria-live="polite" className="sr-only">{copied ? t('copied') : ''}</span>
+      {/* Failure is visible text, not sr-only — a silent broken Copy is a lie. */}
+      <span aria-live="polite" className={copyState === 'failed' ? 'text-2xs text-danger-ink' : 'sr-only'}>
+        {copyState === 'copied' ? t('copied') : copyState === 'failed' ? t('copy_failed') : ''}
+      </span>
 
       {mode === 'blocks' ? (
         blocks.length === 0 ? (

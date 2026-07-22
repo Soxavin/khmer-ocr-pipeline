@@ -1,8 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { Download, PanelLeft, PanelLeftClose, Play, Plus, Trash2, X } from 'lucide-react'
 import type { DocSummary } from '../../api/types'
+import { ConfirmPopover } from '../ConfirmPopover'
 import { useT, type Key } from '../../i18n.tsx'
-import { btnCls, btnSmCls, dangerBtnCls, ICON, ICON_SM, iconBtnCls } from '../../ui'
+import { btnCls, btnSmCls, ICON, ICON_SM, iconBtnCls } from '../../ui'
+
+/** Which destructive action is awaiting confirmation, and where to anchor it. */
+type PendingConfirm =
+  | { kind: 'all'; anchor: { x: number; y: number } }
+  | { kind: 'doc'; id: string; name: string; anchor: { x: number; y: number } }
+
+const anchorOf = (e: React.MouseEvent): { x: number; y: number } => {
+  const r = e.currentTarget.getBoundingClientRect()
+  return { x: r.right, y: r.bottom }
+}
 
 // Linear-style status: a 6px dot + neutral text, not a colored pill.
 const STATUS_DOT: Record<string, string> = {
@@ -20,7 +31,10 @@ const STATUS_KEY: Record<string, Key> = {
   stopped: 'status_stopped',
 }
 
-export function QueueRail(props: {
+// Memoized: the run-status poll re-renders App ~2.5x/s for the whole run;
+// the rail's props are all stable (App memoizes its handlers), so the queue
+// list must not repaint on every tick.
+export const QueueRail = memo(function QueueRail(props: {
   documents: DocSummary[]
   activeId: string | null
   onSelect: (id: string) => void
@@ -45,26 +59,9 @@ export function QueueRail(props: {
   // The queue is management chrome; the page image + tables are the work. The rail
   // folds to a slim strip so the review zones get the width (remembered per machine).
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('railCollapsed') === 'true')
-  const [confirmClear, setConfirmClear] = useState(false)
-  const confirmRef = useRef<HTMLDivElement>(null)
-  // The guard closes on Escape or an outside click — never strands a modal state.
-  useEffect(() => {
-    if (!confirmClear) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setConfirmClear(false)
-    }
-    const onDown = (e: PointerEvent) => {
-      if (!confirmRef.current?.contains(e.target as Node)) setConfirmClear(false)
-    }
-    window.addEventListener('keydown', onKey)
-    // Deferred: the opening click itself must not immediately close the popover.
-    const id = setTimeout(() => window.addEventListener('pointerdown', onDown), 0)
-    return () => {
-      clearTimeout(id)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onDown)
-    }
-  }, [confirmClear])
+  // ONE confirmation guard for both destructive actions (clear-all, remove-doc):
+  // the shared popover names the consequence and never fires on the first click.
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null)
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       localStorage.setItem('railCollapsed', String(!c))
@@ -130,10 +127,10 @@ export function QueueRail(props: {
             {/* Bulk clear earns its place only once the queue is genuinely a queue. */}
             {documents.length > 1 && (
               <button
-                className={`${iconBtnCls} ${confirmClear ? 'bg-danger-soft text-danger-ink' : 'hover:bg-danger-soft hover:text-danger-ink'}`}
-                onClick={() => setConfirmClear((c) => !c)}
+                className={`${iconBtnCls} ${confirm?.kind === 'all' ? 'bg-danger-soft text-danger-ink' : 'hover:bg-danger-soft hover:text-danger-ink'}`}
+                onClick={(e) => setConfirm((c) => (c?.kind === 'all' ? null : { kind: 'all', anchor: anchorOf(e) }))}
                 aria-label={t('delete_all')}
-                aria-expanded={confirmClear}
+                aria-expanded={confirm?.kind === 'all'}
                 title={t('delete_all')}
               >
                 <Trash2 size={ICON} aria-hidden />
@@ -142,33 +139,6 @@ export function QueueRail(props: {
             <button className={iconBtnCls} onClick={toggleCollapsed} aria-label={t('hide_queue')} title={t('hide_queue')}>
               <PanelLeftClose size={ICON} aria-hidden />
             </button>
-            {/* Destructive guard: the action names the count and never fires on the
-                first click. Anchored to the icon so the consequence reads in place. */}
-            {confirmClear && (
-              <div
-                role="dialog"
-                aria-label={t('delete_all')}
-                ref={confirmRef}
-                className="overlay-enter absolute right-0 top-full z-50 mt-1 w-60 rounded-lg border border-line-strong bg-raised p-3 text-left shadow-modal"
-              >
-                <p className="text-sm font-semibold text-ink">{t('delete_all_title')}</p>
-                <p className="mt-1 text-xs leading-4 text-ink-2">{t('delete_all_confirm', { n: documents.length })}</p>
-                <div className="mt-3 flex justify-end gap-2">
-                  <button className={btnSmCls} onClick={() => setConfirmClear(false)}>
-                    {t('cancel')}
-                  </button>
-                  <button
-                    className={dangerBtnCls}
-                    onClick={() => {
-                      setConfirmClear(false)
-                      onRemoveAll()
-                    }}
-                  >
-                    {t('delete_all_action')}
-                  </button>
-                </div>
-              </div>
-            )}
           </span>
         </div>
         <div className="p-3 pb-2">
@@ -275,10 +245,9 @@ export function QueueRail(props: {
                   title={t('remove_doc')}
                   onClick={(e) => {
                     e.stopPropagation()
-                    // Removal discards results AND edits — irreversible, so confirm.
-                    if (window.confirm(t('remove_confirm', { name: d.name }))) {
-                      onRemove(d.id)
-                    }
+                    // Removal discards results AND edits — irreversible, so the same
+                    // popover guard as clear-all (one confirmation vocabulary).
+                    setConfirm({ kind: 'doc', id: d.id, name: d.name, anchor: anchorOf(e) })
                   }}
                 >
                   <X size={14} aria-hidden />
@@ -309,6 +278,24 @@ export function QueueRail(props: {
           )
         })}
       </div>
+
+      {/* Rendered at the rail root (fixed coords): outside the role="button" rows
+          and immune to the scroll container's clipping. */}
+      {confirm && (
+        <ConfirmPopover
+          title={confirm.kind === 'all' ? t('delete_all_title') : t('remove_doc')}
+          body={
+            confirm.kind === 'all'
+              ? t('delete_all_confirm', { n: documents.length })
+              : t('remove_confirm', { name: confirm.name })
+          }
+          actionLabel={confirm.kind === 'all' ? t('delete_all_action') : t('remove_doc')}
+          cancelLabel={t('cancel')}
+          anchor={confirm.anchor}
+          onConfirm={() => (confirm.kind === 'all' ? onRemoveAll() : onRemove(confirm.id))}
+          onClose={() => setConfirm(null)}
+        />
+      )}
     </aside>
   )
-}
+})

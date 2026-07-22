@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n.tsx'
 
 const MAX_THUMB_RETRIES = 4
@@ -10,8 +10,10 @@ const MAX_THUMB_RETRIES = 4
     lands within a beat or two), optionally fall back to the raw preview rendition,
     and — critically — reset the whole lifecycle whenever `src` changes so a stale
     thumbnail never bleeds across a view toggle or a document switch. */
-function GridThumb(props: { src: string; fallbackSrc?: string; alt: string }) {
-  const { src, fallbackSrc, alt } = props
+export function GridThumb(props: { src: string; fallbackSrc?: string; alt: string; className?: string }) {
+  // Default box = grid card; the pre-run single view reuses the same lifecycle
+  // (skeleton -> retry -> never a broken glyph) with its own framing.
+  const { src, fallbackSrc, alt, className = 'relative aspect-[3/4] w-full' } = props
   const [status, setStatus] = useState<'load' | 'ok' | 'fail'>('load')
   const [current, setCurrent] = useState(src)
   const attempt = useRef(0)
@@ -50,7 +52,7 @@ function GridThumb(props: { src: string; fallbackSrc?: string; alt: string }) {
   }
 
   return (
-    <div className="relative aspect-[3/4] w-full">
+    <div className={className}>
       {status !== 'ok' && (
         <div className={`absolute inset-0 ${status === 'fail' ? 'bg-rail/40' : 'animate-pulse bg-rail/60'}`} aria-hidden />
       )}
@@ -62,7 +64,7 @@ function GridThumb(props: { src: string; fallbackSrc?: string; alt: string }) {
           draggable={false}
           onLoad={() => setStatus('ok')}
           onError={onError}
-          className={`aspect-[3/4] w-full object-contain transition-opacity duration-200 ${status === 'ok' ? 'opacity-100' : 'opacity-0'}`}
+          className={`h-full w-full object-contain transition-opacity duration-200 ${status === 'ok' ? 'opacity-100' : 'opacity-0'}`}
         />
       )}
     </div>
@@ -119,8 +121,11 @@ export function ViewToggle(props: { view: 'single' | 'grid'; onChange: (v: 'sing
     The checkbox and the card are separate tab stops — Space on the checkbox
     toggles selection, Enter on the card opens the page, never crosswise.
     `pages` is the explicit 0-based document-page list to render: pre-upload it is
-    every page; post-analysis it is only the pages the run processed. */
-export function PageGrid(props: {
+    every page; post-analysis it is only the pages the run processed.
+    Memoized: during a run the status poll re-renders App ~2.5×/s, and a grid of
+    up to ~100 thumbnails must not re-render on every tick (App memoizes every
+    prop it passes here). */
+export const PageGrid = memo(function PageGrid(props: {
   pages: number[]
   pageCount: number
   imageUrl: (n: number) => string
@@ -175,4 +180,4 @@ export function PageGrid(props: {
       ))}
     </div>
   )
-}
+})

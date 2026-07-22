@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useT } from '../i18n.tsx'
 import { kbdCls, panelFloatingCls } from '../ui'
 
@@ -39,6 +40,10 @@ export function CommandPalette(props: { commands: Command[]; onClose: () => void
   const [sel, setSel] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  // aria-modal promises the keyboard stays inside; the trap keeps it (Tab was
+  // escaping into the background workspace before).
+  useFocusTrap(dialogRef, true)
 
   useEffect(() => inputRef.current?.focus(), [])
 
@@ -72,9 +77,11 @@ export function CommandPalette(props: { commands: Command[]; onClose: () => void
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t('ks_palette')}
+        tabIndex={-1}
         className={`${panelFloatingCls} overlay-enter flex max-h-[55vh] w-[480px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >

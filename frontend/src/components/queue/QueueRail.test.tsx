@@ -89,6 +89,21 @@ describe('QueueRail clear-all guard', () => {
     expect(props.onSelect).toHaveBeenCalledWith('a')
   })
 
+  it('per-document remove uses the same popover guard, not window.confirm', async () => {
+    const user = userEvent.setup()
+    const props = renderRail()
+
+    await user.click(screen.getByRole('button', { name: /remove.*a\.pdf/i }))
+    // A designed dialog appears; nothing is removed until confirmed.
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(props.onRemove).not.toHaveBeenCalled()
+
+    // Exact match: the trigger's own label is "Remove document: a.pdf".
+    await user.click(screen.getByRole('button', { name: /^remove document$/i }))
+    expect(props.onRemove).toHaveBeenCalledWith('a')
+    expect(props.onRemove).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the remove control reachable (not display:none at rest)', () => {
     renderRail()
     // The per-document remove button must be in the tree (focusable), not

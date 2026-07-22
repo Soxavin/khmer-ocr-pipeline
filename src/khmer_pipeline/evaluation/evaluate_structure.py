@@ -15,6 +15,16 @@ _KHMER_TO_ARABIC = {
 # trailing %. (e.g. "7,800", "-3.85%", "123", "0.00%".)
 _NUMERIC_RE = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?%?$")
 
+# The Cambodian convention: comma is the DECIMAL separator and the thousands
+# group is a period or a space (spaces are already stripped by _fold_numeric).
+# e.g. "០,៧១១៧" = 0.7117, "១.២៣៤,៥៦" = 1234.56.
+_NUMERIC_COMMA_DECIMAL_RE = re.compile(r"^[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d+)?%?$")
+
+# Longest trailing token still treated as a unit affix ("ដុល្លារ", "រៀល", "លីត្រ",
+# "គីឡូក្រាម", "USD", "%"). The cap is what separates a unit from a sentence that
+# merely happens to end after a number.
+_UNIT_AFFIX_MAX_CHARS = 12
+
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFC", s)
@@ -29,13 +39,83 @@ def _fold_numeric(s: str) -> str:
     return folded.replace(" ", "")
 
 
+def _is_unit_token(tok: str) -> bool:
+    # A unit affix is short and carries no digits in either script.
+    return (
+        0 < len(tok) <= _UNIT_AFFIX_MAX_CHARS
+        and not any(ch.isdigit() or ch in _KHMER_TO_ARABIC for ch in tok)
+    )
+
+
+def _strip_unit_affixes(s: str) -> tuple[str, bool]:
+    """Strip a leading currency symbol / accounting parens / trailing unit token.
+
+    Returns the remaining number core and whether an affix was found — the latter
+    is a *locale signal* used by `_is_numeric` to decide how to read a comma."""
+    core = _norm(s)
+    found = False
+    # Leading currency symbols are matched by Unicode category Sc ("$", "៛")
+    # rather than an enumerated list, so a new currency needs no code change.
+    if core and unicodedata.category(core[0]) == "Sc":
+        core = core[1:].lstrip()
+        found = True
+    # Accounting convention for negatives, common in budget/TOFE tables: "(1,234)".
+    if core.startswith("(") and core.endswith(")"):
+        core = core[1:-1].strip()
+    # Exactly ONE trailing unit token. Stripping more would let a two-word label
+    # ending in a number-shaped token pass as numeric.
+    tokens = core.split()
+    if len(tokens) > 1 and _is_unit_token(tokens[-1]):
+        core = " ".join(tokens[:-1])
+        found = True
+    return core, found
+
+
 def _is_numeric(s: str) -> bool:
-    # True iff the cell is a well-formed number after digit-folding + space-strip.
-    return bool(_NUMERIC_RE.match(_fold_numeric(s)))
+    """True iff the cell is a single number, optionally carrying a unit affix.
+
+    Two separator conventions are in play. Period-decimal ("7,800.25") is always
+    accepted. Comma-decimal ("០,៧១១៧") is accepted only when the cell carries a
+    locale signal — Khmer digits, or a currency/unit affix — because the two
+    readings are genuinely ambiguous: bare "7,8000" is malformed thousands
+    grouping (the known Kiri digit-duplication artifact) but a valid comma-decimal
+    number. Requiring the signal keeps that artifact detectable.
+
+    Residual gap: a bare, unit-less "0,7117" in an all-ASCII document reads as
+    non-numeric. Resolving it needs document-level context — infer the convention
+    once per grid and pass it in — rather than a better per-cell guess."""
+    core, has_affix = _strip_unit_affixes(s)
+    folded = _fold_numeric(core)
+    if _NUMERIC_RE.match(folded):
+        return True
+    if has_affix or _has_khmer_digit(s):
+        return bool(_NUMERIC_COMMA_DECIMAL_RE.match(folded))
+    return False
 
 
 def _has_khmer_digit(s: str) -> bool:
     return any(ch in _KHMER_TO_ARABIC for ch in s)
+
+
+# A cell counts as Khmer text when at least this fraction of its non-space
+# characters are in the Khmer block — same rule surya_kiri_vlm uses to pick
+# re-read candidates, so eval and engine agree on what "a Khmer cell" is.
+_KHMER_HEAVY_MIN_RATIO = 0.5
+
+
+def _is_khmer_text(s: str) -> bool:
+    """True for Khmer-script *label* cells, excluding Khmer-digit numerals.
+
+    Numerals written in Khmer digits ("១២៣") are semantically numeric and are
+    already scored by the numeric metric, so they are excluded here to keep the
+    numeric and Khmer cell classes disjoint (no cell is counted twice)."""
+    if _is_numeric(s):
+        return False
+    chars = [ch for ch in _norm(s) if not ch.isspace()]
+    if not chars:
+        return False
+    khmer = sum(1 for ch in chars if "\u1780" <= ch <= "\u17ff")
+    return khmer / len(chars) >= _KHMER_HEAVY_MIN_RATIO
 
 
 def _strip_title_row(grid: list[list[str]]) -> list[list[str]]:
@@ -194,6 +274,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             "numeric_cells_correct": 0,
             "numeric_cell_accuracy": 0.0,
             "numeric_cells_khmer_digit_slips": 0,
+            "khmer_cells_total": 0,
+            "khmer_cells_correct": 0,
+            "khmer_cell_accuracy": 0.0,
             "empty_gt_cells_total": 0,
             "empty_gt_cells_clean": 0,
             "empty_cell_precision": None,
@@ -268,6 +351,16 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # cells that carry any Khmer digit (value-right-but-mixed-script vs value-wrong).
     numeric_cells_correct = 0
     numeric_cells_khmer_digit_slips = 0
+    # Khmer-label cells: same denominator rule as numeric (every Khmer GT cell,
+    # so cells in dropped rows count as misses). Compared with plain _norm equality
+    # — no digit folding, since these are text.
+    khmer_cells_total = sum(
+        1
+        for r in range(gt_rows)
+        for c in range(gt_cols)
+        if c < len(gt_stripped[r]) and _is_khmer_text(gt_stripped[r][c])
+    )
+    khmer_cells_correct = 0
     # Empty-cell precision (§2.35): phantom text in empty GT cells (e.g. a cell
     # border read as "|") pollutes exports but is invisible to Recall — count it.
     # Scored over aligned row pairs only (pollution is only measurable where a
@@ -284,6 +377,8 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
                 empty_gt_cells_total += 1
                 if not _norm(pred_raw):
                     empty_gt_cells_clean += 1
+            if _is_khmer_text(gt_raw) and _norm(pred_raw) == _norm(gt_raw):
+                khmer_cells_correct += 1
             if not _is_numeric(gt_raw):
                 continue
             if _fold_numeric(pred_raw) == _fold_numeric(gt_raw):
@@ -292,6 +387,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
                 numeric_cells_khmer_digit_slips += 1
     numeric_cell_accuracy = (
         numeric_cells_correct / numeric_cells_total if numeric_cells_total > 0 else 0.0
+    )
+    khmer_cell_accuracy = (
+        khmer_cells_correct / khmer_cells_total if khmer_cells_total > 0 else 0.0
     )
     empty_cell_precision = (
         empty_gt_cells_clean / empty_gt_cells_total if empty_gt_cells_total > 0 else None
@@ -308,6 +406,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
         "table_cer": table_cer,
         "cells_total": cells_total,
         "cells_correct": cells_correct,
+        "khmer_cells_total": khmer_cells_total,
+        "khmer_cells_correct": khmer_cells_correct,
+        "khmer_cell_accuracy": khmer_cell_accuracy,
         "numeric_cells_total": numeric_cells_total,
         "numeric_cells_correct": numeric_cells_correct,
         "numeric_cell_accuracy": numeric_cell_accuracy,

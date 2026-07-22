@@ -4,16 +4,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api/client'
 import type { RunSettings } from './api/types'
 import { QueueRail } from './components/queue/QueueRail'
+import { HeaderProgress } from './components/run/HeaderProgress'
 import { RunControls } from './components/run/RunControls'
 import { SettingsDrawer } from './components/run/SettingsDrawer'
 import { CommandPalette, type Command } from './components/CommandPalette'
-import { PageGrid, ViewToggle } from './components/viewer/PageGrid'
+import { GridThumb, PageGrid, ViewToggle } from './components/viewer/PageGrid'
 import { PageViewer } from './components/viewer/PageViewer'
 // AG-Grid (~1 MB) lives entirely inside TablesPanel and is only ever rendered
 // once a run has results — lazy-load it so it stays out of the initial bundle
 // (the empty state and pre-run flow never pay for it).
 const TablesPanel = lazy(() => import('./components/review/TablesPanel').then((m) => ({ default: m.TablesPanel })))
 import { IssuesDrawer } from './components/review/IssuesDrawer'
+import { useFocusTrap } from './hooks/useFocusTrap'
 import { useRunStatus } from './hooks/useRunStatus'
 import { encodePages, gridPages, pagesFromSettings, processedIndex } from './lib/pages'
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
@@ -99,40 +101,6 @@ function useSplit(): {
       },
     },
   }
-}
-
-/** Header progress line: milestone ranges per pipeline stage — ingest 0–10,
-    preprocess 10–30, OCR 30–80 (riding the REAL page fraction), post 80–95,
-    export 95–99. The value approaches each ceiling asymptotically, so the line
-    always creeps and never jumps backward; run end completes to 100 then clears. */
-function useSmoothProgress(active: boolean, stage: string, fraction: number): number {
-  const [val, setVal] = useState(0)
-  useEffect(() => {
-    if (!active) {
-      setVal((v) => (v > 0 ? 100 : 0))
-      const id = setTimeout(() => setVal(0), 700)
-      return () => clearTimeout(id)
-    }
-    const range: [number, number] = stage.startsWith('Reading')
-      ? [2, 10]
-      : stage.startsWith('Cleaning')
-        ? [10, 30]
-        : stage.startsWith('Finding')
-          ? [30, 80]
-          : stage.startsWith('Tidying')
-            ? [80, 95]
-            : stage.startsWith('Preparing')
-              ? [95, 99]
-              : [1, 8]
-    const target = stage.startsWith('Finding') && fraction > 0
-      ? range[0] + (range[1] - range[0]) * Math.min(1, fraction)
-      : range[1]
-    const id = setInterval(() => {
-      setVal((v) => Math.max(v, v + (target - v) * 0.08))
-    }, 250)
-    return () => clearInterval(id)
-  }, [active, stage, fraction])
-  return val
 }
 
 /** Errors shown to analysts, not developers: translate transport noise. */
@@ -322,33 +290,7 @@ export default function App() {
 
   // Help dialog: real focus management (trap Tab inside, restore focus on close).
   const helpRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!showHelp) return
-    const prev = document.activeElement as HTMLElement | null
-    helpRef.current?.focus()
-    const trap = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !helpRef.current) return
-      const focusables = helpRef.current.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])')
-      if (!focusables.length) {
-        e.preventDefault()
-        return
-      }
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', trap)
-    return () => {
-      window.removeEventListener('keydown', trap)
-      prev?.focus()
-    }
-  }, [showHelp])
+  useFocusTrap(helpRef, showHelp)
 
   // When a run finishes, refresh everything derived from it.
   const wasActive = useRef(false)
@@ -457,6 +399,19 @@ export default function App() {
   })
   const cancel = useMutation({ mutationFn: (id: string) => api.cancel(id) })
 
+  // Switching documents resets every per-document view state in one place.
+  // Declared before runAll, which both calls it and lists it as a dep.
+  const selectDoc = useCallback((id: string) => {
+    setActiveId(id)
+    touchedRef.current = new Set()
+    setPageIdx(0)
+    setSelectedTable(null)
+    setFlashToken(null)
+    setFocusCell(null)
+    setIssueIdx(-1)
+    setDismissedIssues(new Set())
+  }, [])
+
   // "Run all": sequential client-side loop (single GPU — the server 409s overlap).
   const runAll = useCallback(async () => {
     setBatchRunning(true)
@@ -464,7 +419,13 @@ export default function App() {
     try {
       const targets = documents.filter((d) => d.status === 'queued' || d.status === 'error' || d.status === 'stopped')
       for (const d of targets) {
-        setActiveId(d.id)
+        // A doc removed while the batch was working through the queue must be
+        // skipped, not run — the snapshot in `targets` is minutes old by now.
+        const live = qc.getQueryData<{ documents: { id: string }[] }>(['documents'])
+        if (live && !live.documents.some((x) => x.id === d.id)) continue
+        // Full doc-switch reset (pageIdx, selection, triage): plain setActiveId
+        // bled the previous doc's page index into the next one's preview.
+        selectDoc(d.id)
         try {
           await guardedRun(false, () => api.run(d.id, draftConfiguration))
         } catch (e) {
@@ -491,7 +452,7 @@ export default function App() {
       qc.invalidateQueries({ queryKey: ['documents'] })
       qc.invalidateQueries({ queryKey: ['status'] })
     }
-  }, [documents, engine, runSettings, qc, rememberSettings])
+  }, [documents, engine, runSettings, qc, rememberSettings, selectDoc])
 
   // Keyboard: r runs, n/p step issues, ←/→ pages, Ctrl/Cmd-F find, Esc closes drawers.
   useEffect(() => {
@@ -525,7 +486,7 @@ export default function App() {
           api.review(active.id, selectedTable, !tbl.verified).then(() => {
             qc.invalidateQueries({ queryKey: ['documents'] })
             qc.invalidateQueries({ queryKey: ['page'] })
-          })
+          }).catch((err) => setError(friendlyError(err, t('err_unreachable'))))
         }
       } else if (e.key === 'n' && issues.length) {
         jumpToIssue((issueIdx + 1) % issues.length)
@@ -539,11 +500,13 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [issues.length, issueIdx, pageIdx, pageCount, jumpToIssue, active, status.data?.active, run, selectedTable, page.data, qc])
+  }, [issues.length, issueIdx, pageIdx, pageCount, jumpToIssue, active, status.data?.active, run, selectedTable, page.data, qc, t])
 
   // Grid page selection ⇄ run settings (single source of truth: runSettings).
+  // Derived values + handlers below are memoized so React.memo on PageGrid /
+  // QueueRail actually holds during the 2.5 Hz status polls of a run.
   const docPages = active?.pages ?? 0
-  const selectedPages = pagesFromSettings(runSettings, docPages)
+  const selectedPages = useMemo(() => pagesFromSettings(runSettings, docPages), [runSettings, docPages])
   const togglePage = useCallback((n: number) => {
     setRunSettings((prev) => {
       const cur = pagesFromSettings(prev, docPages)
@@ -557,35 +520,57 @@ export default function App() {
     })
   }, [docPages])
   // Post-analysis: which document pages the finished run actually covered.
-  const processedPages = gridPages('post-analysis', docPages, status.data?.last_run_settings ?? null)
+  const lastRunSettings = status.data?.last_run_settings ?? null
+  const processedPages = useMemo(
+    () => gridPages('post-analysis', docPages, lastRunSettings),
+    [docPages, lastRunSettings],
+  )
+  const preGridPages = useMemo(() => gridPages('pre-upload', Math.max(1, docPages), null), [docPages])
   const openPageFromGrid = useCallback((n: number) => {
     withViewTransition(() => {
       setCanvasView('single')
       setPageIdx(n)
     })
   }, [])
-
-  const smoothProgress = useSmoothProgress(
-    status.data?.active ?? false,
-    status.data?.stage ?? '',
-    status.data?.fraction ?? 0,
+  // Grid image sources, stable across polls (processed_pages keeps identity via
+  // structural sharing once stage 2 has run).
+  const activeDocId = active?.id ?? null
+  const statusProcessed = status.data?.processed_pages
+  const preImageUrl = useCallback(
+    (n: number) => {
+      const k = processedIndex(n, statusProcessed)
+      return k >= 0 && activeDocId
+        ? api.pageImageUrl(activeDocId, k, 'processed')
+        : api.previewImageUrl(activeDocId ?? '', n)
+    },
+    [activeDocId, statusProcessed],
   )
+  const previewUrl = useCallback((n: number) => api.previewImageUrl(activeDocId ?? '', n), [activeDocId])
+  const postImageUrl = useCallback(
+    (n: number) => api.pageImageUrl(activeDocId ?? '', processedPages.indexOf(n), 'processed'),
+    [activeDocId, processedPages],
+  )
+  const openProcessedFromGrid = useCallback(
+    (n: number) => openPageFromGrid(processedPages.indexOf(n)),
+    [openPageFromGrid, processedPages],
+  )
+  // Queue-rail handlers, stable for React.memo.
+  const uploadFiles = useCallback((files: File[]) => upload.mutate(files), [upload.mutate])
+  const removeDoc = useCallback(
+    (id: string) => {
+      remove.mutate(id)
+      if (id === activeId) setActiveId(null)
+    },
+    [remove.mutate, activeId],
+  )
+  const removeAllDocs = useCallback(() => removeAll.mutate(), [removeAll.mutate])
+
   const runError = status.data?.run_error ?? null
   // The backend's only cancel signal is its message string; keep the match in ONE place.
   const wasCancelled = runError !== null && runError.includes('cancelled')
 
   // Everything the workspace can do, searchable from one place (⌘K). All rows
   // orchestrate existing actions — the palette owns no logic of its own.
-  const selectDoc = useCallback((id: string) => {
-    setActiveId(id)
-    touchedRef.current = new Set()
-    setPageIdx(0)
-    setSelectedTable(null)
-    setFlashToken(null)
-    setFocusCell(null)
-    setIssueIdx(-1)
-    setDismissedIssues(new Set())
-  }, [])
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = []
     if (active && !pipelineBusy && !run.isPending) {
@@ -671,14 +656,8 @@ export default function App() {
     <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
       {/* Top bar: identity left, run controls right — the one primary action lives here. */}
       <header className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-line-strong/60 bg-surface px-4 shadow-raised">
-        {/* The run's pulse: a 2px line along the header's bottom edge. */}
-        {smoothProgress > 0 && (
-          <span
-            aria-hidden
-            className="absolute bottom-0 left-0 h-[2px] bg-primary transition-[width] duration-500 motion-reduce:transition-none"
-            style={{ width: `${smoothProgress}%` }}
-          />
-        )}
+        {/* The run's pulse — its 250ms tick renders inside this leaf only. */}
+        <HeaderProgress status={status.data} />
         <div className="flex items-center gap-2.5">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary" aria-hidden>
             <Grid3x3 size={14} className="text-white" strokeWidth={2.25} />
@@ -950,14 +929,11 @@ export default function App() {
           documents={documents}
           activeId={active?.id ?? null}
           onSelect={selectDoc}
-          onUpload={(files) => upload.mutate(files)}
-          onRemove={(id) => {
-            remove.mutate(id)
-            if (id === activeId) setActiveId(null)
-          }}
+          onUpload={uploadFiles}
+          onRemove={removeDoc}
           uploading={upload.isPending}
           onRunAll={runAll}
-          onRemoveAll={() => removeAll.mutate()}
+          onRemoveAll={removeAllDocs}
           pipelineBusy={pipelineBusy}
           batchRunning={batchRunning}
           exportAllUrl={documents.some((d) => d.status === 'done') ? api.exportAllUrl(combineExport) : null}
@@ -992,30 +968,27 @@ export default function App() {
             </div>
             {canvasView === 'grid' ? (
               <PageGrid
-                pages={gridPages('pre-upload', Math.max(1, active.pages), null)}
+                pages={preGridPages}
                 pageCount={Math.max(1, active.pages)}
                 /* Cleaned renditions land at stage 2, so during a run the grid
                    upgrades each page the moment its processed image exists and
                    falls back to the raw preview until then. */
-                imageUrl={(n) => {
-                  const k = processedIndex(n, status.data?.processed_pages)
-                  return k >= 0
-                    ? api.pageImageUrl(active.id, k, 'processed')
-                    : api.previewImageUrl(active.id, n)
-                }}
-                fallbackUrl={(n) => api.previewImageUrl(active.id, n)}
+                imageUrl={preImageUrl}
+                fallbackUrl={previewUrl}
                 selected={selectedPages}
                 onTogglePage={togglePage}
                 onOpenPage={openPageFromGrid}
               />
             ) : (
               <div className="min-h-0 flex-1 overflow-auto bg-canvas p-4">
-                <img
+                {/* Same resilient lifecycle as the grid cards (skeleton → retry →
+                    never the browser's broken glyph) — this was the last raw <img>
+                    on the lazy-rasterized preview endpoint. */}
+                <GridThumb
                   key={`${active.id}:${pageIdx}`}
                   src={api.previewImageUrl(active.id, pageIdx)}
                   alt={t('page_of', { a: pageIdx + 1, b: active.pages })}
-                  className="mx-auto max-w-full shadow-overlay"
-                  draggable={false}
+                  className="relative mx-auto aspect-[3/4] w-full max-w-3xl shadow-overlay"
                 />
               </div>
             )}
@@ -1044,11 +1017,11 @@ export default function App() {
                   <PageGrid
                     pages={processedPages}
                     pageCount={Math.max(1, active.pages)}
-                    imageUrl={(n) => api.pageImageUrl(active.id, processedPages.indexOf(n), 'processed')}
-                    fallbackUrl={(n) => api.previewImageUrl(active.id, n)}
+                    imageUrl={postImageUrl}
+                    fallbackUrl={previewUrl}
                     selected={selectedPages}
                     onTogglePage={togglePage}
-                    onOpenPage={(n) => openPageFromGrid(processedPages.indexOf(n))}
+                    onOpenPage={openProcessedFromGrid}
                   />
                 </>
               ) : pageCount > 0 && (
@@ -1088,7 +1061,19 @@ export default function App() {
               />
             </div>
             <section className={`${panelMainCls} flex min-w-[360px] basis-0 flex-col overflow-hidden`} style={{ flexGrow: 1 - split.ratio }}>
-              {page.data ? (
+              {page.isError ? (
+                /* An honest failure beats an eternal skeleton: name the problem,
+                   offer the retry (trust is the product). */
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                  <TriangleAlert size={20} className="text-danger" aria-hidden />
+                  <p className="max-w-sm text-sm text-ink-2">
+                    {t('page_load_failed', { e: friendlyError(page.error, t('err_unreachable')) })}
+                  </p>
+                  <button className={btnCls} onClick={() => page.refetch()}>
+                    {t('retry')}
+                  </button>
+                </div>
+              ) : page.data ? (
                 <Suspense fallback={<TablesSkeleton label={t('loading_tables')} />}>
                   <TablesPanel
                     docId={active.id}
