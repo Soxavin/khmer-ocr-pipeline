@@ -918,3 +918,93 @@ def test_empty_cell_precision_none_when_gt_has_no_empty_cells():
     assert m["empty_gt_cells_total"] == 0
     assert m["empty_cell_precision"] is None
 
+
+# --- Structure-only metrics (script-independent) ---
+# A challenger engine with NO Khmer ability can still have the best grid in the
+# field. cell/numeric/Khmer accuracy all conflate structure with recognition, so
+# these two isolate "did it find the right table shape" from "could it read it".
+
+def test_grid_shape_match_true_on_identical_shape():
+    gt_grid = [["a", "b"], ["1", "2"]]
+    # Text is entirely wrong, shape is right — structure metrics must not care.
+    pred_table = _make_table_from_grid([["zz", "yy"], ["xx", "ww"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["grid_shape_match"] is True
+    assert m["pred_rows"] == 2 and m["pred_cols"] == 2
+    assert m["cell_accuracy"] == 0.0  # recognition failed; structure did not
+
+
+def test_grid_shape_match_false_on_wrong_column_count():
+    gt_grid = [["a", "b", "c"], ["1", "2", "3"]]
+    pred_table = _make_table_from_grid([["a", "b"], ["1", "2"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["grid_shape_match"] is False
+
+
+def test_col_count_match_isolates_the_column_axis():
+    # Measured on real runs: engines are off by ±1 ROW almost everywhere (a
+    # systematic header artifact), which makes the combined shape match nearly
+    # always False and therefore uninformative. Column count is the axis that
+    # actually discriminates — a wrong column count is a genuine structural
+    # failure (a real run produced 12 columns for a 9-column table).
+    gt_grid = [["a", "b"], ["1", "2"], ["3", "4"]]
+    # Right columns, one extra row → shape match fails, column match holds.
+    pred_table = _make_table_from_grid([["a", "b"], ["x", "y"], ["1", "2"], ["3", "4"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["grid_shape_match"] is False
+    assert m["col_count_match"] is True
+
+
+def test_col_count_match_false_on_split_column():
+    gt_grid = [["a", "b"], ["1", "2"]]
+    pred_table = _make_table_from_grid([["a", "b", ""], ["1", "2", ""]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["col_count_match"] is False
+
+
+def test_grid_shape_match_false_on_dropped_row():
+    gt_grid = [["a", "b"], ["1", "2"], ["3", "4"]]
+    pred_table = _make_table_from_grid([["a", "b"], ["1", "2"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["grid_shape_match"] is False
+
+
+def test_row_alignment_rate_full_when_every_row_pairs():
+    gt_grid = [["a", "b"], ["1", "2"], ["3", "4"]]
+    pred_table = _make_table_from_grid(gt_grid)
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["row_alignment_rate"] == 1.0
+
+
+def test_row_alignment_rate_counts_dropped_rows():
+    # 3 GT rows, pred keeps 2 recognisable ones → 2/3 aligned.
+    gt_grid = [["aaaa", "bbbb"], ["1111", "2222"], ["3333", "4444"]]
+    pred_table = _make_table_from_grid([["aaaa", "bbbb"], ["3333", "4444"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["row_alignment_rate"] == pytest.approx(2 / 3)
+
+
+def test_row_alignment_rate_zero_when_nothing_pairs():
+    gt_grid = [["aaaaaaaa", "bbbbbbbb"]]
+    pred_table = _make_table_from_grid([["zzzzzzzz", "yyyyyyyy"]])
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["row_alignment_rate"] == 0.0
+
+
+def test_structure_metrics_present_when_no_gt_grid():
+    # None-GT branch must carry the same keys, or callers KeyError on it.
+    m = evaluate_table([], None)
+    assert m["grid_shape_match"] is False
+    assert m["row_alignment_rate"] == 0.0
+
+
+def test_structure_metrics_do_not_perturb_existing_metrics():
+    gt_grid = [["a", "b"], ["1", "2"]]
+    pred_table = _make_table_from_grid(gt_grid)
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["cell_accuracy"] == 1.0
+    assert m["numeric_cell_accuracy"] == 1.0
+    assert m["table_cer"] == 0.0
+    assert m["grid_shape_match"] is True
+    assert m["row_alignment_rate"] == 1.0
+

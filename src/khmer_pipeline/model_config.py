@@ -3,15 +3,18 @@ Model configuration for the Khmer OCR pipeline.
 To swap a model, change the constant here and update the corresponding
 stage file (surya.py for Stage 3, postprocess.py for Stage 4).
 
-Stage 3 options: "surya-0.17.1"
+Stage 3 options: "surya-2" (surya-ocr 0.20.x)
 Stage 4 options: "qwen2.5-7b-instruct-4bit-mlx"
 """
 from __future__ import annotations
 
-# Stage 3 — Layout detection, OCR, table recognition
-STAGE3_MODEL: str = "surya-0.17.1"
-STAGE3_CHECKPOINT_LAYOUT: str = "vikp/surya_layout3"  # populated from surya settings
-STAGE3_CHECKPOINT_RECOGNITION: str = "vikp/surya_rec2"
+# Stage 3 — Layout detection, OCR, table recognition.
+# Surya 2 (surya-ocr 0.20.x) is ONE 650M VLM serving layout + OCR + table-rec
+# through a shared SuryaInferenceManager — not the separate layout/recognition
+# checkpoints of 0.17.x. Kept as a single constant so this can't drift back into
+# describing an architecture we no longer run.
+STAGE3_MODEL: str = "surya-2"
+STAGE3_CHECKPOINT: str = "datalab-to/surya-ocr-2"  # surya.settings.SURYA_MODEL_CHECKPOINT
 
 # Stage 4 — Post-processing correction model
 STAGE4_MODEL: str = "qwen2.5-7b-instruct-4bit-mlx"

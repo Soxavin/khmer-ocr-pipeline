@@ -46,6 +46,7 @@ from khmer_pipeline.evaluation.evaluate_structure import (
     gt_table_grid,
     pred_table_grid,
 )
+from khmer_pipeline.evaluation.gt_provenance import circularity_note, is_circular
 
 _REAL_DIR = Path("eval/datasets/real")
 _MOC_GAS_DIR = Path("eval/datasets/moc_gas")
@@ -86,6 +87,9 @@ _METRICS = [
     ("cell_accuracy", "Cell_Acc"),
     ("numeric_cell_accuracy", "Numeric"),
     ("khmer_cell_accuracy", "Khmer"),
+    # Script-INDEPENDENT: an engine with no Khmer can still win on structure, and
+    # the bake-off needs to see that rather than reading it as a total failure.
+    ("row_alignment_rate", "RowAlign"),
     ("table_cer", "CER"),
 ]
 
@@ -160,6 +164,9 @@ def run_one(engine_key: str, name: str, target: Target, repeat: int) -> dict:
         "seconds": round(seconds, 1),
         "pages": pre.page_count,
         "gt_provisional": bool(gt.get("needs_review_rows")),
+        # Recorded on the result itself so a circular score can never be read
+        # back later without its caveat attached.
+        "gt_circular": is_circular(engine_key, gt),
         "metrics": _score(pred_grids, gt),
         # Stored so a metric change is a re-score, not another model run.
         "pred_grids": pred_grids,
@@ -240,7 +247,14 @@ def summarize(out_dir: Path) -> int:
             secs = statistics.median([g["seconds"] for g in group])
             cols.append(f"{secs:.0f}")
             cols.append(str(len(group)))
-            print(_fmt_row(engine, cols))
+            # Column count is the structural axis that separates engines; exact
+            # grid match is reported too but is near-always False on real pages
+            # (systematic ±1 row from header handling), so it leads with columns.
+            n = len(group)
+            cols_ok = sum(1 for g in group if g["metrics"].get("col_count_match"))
+            shape_ok = sum(1 for g in group if g["metrics"].get("grid_shape_match"))
+            label = engine + (" [CIRCULAR]" if any(g.get("gt_circular") for g in group) else "")
+            print(_fmt_row(label, cols) + f"   cols {cols_ok}/{n}  shape {shape_ok}/{n}")
             if len(group) > 1 and all(s == 0 for s in spreads):
                 print(f"    ^ identical across {len(group)} runs")
 
@@ -260,6 +274,9 @@ def main() -> int:
                     help="target to score; repeatable (default: all)")
     ap.add_argument("--repeat", type=int, default=1,
                     help="runs per target, for measuring run-to-run spread (default 1)")
+    ap.add_argument("--allow-circular", action="store_true",
+                    help="score even when the engine's model family drafted the GT "
+                         "(optimistic and not comparable; off by default)")
     ap.add_argument("--out", type=Path, help="directory to write JSON results")
     ap.add_argument("--rescore", type=Path, help="recompute metrics from stored grids")
     ap.add_argument("--summarize", type=Path, help="print the table for a results dir")
@@ -275,6 +292,17 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     for name in (args.target or list(_TARGETS)):
         target = _TARGETS[name]
+        # Refuse a circular pairing BEFORE spending model time on it. --allow-circular
+        # exists because such a run is still useful as a sanity check — but it must be
+        # a deliberate choice, never a default that quietly inflates a benchmark.
+        gt = json.loads(_gt_path(target).read_text(encoding="utf-8"))
+        note = circularity_note(args.engine, gt)
+        if note:
+            if not args.allow_circular:
+                print(f"SKIP {name}: {note}\n  (pass --allow-circular to run anyway)",
+                      flush=True)
+                continue
+            print(f"WARNING {name}: {note}", flush=True)
         for i in range(1, args.repeat + 1):
             print(f"running {args.engine} on {name} (run {i}/{args.repeat}) …", flush=True)
             rec = run_one(args.engine, name, target, repeat=i)

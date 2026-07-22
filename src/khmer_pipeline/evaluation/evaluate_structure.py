@@ -280,6 +280,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             "empty_gt_cells_total": 0,
             "empty_gt_cells_clean": 0,
             "empty_cell_precision": None,
+            "grid_shape_match": False,
+            "col_count_match": False,
+            "row_alignment_rate": 0.0,
         }
 
     tables_found = len(pred_tables)
@@ -299,8 +302,29 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
 
     gt_sigs = [tuple(_norm(c) for c in row) for row in gt_stripped]
     pred_sigs = [tuple(_norm(c) for c in row) for row in pred_stripped]
+
+    # --- Structure-only metrics: script-INDEPENDENT ---
+    # An engine with no Khmer ability can still produce the best grid in the field,
+    # and every other metric here conflates structure with recognition. These two
+    # answer "did it find the right table?" without reading a single character.
+    # grid_shape_match is the strict form (exact rows AND cols); row_alignment_rate
+    # is the graded form — what fraction of GT rows found a partner at all.
+    # col_count_match splits out the COLUMN axis deliberately: measured across the
+    # real runs, engines land within ±1 row almost everywhere (a systematic header
+    # artifact) which pins grid_shape_match near-always-False and drains it of
+    # information, while column count genuinely separates engines — one real run
+    # produced 12 columns for a 9-column table while its rivals produced 9.
+    grid_shape_match = (pred_rows == gt_rows) and (pred_cols == gt_cols)
+    col_count_match = pred_cols == gt_cols
+
+    # Aligned ONCE and reused by every consumer below. _align_rows is
+    # Needleman-Wunsch with a Levenshtein similarity per candidate pair, so on a
+    # 75-row table each call is expensive; it used to run twice here and adding a
+    # third caller made a full re-score time out.
+    row_pairs = _align_rows(gt_sigs, pred_sigs)
+    row_alignment_rate = len(row_pairs) / gt_rows if gt_rows > 0 else 0.0
     cells_correct = 0
-    for gi, pj in _align_rows(gt_sigs, pred_sigs):
+    for gi, pj in row_pairs:
         gt_row = gt_stripped[gi]
         pred_row = pred_stripped[pj]
         for c in range(gt_cols):
@@ -367,7 +391,7 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # GT row has a predicted counterpart).
     empty_gt_cells_total = 0
     empty_gt_cells_clean = 0
-    for gi, pj in _align_rows(gt_sigs, pred_sigs):
+    for gi, pj in row_pairs:
         gt_row = gt_stripped[gi]
         pred_row = pred_stripped[pj]
         for c in range(gt_cols):
@@ -416,6 +440,9 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
         "empty_gt_cells_total": empty_gt_cells_total,
         "empty_gt_cells_clean": empty_gt_cells_clean,
         "empty_cell_precision": empty_cell_precision,
+        "grid_shape_match": grid_shape_match,
+        "col_count_match": col_count_match,
+        "row_alignment_rate": row_alignment_rate,
     }
 
 
