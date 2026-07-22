@@ -346,7 +346,11 @@ export function TableEditor(props: {
       {menu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }} />
-          <div className={`${menuCls} fixed z-50 w-44`} style={{ left: menu.x, top: menu.y }}>
+          <div
+            className={`${menuCls} fixed z-50 w-44`}
+            // Clamped so a right/bottom-edge right-click never overflows the viewport.
+            style={{ left: Math.min(menu.x, window.innerWidth - 184), top: Math.min(menu.y, window.innerHeight - 120) }}
+          >
             <button className={menuItemCls}
                     onClick={() => { insertRow(menu.rowIndex); setMenu(null) }}>{t('insert_above')}</button>
             <button className={menuItemCls}

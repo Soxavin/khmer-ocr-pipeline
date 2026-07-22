@@ -77,20 +77,24 @@ export function GridThumb(props: { src: string; fallbackSrc?: string; alt: strin
     a second hand-rolled copy is how vocabularies drift apart. */
 export function SegmentedToggle<T extends string>(props: {
   value: T
-  options: readonly (readonly [T, string])[]
+  /** [value, label] or [value, label, tooltip]. */
+  options: readonly (readonly [T, string] | readonly [T, string, string])[]
   onChange: (v: T) => void
   label: string
+  disabled?: boolean
 }) {
-  const { value, options, onChange, label } = props
+  const { value, options, onChange, label, disabled = false } = props
   return (
     <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={label}>
-      {options.map(([val, text]) => (
+      {options.map(([val, text, tip]) => (
         <button
           key={val}
-          className={`h-6 px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+          className={`h-6 px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary disabled:opacity-40 ${
             value === val ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
           }`}
           aria-pressed={value === val}
+          title={tip}
+          disabled={disabled}
           onClick={() => onChange(val)}
         >
           {text}

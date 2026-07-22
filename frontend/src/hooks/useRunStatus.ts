@@ -7,6 +7,9 @@ export function useRunStatus(docId: string | null) {
     queryKey: ['status', docId],
     queryFn: () => api.status(docId!),
     enabled: docId !== null,
-    refetchInterval: (query) => (query.state.data?.active ? 400 : 3000),
+    // 400ms while extracting; stop entirely once a doc has settled results (the
+    // run-finished invalidation refreshes them); 3s for queued/error docs.
+    refetchInterval: (query) =>
+      query.state.data?.active ? 400 : query.state.data?.has_results ? false : 3000,
   })
 }

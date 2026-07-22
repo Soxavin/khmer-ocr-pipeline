@@ -5,7 +5,7 @@ import type { PageData } from '../../api/types'
 import { useT } from '../../i18n.tsx'
 import { bucketCounts, confBand, type Band } from '../../lib/confidence'
 import { ICON, ICON_SM, iconBtnCls, selectCls } from '../../ui'
-import { ViewToggle } from './PageGrid'
+import { SegmentedToggle, ViewToggle } from './PageGrid'
 
 // These are SVG stroke colors drawn OVER the page photograph, so they are
 // deliberately theme-independent fixed hex (a dark-mode swap would make the
@@ -250,16 +250,7 @@ export function PageViewer(props: {
           else if (e.key === 'ArrowDown') setView((v) => ({ ...v, ty: v.ty - PAN }))
           else if (e.key === '0') fit()
           else if (e.key === '+' || e.key === '=' || e.key === '-') {
-            // Zoom toward the canvas centre, mirroring the wheel-zoom math.
-            const el = containerRef.current
-            if (!el) return
-            const cx = el.clientWidth / 2
-            const cy = el.clientHeight / 2
-            setView((v) => {
-              const scale = Math.min(8, Math.max(0.05, v.scale * (e.key === '-' ? 1 / 1.2 : 1.2)))
-              const k = scale / v.scale
-              return { scale, tx: cx - k * (cx - v.tx), ty: cy - k * (cy - v.ty) }
-            })
+            zoomBy(e.key === '-' ? 1 / 1.2 : 1.2) // one zoom math for keys, stepper, wheel
           } else return
           e.preventDefault()
         }}
@@ -322,7 +313,7 @@ export function PageViewer(props: {
         >
           <img
             src={api.pageImageUrl(docId, pageIdx, variant)}
-            alt={`Page ${pageIdx + 1} (${variant})`}
+            alt={`${t('page_of', { a: pageIdx + 1, b: pageCount })} — ${variant === 'processed' ? t('variant_processed') : t('variant_original')}`}
             draggable={false}
             // Pages fade in once sized — page turns read as a transition, not a pop.
             className={`block max-w-none select-none shadow-overlay transition-opacity duration-200 ${natural ? 'opacity-100' : 'opacity-0'}`}
@@ -446,27 +437,16 @@ export function PageViewer(props: {
           </button>
         </span>
         <span className="mx-0.5 h-4 w-px shrink-0 bg-line" aria-hidden />
-        {/* Segmented control: which rendition of the page is shown. */}
-        <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('rendition_aria')}>
-          {(
-            [
-              ['processed', t('variant_processed')],
-              ['original', t('variant_original')],
-            ] as const
-          ).map(([val, label]) => (
-            <button
-              key={val}
-              className={`h-6 px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                variant === val ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
-              }`}
-              aria-pressed={variant === val}
-              title={val === 'processed' ? t('variant_processed_tip') : t('variant_original_tip')}
-              onClick={() => setVariant(val)}
-            >
-              {label}
-            </button>
-          ))}
-        </span>
+        {/* Which rendition of the page is shown — the shared segment control. */}
+        <SegmentedToggle
+          value={variant}
+          onChange={setVariant}
+          label={t('rendition_aria')}
+          options={[
+            ['processed', t('variant_processed'), t('variant_processed_tip')],
+            ['original', t('variant_original'), t('variant_original_tip')],
+          ] as const}
+        />
         <select
           className={`${selectCls} h-6 shrink-0 text-xs`}
           value={overlay}

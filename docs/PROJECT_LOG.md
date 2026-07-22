@@ -2526,6 +2526,136 @@ generalized to `SegmentedToggle` rather than copy-pasted for the new panel. `dev
 `restart` after this work hit the stale-backend trap the reuse behaviour creates.
 **Khmer for the changed/new strings is untranslated and flagged in `i18n.tsx`.**
 
+### 2.73 The `auto` router's blind spot, reproduced — and Surya's non-determinism explained (2026-07-22)
+
+**Problem.** The React frontend's OCR output looked far worse than the legacy Streamlit app's.
+The pipelines are code-identical per engine (`app.py:419-457` vs `webapp/runner.py:70-113`), so
+the only real difference is the default engine: Streamlit's radio has no `index=` and so defaults
+to the **first** option, `surya`; the webapp defaults to **`auto`** (`webapp/settings.py:35`).
+
+**The first hypothesis was measured and disproved.** Scored on the two ARDB bulletins,
+`auto`/`surya_kiri` beat plain `surya` decisively (0.959 vs 0.579-0.633 cell accuracy) and ran
+3-5× faster. But ARDB bulletins are Kiri's specialty — they cannot reproduce the complaint. The
+documents that could had only **per-page** GT, which the document-only A/B harness could not score.
+
+**Two harness limits had to be fixed before the real question could even be asked.**
+
+1. **The numeric metric did not measure money.** On the MoC gas bulletin every money cell reads
+   `០,៧១១៧ ដុល្លារ` — Khmer digits, **comma** decimal separator, unit-word suffix. `_NUMERIC_RE`
+   accepted none of these, so 33 of 56 cells were classed as Khmer *label* text and the "Numeric"
+   column reported on the `ល.រ` row-index column instead. `_is_numeric` now decomposes a cell into
+   `[currency symbol] [number core] [unit token]`: leading symbols by Unicode category `Sc`,
+   one trailing digit-free token ≤ `_UNIT_AFFIX_MAX_CHARS`, accounting parens — generalized rather
+   than an enumerated unit list. Comma-decimal is accepted **only** with a locale signal (Khmer
+   digits or a unit affix), which preserves the `7,8000` Kiri digit-duplication guard that an
+   unrestricted comma reading would silently delete. Effect: moc_gas numeric 9 → **33**, Khmer
+   39 → **15**; budget p3 (222/49) and ARDB (422/150) **unchanged** — a no-op where not needed.
+   Every GT grid still self-scores 1.000 on all three classes, so the classes stay disjoint.
+2. **A metric change used to cost a full GPU re-run.** `compare_engines_ab.py` stored only scores.
+   It now stores the **predicted grid** and gained `--rescore`, turning any future metric revision
+   into a seconds-long re-score. It also gained per-page GT targets (`mode="page"`, no stitching)
+   and `--repeat N` with median±spread reporting.
+
+**Result — the complaint is reproduced, and it is the router's documented blind spot.**
+3 runs/engine, medians (`eval/runs/ab_hard/`):
+
+| target | engine | Cell_Acc | Numeric | Khmer | CER | secs |
+|---|---|---|---|---|---|---|
+| budget_p3 | surya | 0.971 | 1.000 | 0.673 | 0.024 | 50 |
+| budget_p3 | **auto** | **0.971** | **1.000** | 0.673 | 0.024 | 75 |
+| budget_p3 | surya_kiri_vlm | 0.919 | 1.000 | 0.102 | 0.111 | 55 |
+| budget_p3 | surya_kiri | 0.721 | 0.550 | 0.122 | 0.164 | 27 |
+| moc_gas_p1 | **surya** | **0.750** | **0.939** | **0.467** | 0.040 | 39 |
+| moc_gas_p1 | auto | 0.232 | 0.242 | 0.133 | 0.458 | 35 |
+| moc_gas_p1 | surya_kiri_vlm | 0.214 | 0.182 | 0.133 | 0.478 | 38 |
+| moc_gas_p1 | surya_kiri | 0.232 | 0.242 | 0.133 | 0.458 | 35 |
+
+- **budget p3: the router works.** `[AutoRouter] fallback surya_kiri->surya | frac=0.539
+  cutoff=0.400` — it detects Kiri failing and recovers surya's 0.971/1.000 exactly as §2.57 designed.
+- **moc_gas p1: the router fails, and `auto` costs 0.518 cell accuracy against `surya`.**
+  `[AutoRouter] kept surya_kiri | frac=0.231 cutoff=0.400` — Kiri reports itself *healthy* while
+  producing garbage. Its structure is near-perfect (13×4 vs GT 14×4) and content recall is 0.196:
+  a pure **recognition** failure, with digits mis-separated and the unit glyphs corrupted into
+  non-words. **This is exactly the ceiling `auto_engine.py:21-23` documented as accepted** — "a
+  document where surya_kiri is *confidently wrong* would not trigger the fallback… absent from our
+  measured failures." It is no longer absent. The MoC gas bulletin is its first real instance, and
+  it is what the frontend was showing.
+
+**Surya's non-determinism is architectural, not a missing seed.** The correlation is exact:
+
+| doc | pages | 3-run spread (Cell_Acc) |
+|---|---|---|
+| budget_p3 | 1 | 0.000 (bit-identical) |
+| moc_gas_p1 | 1 | 0.000 (bit-identical) |
+| ardb0 | 3 | 0.630 / 0.721 / 0.643 → **0.091** |
+
+Surya's layout/table_rec generation runs through a spawned **llama.cpp server** at
+`temperature=0.0, top_p=0.1` — but with `--parallel 8` slots fed by a `ThreadPoolExecutor`
+(`surya/inference/backends/llamacpp.py:147,205`). Concurrent continuous batching makes
+floating-point reduction order depend on **how requests happen to co-batch**, which is
+non-deterministic even at temperature 0. Single-page documents issue too few requests to vary;
+3-page documents do. (A second contributor: `_should_retry` in `openai_client.py` re-issues on
+repeat-token detection at `temperature + 0.2×retries`, i.e. **above 0**.) No `torch.manual_seed`
+in our code can fix this — the sampling is not in our process.
+
+**Decisions.**
+- **The frontend default stays `auto`.** It wins or ties on 2 of 3 measured document classes,
+  including the ARDB bulletins that dominate production, where switching to `surya` would cost
+  ~0.33 cell accuracy *and* introduce the non-determinism above. Fixing moc_gas by changing the
+  default would trade a large regression for a smaller one.
+- **Streamlit and the webapp disagreeing on their default is itself a defect** — Streamlit's
+  `surya` is an accident of a missing `index=`, not a decision. Reconcile to `auto`.
+- **The router's confidence signal is the real bug, and it is now falsifiable.** Kiri's own
+  confidence cannot detect Kiri being confidently wrong; a second, independent signal is needed
+  (e.g. cross-checking a sample of cells against surya, or scoring unit-token plausibility).
+  Deferred — it needs its own measurement, and `moc_gas_p1` is now the regression case for it.
+- **Benchmarks on multi-page documents must report medians over ≥3 runs.** Any single-run
+  multi-page Surya number in this log carries ±0.09 cell accuracy of noise.
+
+**Not changed.** No engine, default, or UI code was touched — this section is measurement and a
+decision to leave the default alone. Harness/metric only: `evaluate_structure.py`,
+`compare_engines_ab.py`, tests (12 new; 789 passing in a shared tree).
+
+### 2.74 Frontend audit remediation: state safety, one confirm vocabulary, render calm (§2.74)
+
+**Problem.** A five-axis audit of `frontend/src` (all 23 files read; detector + tests run)
+found two silent state-loss defects plus a tier of robustness/perf gaps. Both HIGH bugs were
+identity-keyed `useEffect` resets against TanStack Query refetches: structural sharing means
+they fire exactly when data changed — and a verify flips one boolean while the analyst holds
+unsaved work.
+
+**Decision (ranked, each TDD'd red-first where testable).**
+- *H1 draft loss.* `TablesPanel`'s text reset was keyed on the `page` object; verifying any
+  table refetched the page and silently overwrote the unsaved Raw-textarea draft. Now keyed
+  on `page.corrected_text` itself.
+- *H2 undo wipe.* `TableEditor` reset grid+history on every new `table` identity. After
+  edit→verify the refetched grid even has new content (the server echoes the saved edit), so
+  keying on `table.grid` alone was insufficient — the reset now runs only when the incoming
+  grid **differs from the local one** ("confirmation is not new data"); verified/edited sync
+  independently.
+- *H3 eternal skeleton.* Page-query failure now renders an error + Retry, not a forever-
+  skeleton (4-state rule; trust is the product).
+- *M tier.* Copy All falls back to `execCommand` + reports failure (clipboard API is absent
+  on non-secure LAN origins); batch runs switch docs via `selectDoc` (no page-index bleed)
+  and skip docs deleted mid-batch; `v`-verify surfaces errors; one `ConfirmPopover` replaces
+  `window.confirm` for clear-all/remove-doc (rendered outside the `role="button"` rows);
+  shared `useFocusTrap` makes the ⌘K palette's `aria-modal` hold Tab; `HeaderProgress`
+  isolates the 250 ms tick and QueueRail/PageGrid are memoized with stable handlers (a run
+  stops repainting the workspace ~7×/s); pre-run single view uses `GridThumb`.
+- *LOW sweep.* Localized the last hardcoded alt; keyboard zoom reuses `zoomBy`; rendition +
+  DPI segments adopt `SegmentedToggle`; `issues` memoized (global key listener stops
+  rebinding per render); context menu clamped to viewport; status poll stops for settled
+  docs; 30 s fetch timeout in the API client.
+
+**Not doing (audit-noted, rejected):** grid virtualization (`loading="lazy"` suffices at this
+corpus size), typed `RunSettings` (the unknown-bag is load-bearing for server-driven
+passthrough), backend stage-string enum (API contract change).
+
+**Outcome.** vitest 80 (from 74; new `TablesPanel.test.tsx` + `TableEditor.test.tsx`),
+`tsc -b` + build clean. Detector: 3 hits, all classified false positives (test fixtures ×2;
+the `GridThumb` call site pattern-matched as a raw `<img>`). New keys `page_load_failed`,
+`retry`, `copy_failed` are en-only — km placeholders flagged for the next native review.
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

@@ -168,7 +168,12 @@ export default function App() {
   // stepping all agree on the same filtered list. Per-session, reset per document.
   const [dismissedIssues, setDismissedIssues] = useState<Set<string>>(new Set())
   const allIssues = lowconf.data?.issues ?? []
-  const issues = allIssues.filter((it) => !dismissedIssues.has(`${it.table_id}:${it.row}:${it.col}`))
+  // Memoized: a fresh array identity every render was rebinding the global
+  // keyboard listener (whose deps chain through jumpToIssue) on every paint.
+  const issues = useMemo(
+    () => allIssues.filter((it) => !dismissedIssues.has(`${it.table_id}:${it.row}:${it.col}`)),
+    [allIssues, dismissedIssues],
+  )
   const dismissIssue = useCallback((key: string) => {
     setDismissedIssues((prev) => new Set(prev).add(key))
     setIssueIdx(-1) // indexes renumber after a removal: drop the highlight, n restarts cleanly

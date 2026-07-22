@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
+import { SegmentedToggle } from '../viewer/PageGrid'
 import { scanWordingKey } from '../../lib/scan'
 import { autoBadge } from '../../lib/settings'
 import { iconBtnCls, inputCls } from '../../ui'
@@ -156,28 +157,21 @@ export function SettingsDrawer(props: {
           {/* Stacked rows with block labels — no jagged side-by-side alignment. */}
           <div className="mb-3">
             <span className="mb-1 block text-xs font-medium text-ink-2">{t('dpi')}</span>
-            {/* Segmented control, same pattern as the viewer's Cleaned⇄Original.
-                'Auto' leads: it reads the document's density and picks 200 or 300. */}
-            <span className="inline-flex overflow-hidden rounded-md border border-line-strong" role="group" aria-label={t('dpi')}>
-              {(['auto', 150, 200, 300] as const).map((d) => {
-                const selected = (settings.dpi ?? 'auto') === d
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={selected}
-                    className={`h-6 px-2.5 text-xs font-medium transition-colors duration-75 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                      selected ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'
-                    }`}
-                    title={d === 'auto' ? t('dpi_auto_tip') : undefined}
-                    disabled={disabled}
-                    onClick={() => set('dpi', d)}
-                  >
-                    {d === 'auto' ? t('dpi_auto') : d}
-                  </button>
-                )
-              })}
-            </span>
+            {/* The shared segment control; 'Auto' leads — it reads the document's
+                density and picks 200 or 300. Values ride as strings, stored as
+                'auto' | number to match the API contract. */}
+            <SegmentedToggle
+              value={String(settings.dpi ?? 'auto')}
+              onChange={(v) => set('dpi', v === 'auto' ? 'auto' : Number(v))}
+              label={t('dpi')}
+              disabled={disabled}
+              options={[
+                ['auto', t('dpi_auto'), t('dpi_auto_tip')],
+                ['150', '150'],
+                ['200', '200'],
+                ['300', '300'],
+              ] as const}
+            />
           </div>
           <span className="mb-1 block text-xs font-medium text-ink-2">{t('pages')}</span>
           <div className="flex items-center gap-2">
