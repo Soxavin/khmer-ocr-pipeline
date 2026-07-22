@@ -418,9 +418,8 @@ const km: Record<Key, string> = {
   extracting: 'កំពុងទាញយក…',
   export_results: 'នាំចេញលទ្ធផល',
   retry_extraction: 'ព្យាយាមទាញយកម្តងទៀត',
-  // UNTRANSLATED (pending native review — English placeholders, never authored Khmer):
-  page_load_failed: 'Could not load this page: {e}',
-  retry: 'Retry',
+  page_load_failed: 'មិនអាចផ្ទុកទំព័រនេះបានទេ: {e}',
+  retry: 'ព្យាយាមម្តងទៀត',
   run_extraction: 'ដំណើរការទាញយក',
   n_unverified: '{n} មិនទាន់ផ្ទៀងផ្ទាត់',
   export_ok_tip: 'បានផ្ទៀងផ្ទាត់តារាងទាំងអស់ — អាចនាំចេញបាន។',
@@ -553,8 +552,7 @@ const km: Record<Key, string> = {
   view_text_mode: 'ទិដ្ឋភាពអត្ថបទលើទំព័រ',
   copy_all: 'ចម្លងទាំងអស់',
   copied: 'បានចម្លង',
-  // UNTRANSLATED (pending native review):
-  copy_failed: 'Could not copy — select the text and copy manually.',
+  copy_failed: 'មិនអាចចម្លងបានទេ — សូមជ្រើសរើសអត្ថបទ រួចចម្លងដោយដៃ។',
   block_untitled: 'ប្លុក',
   blocks_readonly: 'ប្លុកបង្ហាញអ្វីដែលប្រព័ន្ធអានបាន សម្រាប់ផ្ទៀងផ្ទាត់ជាមួយទំព័រ។ សូមកែប្រែនៅក្នុងទិដ្ឋភាពអត្ថបទឆៅ។',
   no_text_blocks: 'គ្មានអត្ថបទនៅខាងក្រៅតារាងលើទំព័រនេះទេ។',
