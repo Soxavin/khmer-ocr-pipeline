@@ -344,6 +344,86 @@ def test_page_image_serves_png_variants(client):
     assert client.get(f"/api/documents/{doc.upload_id}/pages/0/image?variant=weird").status_code == 400
 
 
+def test_page_image_revalidates_with_etag(client):
+    """Grid<->Single toggles remount every thumbnail. Without a validator the
+    browser refetches and re-encodes every PNG, which is what starved the server
+    during an active run and produced broken thumbnails."""
+    doc = _completed_doc()
+    url = f"/api/documents/{doc.upload_id}/pages/0/image?variant=processed"
+    first = client.get(url)
+    assert first.status_code == 200
+    etag = first.headers.get("etag")
+    assert etag, "page image must carry an ETag so the browser can revalidate"
+    # no-cache (not max-age): a re-run replaces the image at this SAME url, so a
+    # time-based cache would happily serve a stale page.
+    assert "no-cache" in first.headers.get("cache-control", "")
+
+    again = client.get(url, headers={"If-None-Match": etag})
+    assert again.status_code == 304
+    assert again.content == b""  # 304 skips the PNG encode entirely
+
+
+def test_preview_image_revalidates_with_etag(client):
+    with patch("webapp.api._probe_pages", return_value=1):
+        r = _upload(client, "raw.pdf", b"%PDF-raw")
+    doc_id = r.json()["documents"][0]["id"]
+    fake = SimpleNamespace(page_images=[np.zeros((8, 8, 3), dtype=np.uint8)])
+    url = f"/api/documents/{doc_id}/preview/0"
+    with patch("webapp.api.ingest", return_value=fake):
+        first = client.get(url)
+        assert first.status_code == 200
+        etag = first.headers.get("etag")
+        assert etag
+        assert "no-cache" in first.headers.get("cache-control", "")
+        assert client.get(url, headers={"If-None-Match": etag}).status_code == 304
+
+
+def test_page_image_etag_changes_when_the_run_changes(client):
+    """A re-run with different settings must invalidate the cached rendition."""
+    doc = _completed_doc()
+    url = f"/api/documents/{doc.upload_id}/pages/0/image?variant=processed"
+    before = client.get(url).headers["etag"]
+    doc.last_key = (doc.last_key or "") + "_rerun"
+    assert client.get(url).headers["etag"] != before
+
+
+def test_processed_image_available_mid_run_before_results(client):
+    """Preprocessing finishes at stage 2, long before the run ends. Gating the
+    processed rendition behind full results makes the grid show raw previews for the
+    whole run even though the cleaned pages already exist."""
+    from webapp import registry
+    from webapp.state import Document
+    doc = Document(upload_name="a.pdf", upload_bytes=b"%PDF", upload_id="midrun1", doc_page_count=2)
+    doc.preprocess_result = SimpleNamespace(page_images=[np.zeros((4, 4, 3), dtype=np.uint8)])
+    doc.run_page_indices = [1]  # a page-scoped run: result 0 IS document page 1
+    registry.add(doc)
+
+    r = client.get(f"/api/documents/midrun1/pages/0/image?variant=processed")
+    assert r.status_code == 200, "processed pages must be servable as soon as they exist"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    # 'original' still needs the ingest, which a mid-run doc may not expose yet.
+    assert client.get("/api/documents/midrun1/pages/5/image?variant=processed").status_code == 404
+
+
+def test_status_reports_processed_page_mapping(client):
+    """Result index != document page number for a page-scoped run, so the frontend
+    needs the mapping to address the right rendition."""
+    from webapp import registry
+    from webapp.state import Document
+    doc = Document(upload_name="a.pdf", upload_bytes=b"%PDF", upload_id="midrun2", doc_page_count=3)
+    registry.add(doc)
+    assert client.get("/api/documents/midrun2/status").json()["processed_pages"] == []
+
+    doc.preprocess_result = SimpleNamespace(page_images=[np.zeros((4, 4, 3), dtype=np.uint8)] * 2)
+    doc.run_page_indices = [1, 2]
+    body = client.get("/api/documents/midrun2/status").json()
+    assert body["processed_pages"] == [1, 2]
+
+    # A whole-document run stores no explicit selection: every page was processed.
+    doc.run_page_indices = None
+    assert client.get("/api/documents/midrun2/status").json()["processed_pages"] == [0, 1]
+
+
 def test_export_zip_reflects_edits(client):
     doc = _completed_doc()
     doc.edited_tables["p1_t1"] = [["X", "Y"]]

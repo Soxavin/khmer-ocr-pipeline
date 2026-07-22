@@ -52,6 +52,10 @@ class Document:
     stage_times: dict[str, float] = field(default_factory=dict)
     last_key: str | None = None
     run_error: str | None = None
+    # 0-based document pages this run rasterized, or None for "all pages". Needed
+    # because a page-scoped run makes result index != document page number, and the
+    # grid must address the right rendition while the run is still going.
+    run_page_indices: list[int] | None = None
 
     progress: Progress = field(default_factory=Progress)
     current_page_idx: int = 0
@@ -88,6 +92,7 @@ class Document:
         self.stage_times = {}
         self.last_key = None
         self.run_error = None
+        self.run_page_indices = None
         self.progress = Progress()
         self.current_page_idx = 0
         self.edited_tables = {}

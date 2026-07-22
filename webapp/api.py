@@ -109,6 +109,20 @@ def _doc_summary(doc: Document) -> dict:
     }
 
 
+def _processed_pages(doc: Document) -> list[int]:
+    """0-based document pages that already have a cleaned rendition.
+
+    A page-scoped run rasterizes only the selected pages, so the k-th preprocess
+    image is document page `run_page_indices[k]`, not page k. With no explicit
+    selection the run covered the document from the start."""
+    if doc.preprocess_result is None:
+        return []
+    n = len(doc.preprocess_result.page_images)
+    if doc.run_page_indices is None:
+        return list(range(n))
+    return list(doc.run_page_indices[:n])
+
+
 @app.get("/api/meta")
 def api_meta() -> dict:
     return {
@@ -165,6 +179,9 @@ def api_status(doc_id: str) -> dict:
         "total": p.total,
         "fraction": p.fraction,
         "has_results": doc.has_results,
+        # Document pages whose cleaned rendition is already servable. Result index k
+        # maps to processed_pages[k]; empty until stage 2 finishes.
+        "processed_pages": _processed_pages(doc),
         "run_error": doc.run_error,
         "last_run_settings": registry.last_run_settings(doc_id),
     }
@@ -505,8 +522,26 @@ def api_put_page_text(doc_id: str, n: int, payload: dict) -> dict:
     return {"ok": True}
 
 
+def _png_response(img, request: Request, tag_parts: tuple) -> Response:
+    """PNG with a revalidation contract.
+
+    Grid<->Single toggles remount every thumbnail, so without a validator the
+    browser refetches and the server re-encodes every page — the request burst that
+    starved an active run and left broken thumbnails. `no-cache` + ETag (never
+    `max-age`) is deliberate: a re-run replaces the image at the SAME url, so a
+    time-based cache would serve a stale page. The ETag folds in whatever identifies
+    the render, so it changes exactly when the pixels do."""
+    etag = '"' + hashlib.md5("|".join(str(p) for p in tag_parts).encode()).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)  # skips the PNG encode
+    buf = io.BytesIO()
+    Image.fromarray(img).save(buf, "PNG")
+    return Response(buf.getvalue(), media_type="image/png", headers=headers)
+
+
 @app.get("/api/documents/{doc_id}/preview/{n}")
-def api_preview_image(doc_id: str, n: int) -> Response:
+def api_preview_image(doc_id: str, n: int, request: Request) -> Response:
     """Raw page image BEFORE any run: lets the analyst see the document (and pick a
     page range) pre-extraction. Rasterizes lazily on first call and caches the ingest
     on the doc record; a later run simply replaces it."""
@@ -519,22 +554,26 @@ def api_preview_image(doc_id: str, n: int) -> Response:
     imgs = doc.ingest_result.page_images
     if not 0 <= n < len(imgs):
         raise ApiError(404, f"No page {n}")
-    buf = io.BytesIO()
-    Image.fromarray(imgs[n]).save(buf, "PNG")
-    return Response(buf.getvalue(), media_type="image/png")
+    dpi = getattr(doc.ingest_result, "dpi", 0)
+    return _png_response(imgs[n], request, (doc.upload_id, "preview", n, dpi))
 
 
 @app.get("/api/documents/{doc_id}/pages/{n}/image")
-def api_page_image(doc_id: str, n: int, variant: str = "processed") -> Response:
-    doc = _doc_with_results(doc_id)
+def api_page_image(doc_id: str, n: int, request: Request, variant: str = "processed") -> Response:
     if variant not in ("processed", "original"):
         raise ApiError(400, f"Unknown variant {variant!r}")
-    imgs = (doc.preprocess_result if variant == "processed" else doc.ingest_result).page_images
+    # Cleaned pages exist from stage 2, well before the run finishes — serve them as
+    # soon as they do, so the grid stops showing raw previews for the whole run.
+    doc = _doc_or_404(doc_id)
+    source = doc.preprocess_result if variant == "processed" else doc.ingest_result
+    if source is None:
+        _doc_with_results(doc_id)  # nothing rendered yet: the 409 explains why
+        raise ApiError(404, f"No page {n}")
+    imgs = source.page_images
     if not 0 <= n < len(imgs):
         raise ApiError(404, f"No page {n}")
-    buf = io.BytesIO()
-    Image.fromarray(imgs[n]).save(buf, "PNG")
-    return Response(buf.getvalue(), media_type="image/png")
+    # last_key encodes the settings the render came from, so a re-run invalidates.
+    return _png_response(imgs[n], request, (doc.upload_id, variant, n, doc.last_key))
 
 
 def _attachment(filename: str, fallback: str) -> dict[str, str]:

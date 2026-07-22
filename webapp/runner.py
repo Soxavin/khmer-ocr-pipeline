@@ -39,6 +39,9 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
     state = doc  # local alias: the rest of the function fills the document's fields
     is_pdf = Path(state.upload_name or "").suffix.lower() == ".pdf"
     page_indices = s.page_indices(state.doc_page_count) if is_pdf else None
+    # Recorded so the UI can map a result index back to its document page while the
+    # run is still in flight (the grid upgrades thumbnails as soon as stage 2 lands).
+    state.run_page_indices = page_indices
     times: dict[str, float] = {}
     state.run_error = None
     state.progress.active = True
