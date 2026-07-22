@@ -797,6 +797,25 @@ def test_failed_doc_still_reports_error_status(client):
     assert me["status"] == "error"
 
 
+def test_status_exposes_what_auto_resolved_to(client):
+    """'Auto' has to report its outcome, or the drawer states a choice it can't back."""
+    doc_id = _upload(client).json()["documents"][0]["id"]
+    from webapp import registry
+
+    body = client.get(f"/api/documents/{doc_id}/status").json()
+    assert body["effective_engine"] is None and body["effective_dpi"] is None
+
+    doc = registry.get(doc_id)
+    doc.ingest_result = SimpleNamespace(dpi=300)
+    doc.surya_result = SimpleNamespace(
+        warnings=["[AutoRouter] kept surya_kiri | frac=0.010 cutoff=0.250"])
+    registry.set_last_run_settings(doc_id, {"ocr_engine_key": "auto"})
+
+    body = client.get(f"/api/documents/{doc_id}/status").json()
+    assert body["effective_engine"] == "surya_kiri"
+    assert body["effective_dpi"] == 300
+
+
 def test_status_exposes_sub_step(client):
     """The OCR sub-step reaches the UI so a long stage can narrate itself."""
     doc_id = _upload(client).json()["documents"][0]["id"]

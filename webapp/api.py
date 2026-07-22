@@ -30,6 +30,7 @@ from khmer_pipeline.model_config import CELL_CONF_LOW
 from khmer_pipeline.utils.backend_status import llama_server_running
 
 from . import components, downloads, edits, registry, tables
+from .effective import effective_dpi, effective_engine
 from .runner import run_pipeline
 from .settings import Settings
 from .state import Document
@@ -171,6 +172,7 @@ def api_delete(doc_id: str) -> dict:
 def api_status(doc_id: str) -> dict:
     doc = _doc_or_404(doc_id)
     p = doc.progress
+    last_settings = registry.last_run_settings(doc_id)
     return {
         "active": p.active,
         "stage": p.stage,
@@ -183,7 +185,14 @@ def api_status(doc_id: str) -> dict:
         # maps to processed_pages[k]; empty until stage 2 finishes.
         "processed_pages": _processed_pages(doc),
         "run_error": doc.run_error,
-        "last_run_settings": registry.last_run_settings(doc_id),
+        "last_run_settings": last_settings,
+        # What "Auto" resolved to for THIS document, so the drawer's Auto options
+        # can state their outcome instead of staying a black box.
+        "effective_engine": effective_engine(
+            last_settings.get("ocr_engine_key") if last_settings else None,
+            list(getattr(doc.surya_result, "warnings", []) or []),
+        ),
+        "effective_dpi": effective_dpi(doc),
     }
 
 
