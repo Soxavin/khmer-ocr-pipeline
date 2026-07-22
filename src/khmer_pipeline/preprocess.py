@@ -157,7 +157,10 @@ def suggest_preprocess_settings(page_images: list[np.ndarray]) -> dict:
         contrast_scores.append(float(gray.std()))
         bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         skews.append(abs(_skew_angle(bgr)))
-        mask = _stamp_ink_mask(bgr)
+        # Score the SHAPE-GATED mask, not raw colour: blue body text trivially
+        # exceeds a colour-ratio threshold, which is how the UI ended up
+        # recommending stamp removal on documents that have no stamp at all.
+        mask = _stamp_regions_mask(bgr)
         ink_ratios.append(float(cv2.countNonZero(mask)) / mask.size)
     laplacian_var = float(np.median(blur_scores))
     contrast_std = float(np.median(contrast_scores))
@@ -187,7 +190,9 @@ def suggest_preprocess_settings(page_images: list[np.ndarray]) -> dict:
          "detail": f"largest page tilt {skew_deg:.1f}\u00b0"},
         {"field": "remove_stamps", "active": stamped,
          "reason": "stamps_found" if stamped else "no_stamps",
-         "detail": f"colored stamp ink on {stamp_ink_ratio * 100:.2f}% of the worst page"},
+         "detail": (f"stamp-shaped marks on {stamp_ink_ratio * 100:.2f}% of the worst page"
+                    if stamped else
+                    "no stamp-shaped marks found; any colored text is left intact")},
         {"field": "sharpen", "active": soft,
          "reason": "soft_scan" if soft else "already_sharp",
          "detail": f"sharpness score {laplacian_var:.0f} (threshold {_SUGGEST_SHARP_LAPLACIAN:.0f})"},
@@ -212,15 +217,96 @@ def _stamp_ink_mask(bgr: np.ndarray) -> np.ndarray:
     return cv2.bitwise_or(mask_red, mask_blue)
 
 
+# --- Stamp SHAPE gate ---------------------------------------------------------
+# Colour alone cannot separate a stamp from coloured body text: Cambodian ministry
+# documents routinely print body text and headers in blue, and financial tables use
+# red figures. Removing every red/blue pixel erased 8.61% of a real MoC notification
+# (5.18x the colour mask, once dilated) including table values. So a colour-masked
+# component is only removed when its SHAPE says "stamp".
+#
+# Opening kernel: clears specks and hairline bridges before component analysis.
+# Deliberately SMALL — measured on a real MoC seal, a 5px kernel erased the stamp's
+# own ring (stroke thinner than 5px) and the whole seal stopped being detected.
+# 3px keeps real rings intact; the multi-line-text check below is the actual guard
+# against coloured paragraphs, not this kernel.
+_STAMP_OPEN_KERNEL_PX = 3
+# A stamp's bbox spans at least this fraction of the page's shorter side (both
+# dimensions). Fraction, not pixels, so it holds at any DPI.
+_STAMP_MIN_BOX_FRAC = 0.05
+# Stamps are round/oval; text LINES are strongly elongated.
+_STAMP_MAX_ASPECT = 3.0
+# Fill density above which a component is an unambiguous solid/heavy seal — far
+# above any text block, so it is a safe fast-accept. Deliberately NOT used as the
+# general gate: a hollow ring seal scores ~0.05, BELOW a merged text block (~0.1-0.2),
+# so a density floor would reject real stamps and a ceiling would miss the text.
+_STAMP_SOLID_EXTENT = 0.55
+# A row counts as blank when its ink falls below this fraction of the component's
+# mean row ink. Multi-line text alternates dense rows with blank gaps; a ring has
+# ink on its left/right arcs in every row, so it shows no blank bands at all.
+_STAMP_BLANK_ROW_FRAC = 0.25
+# Two or more blank bands means multi-line text, not a stamp.
+_STAMP_MAX_LINE_GAPS = 1
+
+
+def _has_text_line_gaps(component: np.ndarray) -> bool:
+    """True when a component's horizontal profile alternates like multi-line text.
+
+    Guards the case where tight line spacing fuses a whole paragraph into one
+    square-ish component that clears the size and aspect gates."""
+    rows = component.sum(axis=1, dtype=np.float64) / 255.0
+    if rows.size == 0:
+        return False
+    mean_ink = rows.mean()
+    if mean_ink <= 0:
+        return False
+    blank = rows < (mean_ink * _STAMP_BLANK_ROW_FRAC)
+    # Count contiguous runs of blank rows (bands), not individual rows.
+    bands = int(np.count_nonzero(blank[1:] & ~blank[:-1])) + int(blank[0])
+    return bands > _STAMP_MAX_LINE_GAPS
+
+
+def _stamp_regions_mask(bgr: np.ndarray) -> np.ndarray:
+    """Colour-masked components that actually look like stamps.
+
+    Returns an all-zero mask when nothing qualifies — the honesty property: what we
+    cannot positively identify as a stamp is left alone."""
+    coloured = _stamp_ink_mask(bgr)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_STAMP_OPEN_KERNEL_PX,) * 2)
+    opened = cv2.morphologyEx(coloured, cv2.MORPH_OPEN, k)
+
+    h, w = opened.shape[:2]
+    min_box = min(h, w) * _STAMP_MIN_BOX_FRAC
+    keep = np.zeros_like(opened)
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+    for i in range(1, count):  # 0 is the background
+        x, y, bw, bh, area = (stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP],
+                              stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT],
+                              stats[i, cv2.CC_STAT_AREA])
+        if bw < min_box or bh < min_box:
+            continue  # glyph-sized: never a stamp
+        if max(bw / bh, bh / bw) > _STAMP_MAX_ASPECT:
+            continue  # a text line, not a seal
+        component = (labels[y:y + bh, x:x + bw] == i).astype(np.uint8) * 255
+        extent = area / float(bw * bh)
+        if extent < _STAMP_SOLID_EXTENT and _has_text_line_gaps(component):
+            continue  # multi-line text fused into one block
+        # Confirmed stamp: take ALL coloured ink inside its box, not just this
+        # component. A seal fragments into an outer ring, an inner text ring and an
+        # emblem; individually those fail the gates, so removing only the winning
+        # component leaves most of the stamp behind. Colour filtering stays strictly
+        # LOCALIZED to a region already proven to be a stamp.
+        keep[y:y + bh, x:x + bw] |= coloured[y:y + bh, x:x + bw]
+    return keep
+
+
 def _remove_stamps(bgr: np.ndarray) -> np.ndarray:
-    combined = _stamp_ink_mask(bgr)
+    stamps = _stamp_regions_mask(bgr)
+    if cv2.countNonZero(stamps) == 0:
+        return bgr  # nothing identifiable as a stamp: change nothing
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    dilated = cv2.dilate(combined, kernel, iterations=2)
-
-    if cv2.countNonZero(dilated) == 0:
-        return bgr
-
+    dilated = cv2.dilate(stamps, kernel, iterations=2)
     return cv2.inpaint(bgr, dilated, 5, cv2.INPAINT_TELEA)
 
 

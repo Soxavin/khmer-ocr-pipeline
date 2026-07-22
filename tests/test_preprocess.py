@@ -92,6 +92,96 @@ def test_stamp_removal_changes_red_region():
     assert mean_red_channel < 242, f"Red channel mean in blob region is {mean_red_channel:.1f}, expected < 242 after inpainting"
 
 
+# --- Shape-gated stamp removal -------------------------------------------------
+# The colour mask alone cannot tell a stamp from coloured body text, so removal is
+# gated on component SHAPE. These fixtures are BGR (what _remove_stamps takes).
+# Measured on a real Ministry notification, the ungated version erased 8.61% of the
+# page from a 1.66% colour mask — mostly blue paragraphs and blue table figures.
+
+_BLUE_BGR = (255, 0, 0)
+
+
+def _blank_page(h: int = 400, w: int = 400) -> np.ndarray:
+    return np.full((h, w, 3), 240, dtype=np.uint8)
+
+
+def _page_with_text_block(connector_px: int = 10) -> np.ndarray:
+    """A roughly SQUARE block of blue text lines, fused into one component.
+
+    This is the review edge case: with tight line spacing, a whole paragraph can
+    merge into a single large component that clears both the size and the aspect
+    gate. `connector_px` bridges the line gaps and is wide enough to survive the
+    opening, so this really does reach the multi-line-text check."""
+    img = _blank_page()
+    for i in range(6):
+        top = 40 + i * 50
+        cv2.rectangle(img, (60, top), (340, top + 20), _BLUE_BGR, -1)
+    # Vertical bridges through the gaps → one connected component.
+    cv2.rectangle(img, (200, 40), (200 + connector_px, 330), _BLUE_BGR, -1)
+    return img
+
+
+def _page_with_thin_text_lines() -> np.ndarray:
+    """Separate thin blue lines — ordinary coloured body text, no stamp anywhere."""
+    img = _blank_page()
+    for i in range(6):
+        top = 40 + i * 50
+        cv2.rectangle(img, (60, top), (340, top + 3), _BLUE_BGR, -1)
+    return img
+
+
+def _page_with_ring_stamp() -> np.ndarray:
+    """A hollow ring seal: large bbox, near-square, but very LOW fill density —
+    which is exactly why fill density alone cannot be the gate."""
+    img = _blank_page()
+    cv2.circle(img, (200, 200), 120, _BLUE_BGR, thickness=10)
+    return img
+
+
+def test_stamp_gate_keeps_merged_multiline_text_block():
+    from khmer_pipeline.preprocess import _remove_stamps
+    img = _page_with_text_block()
+    out = _remove_stamps(img.copy())
+    assert np.array_equal(out, img), (
+        "A square block of coloured multi-line text must survive untouched — it is "
+        "body text, not a stamp."
+    )
+
+
+def test_stamp_gate_keeps_plain_coloured_text():
+    from khmer_pipeline.preprocess import _remove_stamps
+    img = _page_with_thin_text_lines()
+    out = _remove_stamps(img.copy())
+    assert np.array_equal(out, img), "Thin coloured text lines must never be erased."
+
+
+def test_stamp_gate_still_removes_hollow_ring_seal():
+    from khmer_pipeline.preprocess import _remove_stamps
+    img = _page_with_ring_stamp()
+    out = _remove_stamps(img.copy())
+    assert not np.array_equal(out, img), (
+        "A hollow ring seal must still be removed — proving the multi-line-text "
+        "guard did not cost us real stamps."
+    )
+
+
+def test_stamp_gate_leaves_page_untouched_when_nothing_qualifies():
+    """The honesty property: identify nothing → destroy nothing."""
+    from khmer_pipeline.preprocess import _remove_stamps
+    img = _page_with_thin_text_lines()
+    assert np.array_equal(_remove_stamps(img.copy()), img)
+
+
+def test_suggest_reports_no_stamps_for_coloured_text_only_page():
+    """Coloured text must not trigger a 'stamps found' recommendation."""
+    rgb = cv2.cvtColor(_page_with_thin_text_lines(), cv2.COLOR_BGR2RGB)
+    ing = IngestResult(source_name="t.pdf", page_images=[rgb], dpi=200, page_count=1)
+    s = suggest_preprocess_settings(ing.page_images)
+    stamp = next(c for c in s["checks"] if c["field"] == "remove_stamps")
+    assert stamp["active"] is False
+    assert stamp["reason"] == "no_stamps"
+
+
 def test_sharpen_changes_pixels():
     ingest_r = _make_ingest_result()  # gradient image — not flat, so sharpening has effect
     original = ingest_r.page_images[0].copy()
