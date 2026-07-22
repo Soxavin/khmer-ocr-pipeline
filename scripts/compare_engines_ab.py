@@ -50,6 +50,7 @@ from khmer_pipeline.evaluation.gt_provenance import circularity_note, is_circula
 
 _REAL_DIR = Path("eval/datasets/real")
 _MOC_GAS_DIR = Path("eval/datasets/moc_gas")
+_BUDGET_TEXTLAYER_DIR = Path("eval/datasets/budget_textlayer")
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,20 @@ _TARGETS: dict[str, Target] = {
     ),
     "budget_p3": Target(_REAL_DIR, "CambodiaBudgetExecutioninApr-2024_p3", "page"),
     "moc_gas_p1": Target(_MOC_GAS_DIR, "notification_no_2138_16.06.2026_p1", "page"),
+}
+
+# Text-layer-harvested budget pages (scripts/harvest_textlayer_gt.py): free,
+# model-free numeric+structure GT. Khmer is blanked there, so only the metrics
+# named in each file's scoring_scope are meaningful — see _SCOPE_MASKED_METRICS.
+for _page in (4, 5, 6, 8, 9):
+    _TARGETS[f"budget_p{_page}"] = Target(
+        _BUDGET_TEXTLAYER_DIR, f"CambodiaBudgetExecutioninApr-2024_p{_page}", "page"
+    )
+
+# Metrics that a restricted-scope GT cannot support. Printed as "—" rather than
+# as a number, so a masked score can never be mistaken for a measured one.
+_SCOPE_MASKED_METRICS: dict[str, set[str]] = {
+    "numeric_and_structure": {"cell_accuracy", "khmer_cell_accuracy", "table_cer"},
 }
 
 _ENGINES = ["surya", "auto", "surya_kiri_vlm", "surya_kiri"]
@@ -167,6 +182,7 @@ def run_one(engine_key: str, name: str, target: Target, repeat: int) -> dict:
         # Recorded on the result itself so a circular score can never be read
         # back later without its caveat attached.
         "gt_circular": is_circular(engine_key, gt),
+        "scoring_scope": gt.get("scoring_scope"),
         "metrics": _score(pred_grids, gt),
         # Stored so a metric change is a re-score, not another model run.
         "pred_grids": pred_grids,
@@ -233,14 +249,21 @@ def summarize(out_dir: Path) -> int:
         print(f"\n=== {target_name}  ({rs[0]['stem']})")
         if any(r["gt_provisional"] for r in rs):
             print("    (PROVISIONAL — GT has unverified rows)")
+        scope = rs[0].get("scoring_scope")
+        if scope:
+            print(f"    (scope={scope} — '—' columns are not measurable against this GT)")
         print(_fmt_row("engine", [label for _, label in _METRICS] + ["secs", "runs"]))
         print("-" * 96)
 
         for engine in sorted(by_engine, key=lambda e: _ENGINES.index(e) if e in _ENGINES else 99):
             group = by_engine[engine]
+            masked = _SCOPE_MASKED_METRICS.get(group[0].get("scoring_scope") or "", set())
             cols = []
             spreads = []
             for key, _ in _METRICS:
+                if key in masked:
+                    cols.append("—")
+                    continue
                 median, spread = _agg([g["metrics"][key] for g in group])
                 spreads.append(spread)
                 cols.append(f"{median:.3f}" if spread == 0 else f"{median:.3f}±{spread:.3f}")
