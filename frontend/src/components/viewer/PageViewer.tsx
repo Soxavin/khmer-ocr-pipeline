@@ -26,6 +26,11 @@ const LABEL_COLORS: Record<string, string> = {
 
 type OverlayMode = 'confidence' | 'regions' | 'none'
 
+// Pointer travel (px, Manhattan) past which a press is a pan, not a click.
+const PAN_SLOP = 4
+// Block↔card linking must feel instant: a short ease-out glide, not a flight.
+const BLOCK_PAN_MS = 180
+
 // Segmented button inside the zoom cluster (shares the group's border).
 const zoomBtn =
   'inline-flex h-6 items-center px-1.5 text-xs text-ink-2 transition-colors duration-150 ' +
@@ -49,11 +54,19 @@ export function PageViewer(props: {
   selectedTable: string | null
   onTableClick: (tableId: string) => void
   flyToken?: number // increments on triage jumps: fly the camera to the evidence
+  /** Index into `page.text_blocks` of the block to halo — the hovered or selected
+      Page-text card. Null when nothing is linked. */
+  activeBlock?: number | null
+  /** A selection that came from the TEXT side: pan the camera onto that block.
+      `n` increments per request so re-selecting the same block still moves. */
+  blockFocus?: { i: number; n: number } | null
+  /** A block box was clicked on the canvas — select the matching text card. */
+  onBlockClick?: (i: number) => void
   /** Canvas view toggle (single ⇄ grid) shown in the strip when provided. */
   view?: 'single' | 'grid'
   onViewChange?: (v: 'single' | 'grid') => void
 }) {
-  const { docId, pageIdx, pageCount, onPageChange, page, selectedTable, onTableClick, flyToken = 0, view: canvasView, onViewChange } = props
+  const { docId, pageIdx, pageCount, onPageChange, page, selectedTable, onTableClick, flyToken = 0, activeBlock = null, blockFocus = null, onBlockClick, view: canvasView, onViewChange } = props
   const { t } = useT()
   const [variant, setVariant] = useState<'processed' | 'original'>('processed')
   const [overlay, setOverlay] = useState<OverlayMode>('confidence')
@@ -69,6 +82,10 @@ export function PageViewer(props: {
   viewRef.current = view
   const containerRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; y: number } | null>(null)
+  // A pan that ends over a region must not read as a click on it. Set once the
+  // pointer travels past PAN_SLOP; cleared on the next press.
+  const panned = useRef(false)
+  const pressAt = useRef<{ x: number; y: number } | null>(null)
 
   // Zoom toward the canvas centre, clamped — shared by the stepper and keyboard.
   const zoomBy = useCallback((factor: number) => {
@@ -126,6 +143,9 @@ export function PageViewer(props: {
 
   const bboxIndex = page?.table_bbox_index ?? {}
   const selectedBbox = selectedTable ? bboxIndex[selectedTable] : undefined
+  const activeBlockBox =
+    activeBlock !== null ? page?.text_blocks?.[activeBlock]?.bbox : undefined
+  const haloBox = activeBlockBox && activeBlockBox.length >= 4 ? activeBlockBox : undefined
   const pct = Math.round(view.scale * 100)
   // Text-block confidence counts for the overlay legend (same bands as the grid).
   const confCounts = useMemo(
@@ -180,6 +200,44 @@ export function PageViewer(props: {
     }
     flyAnim.current = requestAnimationFrame(step)
   }, [natural])
+  // Centre a region WITHOUT changing zoom — the block↔card link is a "look here",
+  // not a "zoom in": re-framing the page every time a card is clicked would lose
+  // the analyst's chosen reading scale.
+  const panTo = useCallback((bbox: number[]) => {
+    const el = containerRef.current
+    if (!el || !natural) return
+    const from = { ...viewRef.current }
+    const target = {
+      scale: from.scale,
+      tx: el.clientWidth / 2 - ((bbox[0] + bbox[2]) / 2) * from.scale,
+      ty: el.clientHeight / 2 - ((bbox[1] + bbox[3]) / 2) * from.scale,
+    }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setView(target)
+      return
+    }
+    if (flyAnim.current !== null) cancelAnimationFrame(flyAnim.current)
+    const t0 = performance.now()
+    const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t))
+    const step = (now: number) => {
+      const k = easeOutExpo(Math.min(1, (now - t0) / BLOCK_PAN_MS))
+      setView({ scale: from.scale, tx: from.tx + (target.tx - from.tx) * k, ty: from.ty + (target.ty - from.ty) * k })
+      if (k < 1) flyAnim.current = requestAnimationFrame(step)
+      else flyAnim.current = null
+    }
+    flyAnim.current = requestAnimationFrame(step)
+  }, [natural])
+
+  // A card was picked in Page text: bring its box into view.
+  const lastBlockFocus = useRef(0)
+  useEffect(() => {
+    if (!blockFocus || blockFocus.n === lastBlockFocus.current) return
+    const bbox = page?.text_blocks?.[blockFocus.i]?.bbox
+    if (!natural || !bbox || bbox.length < 4) return
+    lastBlockFocus.current = blockFocus.n
+    panTo(bbox)
+  }, [blockFocus, page, natural, panTo])
+
   useEffect(() => {
     // Triage jump: retriggers when page data arrives late (cross-page jumps load async).
     if (flyToken === 0 || flyToken === lastFlown.current) return
@@ -256,9 +314,15 @@ export function PageViewer(props: {
         }}
         onMouseDown={(e) => {
           drag.current = { x: e.clientX - view.tx, y: e.clientY - view.ty }
+          pressAt.current = { x: e.clientX, y: e.clientY }
+          panned.current = false
         }}
         onMouseMove={(e) => {
           if (drag.current) {
+            const p = pressAt.current
+            if (p && Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > PAN_SLOP) {
+              panned.current = true
+            }
             setLensPos(null) // panning and inspecting are different hand modes
             setView((v) => ({ ...v, tx: e.clientX - drag.current!.x, ty: e.clientY - drag.current!.y }))
             return
@@ -324,14 +388,17 @@ export function PageViewer(props: {
               fit(n)
             }}
           />
-          {natural && page && overlay !== 'none' && (
+          {natural && page && (
             <svg
               className="absolute inset-0"
               width="100%"
               height="100%"
               viewBox={`0 0 ${natural.w} ${natural.h}`}
+              // With the overlay off the layer carries only the block halo, which
+              // is a passive marker — never a pointer trap over the page.
+              pointerEvents={overlay === 'none' ? 'none' : undefined}
             >
-              {page.text_blocks.map((b, i) =>
+              {overlay !== 'none' && page.text_blocks.map((b, i) =>
                 b.bbox && b.bbox.length >= 4 ? (
                   <rect
                     key={`t${i}`}
@@ -339,7 +406,9 @@ export function PageViewer(props: {
                     y={b.bbox[1]}
                     width={b.bbox[2] - b.bbox[0]}
                     height={b.bbox[3] - b.bbox[1]}
-                    fill="none"
+                    // Transparent, not none: the whole box is the hit target, so a
+                    // block can be picked without hunting for its 2px outline.
+                    fill={onBlockClick ? 'transparent' : 'none'}
                     stroke={overlay === 'confidence' ? confColor(b.confidence) : (LABEL_COLORS[b.label ?? ''] ?? '#95A5A6')}
                     strokeWidth={2 / view.scale}
                     // Confidence must not be color-only: anything not Clean is dashed too.
@@ -348,10 +417,27 @@ export function PageViewer(props: {
                         ? `${6 / view.scale} ${4 / view.scale}`
                         : undefined
                     }
-                  />
+                    className={onBlockClick ? 'region-rect cursor-pointer' : undefined}
+                    role={onBlockClick ? 'button' : undefined}
+                    tabIndex={onBlockClick ? 0 : undefined}
+                    aria-label={onBlockClick ? t('block_open') : undefined}
+                    onClick={onBlockClick ? () => { if (!panned.current) onBlockClick(i) } : undefined}
+                    onKeyDown={
+                      onBlockClick
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onBlockClick(i)
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    {onBlockClick && <title>{t('block_open')}</title>}
+                  </rect>
                 ) : null,
               )}
-              {Object.entries(bboxIndex).map(([tid, bbox]) => (
+              {overlay !== 'none' && Object.entries(bboxIndex).map(([tid, bbox]) => (
                 <rect
                   key={tid}
                   x={bbox[0]}
@@ -388,6 +474,35 @@ export function PageViewer(props: {
                   strokeWidth={4 / view.scale}
                   pointerEvents="none"
                 />
+              )}
+              {/* Block halo: the live link to the hovered/selected Page-text card.
+                  Drawn last so it reads above the overlay, and independent of the
+                  overlay mode — the link must work even with boxes turned off.
+                  A soft outer ring plus a crisp inner one; the 150ms transition
+                  makes it pop rather than slide. */}
+              {haloBox && (
+                <g pointerEvents="none" className="transition-all duration-150 ease-out">
+                  <rect
+                    x={haloBox[0]}
+                    y={haloBox[1]}
+                    width={haloBox[2] - haloBox[0]}
+                    height={haloBox[3] - haloBox[1]}
+                    fill="var(--color-primary)"
+                    fillOpacity={0.1}
+                    stroke="var(--color-primary)"
+                    strokeOpacity={0.25}
+                    strokeWidth={8 / view.scale}
+                  />
+                  <rect
+                    x={haloBox[0]}
+                    y={haloBox[1]}
+                    width={haloBox[2] - haloBox[0]}
+                    height={haloBox[3] - haloBox[1]}
+                    fill="none"
+                    stroke="var(--color-primary)"
+                    strokeWidth={2.5 / view.scale}
+                  />
+                </g>
               )}
               {/* Spotlight: dim everything around the evidence for a beat after landing. */}
               {spotlight && (

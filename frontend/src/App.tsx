@@ -121,6 +121,22 @@ export default function App() {
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [flashToken, setFlashToken] = useState<{ tid: string; n: number } | null>(null)
   const [focusCell, setFocusCell] = useState<{ tid: string; row: number; col: number; n: number } | null>(null)
+  // The page image and the Page-text cards are two views of one block list, so the
+  // link between them lives here — the nearest common owner. `from` records which
+  // side initiated, so only the OTHER side scrolls and the two never chase each
+  // other. Hover highlights without moving anything; a click moves the camera.
+  const [blockSel, setBlockSel] = useState<{ i: number; from: 'canvas' | 'text'; n: number } | null>(null)
+  const [blockHover, setBlockHover] = useState<number | null>(null)
+  const activeBlock = blockHover ?? blockSel?.i ?? null
+  const pickBlock = useCallback((from: 'canvas' | 'text') => (i: number) => {
+    setBlockSel((p) => ({ i, from, n: (p?.n ?? 0) + 1 }))
+  }, [])
+  const clearBlockLink = useCallback(() => {
+    setBlockSel(null)
+    setBlockHover(null)
+  }, [])
+  const canvasPickBlock = useMemo(() => pickBlock('canvas'), [pickBlock])
+  const textPickBlock = useMemo(() => pickBlock('text'), [pickBlock])
   // Silently remember the analyst's last-used engine/settings (no presets UI).
   const [engine, setEngine] = useState(() => localStorage.getItem('engine') ?? 'surya')
   // Joining continuation tables is an EXPORT choice; extraction always stays
@@ -413,9 +429,10 @@ export default function App() {
     setSelectedTable(null)
     setFlashToken(null)
     setFocusCell(null)
+    clearBlockLink()
     setIssueIdx(-1)
     setDismissedIssues(new Set())
-  }, [])
+  }, [clearBlockLink])
 
   // "Run all": sequential client-side loop (single GPU — the server 409s overlap).
   const runAll = useCallback(async () => {
@@ -1040,10 +1057,14 @@ export default function App() {
                     setPageIdx(i)
                     setSelectedTable(null)
                     setFlashToken(null)
+                    clearBlockLink()
                   }}
                   page={page.data}
                   selectedTable={selectedTable}
                   flyToken={focusCell?.n ?? 0}
+                  activeBlock={activeBlock}
+                  blockFocus={blockSel?.from === 'text' ? blockSel : null}
+                  onBlockClick={canvasPickBlock}
                   onTableClick={(tid) => {
                     setSelectedTable(tid)
                     setFlashToken((f) => ({ tid, n: (f?.n ?? 0) + 1 }))
@@ -1092,6 +1113,10 @@ export default function App() {
                     onOpenFind={() => setShowFind(true)}
                     onCloseFind={() => setShowFind(false)}
                     onFocusCell={focusGridCell}
+                    activeBlock={activeBlock}
+                    blockFocus={blockSel?.from === 'canvas' ? blockSel : null}
+                    onSelectBlock={textPickBlock}
+                    onHoverBlock={setBlockHover}
                   />
                 </Suspense>
               ) : (
@@ -1203,6 +1228,8 @@ export default function App() {
             auto={autoApplied}
             onAutoOverride={clearAuto}
             highlight={highlightFlag}
+            effectiveEngine={status.data?.effective_engine ?? null}
+            effectiveDpi={status.data?.effective_dpi ?? null}
             pageCount={active?.pages ?? 0}
             onClose={() => setDrawer(null)}
           />

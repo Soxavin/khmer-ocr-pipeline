@@ -85,7 +85,7 @@ export function SegmentedToggle<T extends string>(props: {
 }) {
   const { value, options, onChange, label, disabled = false } = props
   return (
-    <span className="flex shrink-0 overflow-hidden rounded-md border border-line-strong" role="group" aria-label={label}>
+    <span className="inline-flex w-fit shrink-0 overflow-hidden rounded-md border border-line-strong align-middle" role="group" aria-label={label}>
       {options.map(([val, text, tip]) => (
         <button
           key={val}

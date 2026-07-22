@@ -7,12 +7,24 @@ import type { TextBlock } from '../api/types'
     here, where it can be tested. Blocks with no text are layout regions the reader
     has no use for (an empty figure box), so they are dropped. */
 export function orderedBlocks(blocks: TextBlock[] | undefined): TextBlock[] {
+  return orderedBlockEntries(blocks).map((e) => e.block)
+}
+
+/** The same reading-order list, each block paired with its index in the ORIGINAL
+    `text_blocks` array.
+
+    That index is the block's identity across the workspace: the page overlay draws
+    one rect per source block, so linking a text card to its box needs the source
+    position, not the card's position — filtering and reading-order sorting make
+    the two disagree. */
+export function orderedBlockEntries(
+  blocks: TextBlock[] | undefined,
+): { block: TextBlock; index: number }[] {
   if (!blocks) return []
   return blocks
-    .filter((b) => (b.text ?? '').trim().length > 0)
-    .map((b, i) => ({ b, i }))
-    .sort((x, y) => (x.b.reading_order ?? x.i) - (y.b.reading_order ?? y.i))
-    .map(({ b }) => b)
+    .map((block, index) => ({ block, index }))
+    .filter((e) => (e.block.text ?? '').trim().length > 0)
+    .sort((x, y) => (x.block.reading_order ?? x.index) - (y.block.reading_order ?? y.index))
 }
 
 /** Human label for a block's region type, falling back to a generic word when

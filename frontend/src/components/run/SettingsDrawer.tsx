@@ -48,6 +48,21 @@ function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label
   )
 }
 
+/** What an 'Auto' option actually resolved to for this document.
+    'Auto' without an outcome is a black box: the analyst cannot tell 200 DPI from
+    300, or which recognizer read the page. Rendered only once a run has decided —
+    a badge that guessed would be worse than no badge. */
+function ResolvedBadge(props: { text: string; title: string }) {
+  return (
+    <span
+      className="ml-1.5 inline-block rounded bg-primary-soft px-1.5 py-0.5 text-2xs font-semibold text-primary-strong"
+      title={props.title}
+    >
+      {props.text}
+    </span>
+  )
+}
+
 function SectionTitle(props: { icon: typeof Files; label: string }) {
   const Icon = props.icon
   return (
@@ -76,11 +91,15 @@ export function SettingsDrawer(props: {
   /** Telemetry-bar jump target: scroll to + pulse this flag's row (n re-triggers). */
   highlight?: { k: string; n: number } | null
   pageCount: number
+  /** What the last run's 'Auto' choices resolved to for the active document —
+      the engine key the router used, and the concrete render DPI. */
+  effectiveEngine?: string | null
+  effectiveDpi?: number | null
   /** A run is in flight: its parameters are frozen until it finishes. */
   disabled?: boolean
   onClose: () => void
 }) {
-  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, disabled = false, onClose } = props
+  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, effectiveEngine = null, effectiveDpi = null, disabled = false, onClose } = props
   const { t } = useT()
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const [pulsing, setPulsing] = useState<string | null>(null)
@@ -97,6 +116,12 @@ export function SettingsDrawer(props: {
   const set = (k: string, v: unknown) => onChange({ ...settings, [k]: v })
   const bool = (k: string) => Boolean(settings[k])
   const scope = String(settings.page_scope ?? 'all')
+  // The router reports an engine KEY; show the same label the card carries.
+  const resolvedEngineLabel =
+    effectiveEngine && effectiveEngine !== 'auto'
+      ? (engines.find((e2) => e2.key === effectiveEngine)?.label ?? effectiveEngine)
+      : null
+  const dpiIsAuto = String(settings.dpi ?? 'auto') === 'auto'
 
   return (
     <div className="flex h-full min-h-0 w-96 shrink-0 flex-col max-[1279px]:w-80">
@@ -143,6 +168,13 @@ export function SettingsDrawer(props: {
                   <span className="min-w-0">
                     <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
                       {e2.label}
+                      {/* Only the Auto card, only once the router has ruled. */}
+                      {selected && e2.key === 'auto' && resolvedEngineLabel && (
+                        <ResolvedBadge
+                          text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
+                          title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
+                        />
+                      )}
                     </span>
                     {e2.guidance && <span className="mt-0.5 block text-xs leading-4 text-ink-2">{e2.guidance}</span>}
                   </span>
@@ -156,7 +188,15 @@ export function SettingsDrawer(props: {
           <SectionTitle icon={Files} label={t('pages')} />
           {/* Stacked rows with block labels — no jagged side-by-side alignment. */}
           <div className="mb-3">
-            <span className="mb-1 block text-xs font-medium text-ink-2">{t('dpi')}</span>
+            <span className="mb-1 block text-xs font-medium text-ink-2">
+              {t('dpi')}
+              {dpiIsAuto && effectiveDpi && (
+                <ResolvedBadge
+                  text={t('auto_resolved_dpi', { n: effectiveDpi })}
+                  title={t('auto_resolved_dpi_tip', { n: effectiveDpi })}
+                />
+              )}
+            </span>
             {/* The shared segment control; 'Auto' leads — it reads the document's
                 density and picks 200 or 300. Values ride as strings, stored as
                 'auto' | number to match the API contract. */}

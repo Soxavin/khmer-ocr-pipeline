@@ -35,6 +35,10 @@ export type RunStatus = {
   processed_pages: number[]
   run_error: string | null
   last_run_settings: Record<string, unknown> | null
+  /** What the run's "Auto" options resolved to for THIS document — the engine the
+      router actually used and the concrete render DPI. Null until decided. */
+  effective_engine: string | null
+  effective_dpi: number | null
 }
 
 export type PageTable = {

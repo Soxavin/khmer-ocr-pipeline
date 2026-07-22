@@ -39,8 +39,13 @@ export function TablesPanel(props: {
   onCloseFind: () => void
   /** Focus a grid cell (triage-band jump): selects, flashes, scrolls + flies the page. */
   onFocusCell: (tid: string, row: number, col: number) => void
+  /** Page-text block link — passed straight through to PageTextPanel. */
+  activeBlock?: number | null
+  blockFocus?: { i: number; n: number } | null
+  onSelectBlock?: (i: number) => void
+  onHoverBlock?: (i: number | null) => void
 }) {
-  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onOpenFind, onCloseFind, onFocusCell } = props
+  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onOpenFind, onCloseFind, onFocusCell, activeBlock = null, blockFocus = null, onSelectBlock, onHoverBlock } = props
   const qc = useQueryClient()
   const { t } = useT()
   const findRef = useRef<HTMLInputElement>(null)
@@ -279,6 +284,10 @@ export function TablesPanel(props: {
             }}
             saved={textSaved}
             onSaved={() => setTextSaved(true)}
+            activeBlock={activeBlock}
+            blockFocus={blockFocus}
+            onSelectBlock={onSelectBlock}
+            onHoverBlock={onHoverBlock}
           />
         )}
       </div>

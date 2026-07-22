@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy } from 'lucide-react'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { useT } from '../../i18n.tsx'
 import { SegmentedToggle } from '../viewer/PageGrid'
-import { blockLabel, mergedText, orderedBlocks } from '../../lib/blocks'
+import { blockLabel, mergedText, orderedBlockEntries } from '../../lib/blocks'
 import { confBand, type Band } from '../../lib/confidence'
 import { btnSmCls, chipCls, iconBtnCls } from '../../ui'
 
@@ -35,16 +35,50 @@ export function PageTextPanel(props: {
   onTextChange: (v: string) => void
   saved: boolean
   onSaved: () => void
+  /** Source index of the block currently linked to the page canvas, or null. */
+  activeBlock?: number | null
+  /** A selection that came from the CANVAS: open this panel and scroll its card
+      into view. `n` increments per request so re-picking the same box still moves. */
+  blockFocus?: { i: number; n: number } | null
+  /** A card was clicked — link it to the page image. */
+  onSelectBlock?: (i: number) => void
+  /** A card was hovered (null on leave) — highlight without moving the camera. */
+  onHoverBlock?: (i: number | null) => void
 }) {
-  const { docId, pageIdx, page, text, onTextChange, saved, onSaved } = props
+  const { docId, pageIdx, page, text, onTextChange, saved, onSaved, activeBlock = null, blockFocus = null, onSelectBlock, onHoverBlock } = props
   const { t } = useT()
   const [mode, setMode] = useState<'blocks' | 'raw'>('blocks')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  // Controlled so a canvas pick can open the panel; the analyst's own toggling
+  // still works because every path writes this one piece of state.
+  const [open, setOpen] = useState(true)
+  const cardRefs = useRef(new Map<number, HTMLLIElement>())
 
-  const blocks = useMemo(() => orderedBlocks(page.text_blocks), [page.text_blocks])
+  const blocks = useMemo(() => orderedBlockEntries(page.text_blocks), [page.text_blocks])
+
+  // A box was clicked on the page: surface the matching card. Blocks view is the
+  // only one that HAS cards, so the panel switches to it rather than opening onto
+  // a textarea that cannot answer the question.
+  const lastFocus = useRef(0)
+  useEffect(() => {
+    if (!blockFocus || blockFocus.n === lastFocus.current) return
+    lastFocus.current = blockFocus.n
+    setOpen(true)
+    setMode('blocks')
+  }, [blockFocus])
+
+  // Separate pass: the card only exists to scroll to once the panel is open and
+  // in Blocks mode, which the effect above may have just changed.
+  useEffect(() => {
+    if (!blockFocus || !open || mode !== 'blocks') return
+    const el = cardRefs.current.get(blockFocus.i)
+    if (!el) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+  }, [blockFocus, open, mode])
 
   async function copyAll() {
-    const payload = mode === 'raw' ? text : mergedText(blocks)
+    const payload = mode === 'raw' ? text : mergedText(blocks.map((e) => e.block))
     let ok = false
     // navigator.clipboard is absent on non-secure origins (a LAN demo over
     // http://<ip>:8600) and can reject even where present — fall back to the
@@ -71,7 +105,11 @@ export function PageTextPanel(props: {
   }
 
   return (
-    <details className="rounded-lg border border-line bg-surface p-2 shadow-raised">
+    <details
+      className="rounded-lg border border-line bg-surface p-2 shadow-raised"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
       <summary className="cursor-pointer text-sm font-medium text-ink-2">
         {t('page_text')}
         {blocks.length > 0 && (
@@ -107,17 +145,47 @@ export function PageTextPanel(props: {
         ) : (
           <>
             <ol className="mt-2 space-y-1.5">
-              {blocks.map((b, i) => {
+              {blocks.map(({ block: b, index }, i) => {
                 const band = confBand(b.confidence)
+                const active = activeBlock === index
+                const linkable = Boolean(onSelectBlock)
                 return (
                   <li
-                    key={i}
-                    className="rounded-md border border-line-strong/30 bg-rail/20 p-2 transition-colors duration-150 hover:border-line-strong/60"
+                    key={index}
+                    ref={(el) => {
+                      if (el) cardRefs.current.set(index, el)
+                      else cardRefs.current.delete(index)
+                    }}
+                    // The active card carries the same primary ring the page halo
+                    // does — one highlight language across the two panes.
+                    className={`rounded-md border p-2 transition-all duration-150 ease-out ${
+                      active
+                        ? 'border-primary bg-primary-soft/40 ring-2 ring-primary/40'
+                        : 'border-line-strong/30 bg-rail/20 hover:border-line-strong/60'
+                    }`}
+                    onMouseEnter={() => onHoverBlock?.(index)}
+                    onMouseLeave={() => onHoverBlock?.(null)}
                   >
                     <div className="flex items-center justify-between gap-2 text-2xs">
-                      <span className="min-w-0 truncate font-semibold uppercase tracking-wide text-ink-3">
-                        {i + 1} · {blockLabel(b, t('block_untitled'))}
-                      </span>
+                      {/* The number is the card's position in reading order; the
+                          identity it links by is the source index, kept off-screen. */}
+                      {linkable ? (
+                        <button
+                          type="button"
+                          className="min-w-0 truncate rounded font-semibold uppercase tracking-wide text-ink-3 transition-colors duration-150 ease-out hover:text-primary-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          onClick={() => onSelectBlock?.(index)}
+                          onFocus={() => onHoverBlock?.(index)}
+                          onBlur={() => onHoverBlock?.(null)}
+                          title={t('block_focus')}
+                          aria-pressed={active}
+                        >
+                          {i + 1} · {blockLabel(b, t('block_untitled'))}
+                        </button>
+                      ) : (
+                        <span className="min-w-0 truncate font-semibold uppercase tracking-wide text-ink-3">
+                          {i + 1} · {blockLabel(b, t('block_untitled'))}
+                        </span>
+                      )}
                       {band && (
                         // Colour is never the only signal: the percentage is visible
                         // text and the band is named for screen readers.

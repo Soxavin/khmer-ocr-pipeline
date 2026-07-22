@@ -28,4 +28,23 @@ function memoryStorage(): Storage {
 beforeEach(() => {
   Object.defineProperty(globalThis, 'localStorage', { value: memoryStorage(), configurable: true, writable: true })
 })
+
+// jsdom implements neither of these, and both are load-bearing in real code: every
+// animation asks matchMedia whether motion is reduced, and linked panes scroll
+// their target into view. Defaults mirror a plain browser (motion allowed).
+if (!window.matchMedia) {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => undefined
+}
 afterEach(cleanup)

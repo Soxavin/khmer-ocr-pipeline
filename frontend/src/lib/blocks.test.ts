@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockLabel, mergedText, orderedBlocks } from './blocks'
+import { blockLabel, mergedText, orderedBlockEntries, orderedBlocks } from './blocks'
 import type { TextBlock } from '../api/types'
 
 const b = (over: Partial<TextBlock> = {}): TextBlock => ({ bbox: [0, 0, 1, 1], ...over })
@@ -26,6 +26,26 @@ describe('orderedBlocks', () => {
   it('falls back to array position when reading_order is absent, keeping order stable', () => {
     const out = orderedBlocks([b({ text: 'a' }), b({ text: 'b' }), b({ text: 'c' })])
     expect(out.map((x) => x.text)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('orderedBlockEntries', () => {
+  it('carries each block’s SOURCE index — the id the page overlay draws by', () => {
+    // Reading order reverses the array, and one block is dropped for having no
+    // text: card position can never stand in for the overlay's rect index.
+    const out = orderedBlockEntries([
+      b({ text: 'second', reading_order: 2 }),
+      b({ text: '' }),
+      b({ text: 'first', reading_order: 1 }),
+    ])
+    expect(out.map((x) => [x.block.text, x.index])).toEqual([
+      ['first', 2],
+      ['second', 0],
+    ])
+  })
+
+  it('is empty when the page has no blocks', () => {
+    expect(orderedBlockEntries(undefined)).toEqual([])
   })
 })
 
