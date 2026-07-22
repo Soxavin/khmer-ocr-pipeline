@@ -2783,6 +2783,67 @@ Khmer is never authored here, only mapped in from verified text.
 
 ---
 
+### 2.77 Confirm popover, grid badge provenance, and a real Find (2026-07-22)
+
+Three reported UI defects. Two of them were not what they looked like, and one of my own
+tests turned out to be worthless — recorded here because the correction is the useful part.
+
+**The grid badge was a disagreement about what a page number means.** Reported as "shows 3
+on a 1-page document". My first instinct was to defend document-page numbering as
+provenance. The user pushed back: *if they picked 3 pages out of 7, those are pages 1, 2, 3
+— that's what they selected.* The deciding evidence settled it against me:
+`overview.pages` is `len(preprocess_result.page_images)`, the **result** count
+([webapp/api.py:294](webapp/api.py#L294)), so `PageViewer` already renders "Page 1 / 3" for
+that run. The grid was the surface deviating from the workspace's own convention, and the
+two panes disagreed with each other. Badge now counts position; `alt` text and the
+include-checkbox keep the true page identity so assistive tech and run scope stay exact.
+
+Underneath sat a real defect the badge change would have *hidden*: `pagesFromSettings`
+never clamped a range's `start` to the document length. Settings persist across uploads, so
+a 1-page document carrying a stale `page_start: 3` gave `start=2`, `end=min(5,1)=1`, and
+`Math.max(1, end - start)` **forced** a phantom index through. `webapp/settings.py`
+`page_indices` had the identical bug, where it meant asking ingest to rasterize a page that
+does not exist. Both clamped, both pinned by tests. Worth stating plainly: relative
+numbering makes this *invisible*, not fixed — the phantom still reached the run scope.
+
+**The popover's "text overflow" was a string-shape problem.** `remove_confirm` interpolated
+the filename mid-sentence, so no amount of `truncate` could bound it without cutting the
+sentence. Split into a bounded `subject` slot (`break-all line-clamp-2`) plus a generic
+consequence line. The Khmer came from splitting the existing verified string at its own
+seam, so nothing was newly authored. The button misalignment was likewise structural, not
+spacing: `btnSmCls` is `h-6` and `dangerBtnCls` is `h-7`. (The brief asked for `h-8` /
+`btnSmCls`, which are contradictory — `h-8` exists only on `primaryBtnCls`. Both are `h-7`
+now, the height the tokens already wanted.)
+
+**Find became a search.** New `lib/search.ts` owns one matching predicate, `cellMatches`,
+called by both the counter and the grid's highlight — two implementations of "does this
+match" is how a counter and its highlights drift apart. Matches are ordered table → row →
+col; stepping wraps; navigation reuses the existing `onFocusCell` triage jump rather than
+building a second scroll path. `Enter` now steps instead of firing the document-wide
+replace: arming a bulk mutation on Enter-while-typing was defensible when the field was
+replace-only, and is the wrong reflex now that it is a live search box.
+
+The highlight is an **inset ring, not a background wash**. Confidence tints and the diff
+tint are persistent trust signals that the analyst is searching *in order to check*; a
+highlight that painted over them would hide the very thing being looked for. Rings compose
+with any background.
+
+**A test of mine was vacuous and is now the opposite.** I justified NFC-normalizing the
+search with a Khmer round-trip test — and it passed trivially, because Khmer combining marks
+all carry combining class 0, so `NFD === NFC` and canonical normalization never reorders
+them. Verified directly rather than trusted. NFC still earns its place on the Latin side, so
+it stays; but the Khmer test was replaced with one that **asserts the limitation**: a query
+typed in a non-canonical mark order does not match. Stored cell text is normalized by
+`utils/khmer_normalize.py` (cluster-aware reordering) which has no TypeScript twin, so this
+gap is real and now visible in the suite instead of papered over by a green check.
+
+Verified: 109 frontend tests (24 new), 823 backend (5 new), `tsc -b` and build clean. The
+find-bar tests were mutation-checked — breaking the wrap and the cursor reset fails four of
+them — after the NFC episode made "it passes" insufficient evidence that a test tests
+anything.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
