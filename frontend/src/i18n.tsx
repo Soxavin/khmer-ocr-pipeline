@@ -643,7 +643,9 @@ const km: Record<Key, string> = {
   auto_resolved_dpi: 'ស្វ័យប្រវត្តិ → {n} DPI',
   auto_resolved_dpi_tip: 'ឯកសារនេះត្រូវបានបង្ហាញក្នុងកម្រិត {n} DPI។',
   block_focus: 'បង្ហាញប្លុកអត្ថបទនេះលើទំព័រ',
-  block_open: 'បង្ហាញប្លុកនេះក្នុងអត្ថបទលើទំព័រ',
+  // "អត្ថបទទំព័រ" verbatim from page_text: a tooltip that points at a panel must
+  // name it exactly as its own heading does, or the two read as different places.
+  block_open: 'បង្ហាញប្លុកនេះក្នុងអត្ថបទទំព័រ',
   delete_all: 'លុបទាំងអស់',
   cancel: 'បោះបង់',
   step_layout: 'កំពុងរកប្លង់ទំព័រ',
