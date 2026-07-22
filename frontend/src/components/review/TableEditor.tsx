@@ -12,6 +12,7 @@ import { Check, Diff, Download, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
+import { cellMatches } from '../../lib/search'
 import { useT } from '../../i18n.tsx'
 import { btnSmCls, menuCls, menuItemCls } from '../../ui'
 
@@ -58,8 +59,12 @@ export function TableEditor(props: {
   onFocus: () => void
   flash: number // increments on every image-side click; 0 = never flashed
   focusCell?: { row: number; col: number; n: number } | null // triage jump target
+  /** Live search term — every matching cell in this table rings. '' = no search. */
+  findQuery?: string
+  /** The one match currently stepped to, when it belongs to THIS table. */
+  activeMatch?: { row: number; col: number } | null
 }) {
-  const { docId, table, focused, onFocus, flash, focusCell } = props
+  const { docId, table, focused, onFocus, flash, focusCell, findQuery = '', activeMatch = null } = props
   const qc = useQueryClient()
   const { t } = useT()
   const gridApi = useRef<GridApi | null>(null)
@@ -108,6 +113,12 @@ export function TableEditor(props: {
       requestAnimationFrame(() => setTimeout(go, 50))
     }
   }, [focusCell])
+
+  // cellClassRules are evaluated on render/refresh, not on prop identity: without
+  // this the rings would lag a keystroke behind the query the analyst is typing.
+  useEffect(() => {
+    gridApi.current?.refreshCells({ force: true })
+  }, [findQuery, activeMatch])
 
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
@@ -204,6 +215,15 @@ export function TableEditor(props: {
             const r = (p.data as Row).__r
             return (table.original_grid[r]?.[c] ?? '') !== (p.value ?? '')
           },
+          // Search is a TRANSIENT overlay on persistent trust signals: it rings the
+          // cell rather than tinting it, so a low-confidence wash or a diff tint
+          // stays visible underneath. Replacing the background would hide exactly
+          // the information the analyst is searching in order to check.
+          'cell-find': (p) => cellMatches(String(p.value ?? ''), findQuery),
+          'cell-find-active': (p) =>
+            activeMatch !== null &&
+            (p.data as Row).__r === activeMatch.row &&
+            c === activeMatch.col,
           // Empty cells are intentional table structure, not OCR errors — never tint them.
           'cell-conf-low': (p) => {
             if (diffOn || !String(p.value ?? '').trim()) return false
@@ -219,7 +239,7 @@ export function TableEditor(props: {
           },
         },
       })),
-    [nCols, diffOn, table],
+    [nCols, diffOn, table, findQuery, activeMatch],
   )
 
   const rows = useMemo(() => toRows(grid), [grid])

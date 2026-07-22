@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Info, Search, Undo2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, Info, Search, Undo2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
@@ -7,7 +7,15 @@ import { TableEditor } from './TableEditor'
 import { PageTextPanel } from './PageTextPanel'
 import { useT } from '../../i18n.tsx'
 import { bandCells, nextInBand, type Band } from '../../lib/confidence'
-import { btnSmCls, chipCls, iconBtnCls, inputCls } from '../../ui'
+import { findMatches } from '../../lib/search'
+import { btnSmCls, chipCls, ICON_SM, iconBtnCls, inputCls } from '../../ui'
+
+// Stepper inside the match cluster — same geometry and states as the page
+// viewer's zoom segment, so the two clusters are visibly one control family.
+const stepBtn =
+  'inline-flex h-6 items-center px-1.5 text-ink-2 transition-colors duration-150 ' +
+  'hover:bg-rail hover:text-ink disabled:opacity-40 disabled:pointer-events-none ' +
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary'
 
 // Triage bands, most-urgent first, with their semantic chip + dot styling.
 const BAND_ORDER: Band[] = ['check', 'skim', 'clean']
@@ -57,6 +65,30 @@ export function TablesPanel(props: {
   }, [showFind])
 
   const [canUndoReplace, setCanUndoReplace] = useState(false)
+
+  // Live search over THIS page's tables — the only cells the panel can scroll to,
+  // so every counted match is reachable. (Replace-all stays document-wide and says
+  // so in its own confirm; the two scopes are deliberately distinct, not conflated.)
+  const matches = useMemo(() => findMatches(page.tables, find), [page.tables, find])
+  const [cursorIdx, setCursorIdx] = useState(0)
+  // A new query, page, or document invalidates the old position — without this the
+  // counter could read "7 / 3" after the match list shrinks under it.
+  useEffect(() => setCursorIdx(0), [find, docId, pageIdx])
+  const stepMatch = useCallback(
+    (dir: 1 | -1) => {
+      if (!matches.length) return
+      // Wraps both ways: cycling is the expected behaviour of a find bar, and
+      // dead-ending at the last match makes the analyst re-type to start over.
+      const next = (cursorIdx + dir + matches.length) % matches.length
+      setCursorIdx(next)
+      const m = matches[next]
+      // Reuses the triage jump: selects the table, flashes it, scrolls the cell
+      // into view and flies the page image to the matching region.
+      onFocusCell(m.table_id, m.row, m.col)
+    },
+    [matches, cursorIdx, onFocusCell],
+  )
+  const activeMatch = matches[cursorIdx] ?? null
 
   // Replace-all is the only bulk mutation and it can touch pages the analyst has
   // not reviewed — so it confirms with a count first and stays undoable after.
@@ -212,7 +244,38 @@ export function TablesPanel(props: {
           <input ref={findRef} className={`${inputCls} khmer-content w-36`}
                  placeholder={t('find_ph')} value={find}
                  onChange={(e) => setFind(e.target.value)}
-                 onKeyDown={(e) => e.key === 'Enter' && doReplace()} />
+                 // Enter steps through matches. It used to fire replace-all — a
+                 // document-wide mutation on Enter-while-typing, now that this is a
+                 // live search field, is the wrong reflex to arm.
+                 onKeyDown={(e) => {
+                   if (e.key !== 'Enter') return
+                   e.preventDefault()
+                   stepMatch(e.shiftKey ? -1 : 1)
+                 }} />
+          {/* Counter + steppers share one bordered track — the same cluster the
+              page viewer's zoom control uses, so the two read as one vocabulary. */}
+          {find.trim() !== '' && (
+            <span className="flex shrink-0 items-center overflow-hidden rounded-md border border-line-strong"
+                  role="group" aria-label={t('find_matches_aria')}>
+              <span
+                className={`inline-flex h-6 min-w-[3.25rem] items-center justify-center px-1.5 text-xs font-medium tabular-nums ${
+                  matches.length ? 'text-ink-2' : 'text-ink-3'
+                }`}
+                aria-live="polite"
+              >
+                {matches.length ? `${cursorIdx + 1} / ${matches.length}` : t('find_none')}
+              </span>
+              <span className="h-4 w-px self-center bg-line" aria-hidden />
+              <button className={stepBtn} disabled={!matches.length} onClick={() => stepMatch(-1)}
+                      aria-label={t('find_prev')} title={t('find_prev')}>
+                <ChevronUp size={ICON_SM} aria-hidden />
+              </button>
+              <button className={stepBtn} disabled={!matches.length} onClick={() => stepMatch(1)}
+                      aria-label={t('find_next')} title={t('find_next')}>
+                <ChevronDown size={ICON_SM} aria-hidden />
+              </button>
+            </span>
+          )}
           <input className={`${inputCls} khmer-content w-36`}
                  placeholder={t('replace_ph')} value={repl}
                  onChange={(e) => setRepl(e.target.value)}
@@ -268,6 +331,8 @@ export function TablesPanel(props: {
               onFocus={() => onSelectTable(t.table_id)}
               flash={flashToken?.tid === t.table_id ? flashToken.n : 0}
               focusCell={focusCell?.tid === t.table_id ? focusCell : null}
+              findQuery={find}
+              activeMatch={activeMatch?.table_id === t.table_id ? activeMatch : null}
             />
           </div>
         ))}

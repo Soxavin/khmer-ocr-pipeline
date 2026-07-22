@@ -95,6 +95,9 @@
   --cell-low-bg: #fdecec;
   --cell-mid-bg: #fffcf0;
   --cell-low-line: #b91c1c;
+  /* Search rings — muted for the crowd, primary for the active hit. */
+  --color-find-ring: oklch(0.72 0.09 255);
+  --color-find-halo: color-mix(in oklab, var(--color-primary) 18%, transparent);
 }
 
 /* ─── Dark theme ────────────────────────────────────────────────────────────
@@ -133,6 +136,8 @@
   --cell-low-bg: oklch(0.3 0.055 25);
   --cell-mid-bg: oklch(0.29 0.045 85);
   --cell-low-line: oklch(0.72 0.15 25);
+  /* Lifted on dark ground: the light-theme ring would sink into the surface. */
+  --color-find-ring: oklch(0.62 0.1 255);
 }
 
 /* Khmer UI language: the chrome face becomes Noto Sans Khmer with extra leading
@@ -213,6 +218,21 @@ body {
   text-underline-offset: 3px;
 }
 .cell-conf-mid { background: var(--cell-mid-bg); }
+
+/* Search hits: an inset RING, never a background. The confidence washes and the
+   diff tint above are persistent trust signals the analyst is searching in order
+   to check — a highlight that painted over them would hide the very thing being
+   looked for. Rings compose with any background; tints would fight. */
+.cell-find {
+  box-shadow: inset 0 0 0 2px var(--color-find-ring);
+}
+/* The one match currently stepped to: full-strength primary plus a soft halo, so
+   it reads as "here" among a page of equally-ringed hits. */
+.cell-find-active {
+  box-shadow:
+    inset 0 0 0 2px var(--color-primary),
+    inset 0 0 0 6px var(--color-find-halo);
+}
 
 /* Flash a table the user jumped to from the page image. */
 @keyframes table-flash {
