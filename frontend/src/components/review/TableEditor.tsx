@@ -75,14 +75,24 @@ export function TableEditor(props: {
   const [justVerified, setJustVerified] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  // New server data (page change, re-run) replaces local state.
+  // New server data replaces local state — but ONLY when it genuinely differs
+  // from what we already hold. Every page refetch (a verify flips one boolean)
+  // hands down a new table identity, and after an edit→verify the refetched grid
+  // even has new CONTENT (the server echoes the saved edit back); an unconditional
+  // reset therefore destroyed the undo stack at the exact moment the analyst
+  // committed trust. Confirmation is not new data.
   useEffect(() => {
+    if (JSON.stringify(grid) === JSON.stringify(table.grid)) return
     setGrid(table.grid)
     setHistory([])
     setRedo([])
-    setEdited(table.edited)
-    setVerified(table.verified)
-  }, [table])
+    // `grid` read from the render that delivered the new table.grid — current by
+    // construction; adding it to deps would re-run the reset on every local edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table.grid])
+  // Verified/edited are server facts with no local history: sync unconditionally.
+  useEffect(() => setVerified(table.verified), [table.verified])
+  useEffect(() => setEdited(table.edited), [table.edited])
 
   // Triage jump: scroll the exact cell into view and focus it.
   useEffect(() => {

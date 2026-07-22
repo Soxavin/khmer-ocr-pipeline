@@ -93,10 +93,14 @@ export function TablesPanel(props: {
   const [size, setSize] = useKhmerSize()
   const [text, setText] = useState(page.corrected_text)
   const [textSaved, setTextSaved] = useState(true)
+  // Keyed on the TEXT, not the page object: any refetch (a verify flips one
+  // boolean, replace-all touches grids) produces a new page identity, and an
+  // object-keyed reset would silently discard the analyst's unsaved draft.
+  // Structural sharing keeps corrected_text's identity until it truly changes.
   useEffect(() => {
     setText(page.corrected_text)
     setTextSaved(true)
-  }, [page])
+  }, [page.corrected_text])
 
   // Grid-cell confidence bands + a per-band jump cursor (§2.70). Clicking a chip
   // cycles focus to the next cell in that band; the counter shows the position.
