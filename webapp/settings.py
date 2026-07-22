@@ -58,6 +58,12 @@ class Settings:
             return [idx]
         if self.page_scope == "range":
             start = max(0, int(self.page_start) - 1)
+            # Settings persist across uploads, so a range can start past THIS
+            # document's end. Without the clamp, max(start + 1, end) below forced a
+            # phantom index through and ingest was asked for a page that does not
+            # exist (the same defect as the frontend's pagesFromSettings).
+            if doc_page_count:
+                start = min(start, doc_page_count - 1)
             end = min(int(self.page_end), doc_page_count) if doc_page_count else int(self.page_end)
             return list(range(start, max(start + 1, end)))
         if self.page_scope == "list" and self.page_list:

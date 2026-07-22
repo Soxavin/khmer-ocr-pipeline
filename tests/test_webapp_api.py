@@ -771,6 +771,21 @@ def test_settings_list_scope():
     assert key != Settings(page_scope="list", page_list=[2, 3]).settings_key("id0")
 
 
+def test_settings_range_scope_never_addresses_a_missing_page():
+    """Settings outlive the document they were set on, so a range can point past
+    this document's end. Every index handed to ingest must be a page that exists —
+    `range(start, max(start + 1, end))` previously forced a phantom index through."""
+    from webapp.settings import Settings
+    # 1-page document carrying a stale 3-5 range: the only real page is 0.
+    assert Settings(page_scope="range", page_start=3, page_end=5).page_indices(1) == [0]
+    # A range running off the end keeps just the pages that exist.
+    assert Settings(page_scope="range", page_start=2, page_end=99).page_indices(3) == [1, 2]
+    # An inverted range still means "the start page", which must itself be real.
+    assert Settings(page_scope="range", page_start=4, page_end=2).page_indices(6) == [3]
+    # Single scope was already clamped — pin it so it stays that way.
+    assert Settings(page_scope="single", page_num=9).page_indices(3) == [2]
+
+
 def test_run_payload_accepts_list_scope():
     from webapp.api import _settings_from
     s = _settings_from({"page_scope": "list", "page_list": [2, 4]})
