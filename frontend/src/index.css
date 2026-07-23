@@ -152,7 +152,11 @@
 /* The workspace owns the viewport: three panes that each scroll internally, and a
    document that never scrolls at all. `overflow: hidden` here removes the document
    scrollport outright, so no stray element can produce a page-level scrollbar —
-   structural, rather than chasing whichever child overflowed this week. */
+   structural, rather than chasing whichever child overflowed this week.
+   NOTE: this stops USER scrolling only. `Element.scrollIntoView()` and `.focus()`
+   still scroll this hidden container programmatically, which is why selection code
+   uses lib/scroll's scrollIntoViewWithin (scoped to a pane) and focus(preventScroll)
+   rather than the DOM defaults. */
 html, body, #root {
   height: 100%;
   overflow: hidden;

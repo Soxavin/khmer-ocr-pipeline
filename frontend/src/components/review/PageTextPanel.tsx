@@ -8,6 +8,7 @@ import { orderedBlockEntries } from '../../lib/blocks'
 import { blockLabel } from '../../lib/blocks'
 import { pairSegments, replaceSegment, segmentRange, splitSegments } from '../../lib/pageText'
 import { copyText } from '../../lib/clipboard'
+import { scrollIntoViewWithin } from '../../lib/scroll'
 import { confBand, type Band } from '../../lib/confidence'
 import { btnSmCls, chipCls, iconBtnCls } from '../../ui'
 
@@ -104,8 +105,9 @@ export function PageTextPanel(props: {
     if (!blockFocus || !open || mode !== 'blocks') return
     const el = cardRefs.current.get(blockFocus.i)
     if (!el) return
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    el.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' })
+    // scrollIntoViewWithin, not el.scrollIntoView: the latter scrolls the document
+    // too (even under overflow:hidden), which jumped the whole page on a box click.
+    scrollIntoViewWithin(el)
   }, [blockFocus, open, mode])
 
   // Edit in Raw: select that segment once the textarea exists. Runs after the mode
@@ -118,7 +120,9 @@ export function PageTextPanel(props: {
     const ta = rawRef.current
     if (!ta) return
     const { start, end } = segmentRange(text, i)
-    ta.focus()
+    // preventScroll: a textarea .focus() otherwise scrolls ancestors (incl. the
+    // document) to reveal the caret; we position the selection ourselves below.
+    ta.focus({ preventScroll: true })
     ta.setSelectionRange(start, end)
     // Put the selection on screen: scroll proportionally to where it sits in the
     // text, since a textarea offers no scrollIntoView for a character range.

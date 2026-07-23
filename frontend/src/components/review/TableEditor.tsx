@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
 import { cellMatches } from '../../lib/search'
+import { scrollIntoViewWithin } from '../../lib/scroll'
 import { useT } from '../../i18n.tsx'
 import { btnSmCls, menuCls, menuItemCls } from '../../ui'
 
@@ -122,8 +123,9 @@ export function TableEditor(props: {
 
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
-      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      wrapRef.current.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' })
+      // scrollIntoViewWithin, not el.scrollIntoView: a table-box click on the image
+      // must reveal the table in its panel without scrolling the whole document.
+      scrollIntoViewWithin(wrapRef.current)
       wrapRef.current.classList.remove('table-flash')
       void wrapRef.current.offsetWidth // restart the animation
       wrapRef.current.classList.add('table-flash')
