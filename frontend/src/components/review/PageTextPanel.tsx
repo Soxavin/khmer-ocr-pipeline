@@ -220,7 +220,13 @@ export function PageTextPanel(props: {
 
   return (
     <details
-      className="rounded-lg border border-line bg-surface p-2 shadow-raised"
+      // `relative` is load-bearing, not cosmetic: the sr-only copy-status span
+      // below is `position:absolute` (Tailwind's sr-only). With no positioned
+      // ancestor its containing block is the INITIAL containing block, so it
+      // escaped this pane's overflow-y:auto and landed ~1500px down the document —
+      // giving html a 547px programmatic scroll range that overflow:hidden hides
+      // but does not remove. Anchoring it here keeps the document unscrollable.
+      className="relative rounded-lg border border-line bg-surface p-2 shadow-raised"
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
     >
