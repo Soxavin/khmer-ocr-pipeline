@@ -1,0 +1,7 @@
+Subject should have read, per the repo's Conventional Commits convention:
+
+    feat(review): link Page-text blocks to the page canvas, both ways
+
+Recorded as a note rather than a reword: this commit is published, and rewording
+it would rewrite every descendant hash — including two commits belonging to a
+parallel session that had uncommitted work in the same paths.
