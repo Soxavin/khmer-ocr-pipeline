@@ -149,8 +149,13 @@
   --text-sm--line-height: 1.8;
 }
 
+/* The workspace owns the viewport: three panes that each scroll internally, and a
+   document that never scrolls at all. `overflow: hidden` here removes the document
+   scrollport outright, so no stray element can produce a page-level scrollbar —
+   structural, rather than chasing whichever child overflowed this week. */
 html, body, #root {
   height: 100%;
+  overflow: hidden;
 }
 body {
   /* Numbers line up everywhere by default — this is a numbers product. */

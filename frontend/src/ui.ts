@@ -7,7 +7,9 @@ const press = 'active:scale-[0.98]'
 
 // --- NEW: Spatial Depth & Layering Primitives ---
 // Gives Claude the vocabulary to create layered panels instead of flat walls
-export const panelCanvasCls = 'bg-canvas p-3 min-h-screen' // Base workspace background
+// (panelCanvasCls removed: it carried min-h-screen, was exported, and was used
+// nowhere. A dead viewport-height token is a loaded gun next to a layout that
+// depends on nothing exceeding the viewport.)
 export const panelMainCls = `bg-surface border border-line-strong/60 rounded-xl shadow-sm ${trans}` // Standard crisp panel
 export const panelFloatingCls = `bg-raised border border-line-strong shadow-overlay rounded-xl backdrop-blur-md ${trans}` // Elevated contextual panel
 
