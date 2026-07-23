@@ -19,7 +19,74 @@ const BAND_STYLE: Record<Band, string> = {
   skim: 'bg-warn-soft text-warn-ink',
   clean: 'bg-ok-soft text-ok-ink',
 }
+// Dot colours ARE the confidence-overlay colours (rose / amber / emerald), read
+// from the same --color-conf-* tokens the page boxes and cell tints use, so the
+// filter track speaks one language with the rest of the confidence system.
+const BAND_DOT: Record<Band, string> = {
+  check: 'var(--color-conf-low)',
+  skim: 'var(--color-conf-mid)',
+  clean: 'var(--color-conf-high)',
+}
 const BANDS: Band[] = ['check', 'skim', 'clean']
+
+// One connected control shell + inner-segment recipe, shared verbatim with the
+// SegmentedToggle so the filter track and the Blocks|Raw toggle are the same object.
+const TRACK_SHELL =
+  'inline-flex w-fit shrink-0 overflow-hidden rounded-md border border-line-strong align-middle'
+const SEGMENT =
+  'inline-flex h-6 items-center gap-1.5 px-2 text-xs font-medium tabular-nums transition-colors ' +
+  'duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ' +
+  'disabled:opacity-40 disabled:pointer-events-none'
+const SEGMENT_IDLE = 'bg-surface text-ink-2 hover:bg-rail'
+
+/** The confidence filter as one connected track: `[ All 13 | ●5 | ●3 | ●5 ]`.
+    Band segments are dot + count only — the word is dropped for density; the band
+    is named by fixed order plus the tooltip/aria-label, and the count keeps colour
+    from being the sole signal. Matches the SegmentedToggle beside it exactly. */
+function FilterTrack(props: {
+  counts: Record<Band, number>
+  filter: Band | null
+  onFilter: (b: Band | null) => void
+  bandLabel: (b: Band) => string
+  allLabel: string
+}) {
+  const { counts, filter, onFilter, bandLabel, allLabel } = props
+  return (
+    <span className={TRACK_SHELL} role="group" aria-label={allLabel}>
+      <button
+        className={`${SEGMENT} ${filter === null ? 'bg-primary-soft text-primary-strong' : SEGMENT_IDLE}`}
+        onClick={() => onFilter(null)}
+        aria-pressed={filter === null}
+      >
+        {allLabel}
+      </button>
+      {BANDS.map((b) => {
+        const active = filter === b
+        return (
+          <span key={b} className="flex">
+            <span className="w-px self-stretch bg-line-strong" aria-hidden />
+            <button
+              className={`${SEGMENT} ${active ? `${BAND_STYLE[b]} ring-1 ring-inset ring-current` : SEGMENT_IDLE}`}
+              onClick={() => onFilter(active ? null : b)}
+              disabled={counts[b] === 0}
+              aria-pressed={active}
+              // Order + tooltip + this name carry the band without the visible word.
+              title={bandLabel(b)}
+              aria-label={bandLabel(b)}
+            >
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: BAND_DOT[b] }}
+                aria-hidden
+              />
+              {counts[b]}
+            </button>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
 
 /** Page text outside the tables — ONE string, two presentations.
  *
@@ -167,16 +234,30 @@ export function PageTextPanel(props: {
         {saved ? '' : t('unsaved_suffix')}
       </summary>
 
+      {/* One row: view toggle + filter track (left), Save + Copy (right). Wraps —
+          never overflows — when the pane is dragged narrow. */}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <SegmentedToggle
-          value={mode}
-          onChange={setMode}
-          label={t('view_text_mode')}
-          options={[
-            ['blocks', t('view_structured')],
-            ['raw', t('view_raw')],
-          ] as const}
-        />
+        <span className="flex flex-wrap items-center gap-2">
+          <SegmentedToggle
+            value={mode}
+            onChange={setMode}
+            label={t('view_text_mode')}
+            options={[
+              ['blocks', t('view_structured')],
+              ['raw', t('view_raw')],
+            ] as const}
+          />
+          {/* Filtering only applies to Blocks, and only when blocks are paired. */}
+          {mode === 'blocks' && aligned && rows.length > 0 && (
+            <FilterTrack
+              counts={counts}
+              filter={filter}
+              onFilter={setFilter}
+              allLabel={t('filter_all', { n: rows.length })}
+              bandLabel={(b) => t(`band_aria_${b}` as const, { n: counts[b] })}
+            />
+          )}
+        </span>
         <span className="flex items-center gap-1">
           {/* Save lives outside the Raw branch: edits now originate in BOTH views,
               so a save button reachable from only one of them would strand them. */}
@@ -198,32 +279,8 @@ export function PageTextPanel(props: {
           <p className="mt-2 text-xs text-ink-3">{t('no_text_blocks')}</p>
         ) : (
           <>
-            {/* Triage pills — same bands, same words as the tables and the overlay.
-                Disabled rather than hidden at zero so the row never reflows. */}
-            {aligned && (
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                <button
-                  className={`${chipCls} ${filter === null ? 'bg-primary-soft text-primary-strong' : 'bg-rail text-ink-2 hover:bg-rail/70'}`}
-                  onClick={() => setFilter(null)}
-                  aria-pressed={filter === null}
-                >
-                  {t('filter_all', { n: rows.length })}
-                </button>
-                {BANDS.map((b) => (
-                  <button
-                    key={b}
-                    className={`${chipCls} ${filter === b ? BAND_STYLE[b] + ' ring-1 ring-current' : 'bg-rail text-ink-2 hover:bg-rail/70'}`}
-                    onClick={() => setFilter(filter === b ? null : b)}
-                    disabled={counts[b] === 0}
-                    aria-pressed={filter === b}
-                    aria-label={t(`band_aria_${b}` as const, { n: counts[b] })}
-                  >
-                    {t(`band_${b}` as const)} {counts[b]}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* The one honest note when the pairing could not be trusted. */}
+            {/* The filter track lives in the header row above; here only the honest
+                note when block metadata could not be paired to the text. */}
             {!aligned && <p className="mt-2 text-2xs text-warn-ink">{t('blocks_unmatched')}</p>}
 
             <ol className="mt-2 space-y-1.5">

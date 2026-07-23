@@ -149,6 +149,22 @@ describe('PageTextPanel confidence filter', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Z' } })
     expect(onTextChange).toHaveBeenCalledWith('first block\n\nZ')
   })
+
+  it('band chips are label-less: a count and accessible name, but no visible band word', () => {
+    // The density contract of the connected track. The band is carried by the
+    // accessible name (order + tooltip too), never by a visible "Check"/"Skim"/
+    // "Clean" — so color is not the sole signal and the row stays quiet.
+    renderPanel()
+    const check = screen.getByRole('button', { name: /need checking/i })
+    expect(check).toHaveTextContent('1') // the count is visible…
+    expect(check).not.toHaveTextContent(/check/i) // …the band word is not.
+  })
+
+  it('dims a zero-count band instead of dropping it, so the track never reflows', () => {
+    // Only Check(1) and Clean(1) exist in the fixture; Skim is empty.
+    renderPanel()
+    expect(screen.getByRole('button', { name: /to skim/i })).toBeDisabled()
+  })
 })
 
 describe('PageTextPanel when segments and blocks disagree', () => {
