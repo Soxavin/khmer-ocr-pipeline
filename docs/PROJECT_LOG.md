@@ -3122,6 +3122,38 @@ parallel session holds 2.79 and 2.81.
 
 ---
 
+### 2.83 Page Text header: one connected filter track (`/impeccable craft`) (2026-07-23)
+
+The confidence filter was four separate rounded-full chips on their own wrapped row — `All 13`,
+`Check 5`, `Skim 3`, `Clean 5` — each repeating a band word. Against the Command Deck brand
+(PRODUCT.md: "polished command density without visual noise") that reads as noise on a second row
+that steals height from the tables. Redesigned as one **connected pill track**,
+`[ All 13 | ●5 | ●3 | ●5 ]`, on the **same row** as the `Blocks | Raw` toggle.
+
+The track reuses the shared `SegmentedToggle` shell verbatim (`overflow-hidden rounded-md border
+border-line-strong`) and its inner-segment recipe, so the two controls are one object visually —
+item 2's token-alignment goal met by *reuse*, not by re-specifying radii/borders/hover. Band
+segments drop the word: a status dot (`--color-conf-low/mid/high` — the same rose/amber/emerald the
+page overlay and cell tints use, so the header speaks one confidence language) plus the count.
+
+The brief said "h-7 row"; the shared toggle is `h-6`. Surfaced the conflict — matching h-6 aligns
+the two tracks pixel-for-pixel with zero change to the shared component (which also drives the
+rendition / Single-Grid / DPI toggles), where h-7 would have resized all of them. User chose h-6.
+
+**The one real tradeoff, made explicit:** dropping the visible band word means color could become
+the sole band signal. Three non-color signals prevent that — fixed check→skim→clean order, the
+count as visible text, and `title`/`aria-label` naming the band. Those names reuse the existing
+**user-verified** `band_aria_*` strings ("5 need checking (under 80%)"), so the tooltip is richer
+than the brief's "5 Check blocks" *and* no Khmer was authored. Because the filter tests already
+query by accessible name, the label-drop couldn't silently break them; a new test pins the
+label-less contract (count visible, band word not) and was mutation-checked.
+
+Whole redesign composes from existing tokens and strings: no `ui.ts` change, no `SegmentedToggle`
+change, no i18n additions. Verified: 143 frontend tests (2 new), `tsc -b` and build clean. In-browser
+visual check deferred — no screenshot tool in this harness; the manual pass in the plan covers it.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
