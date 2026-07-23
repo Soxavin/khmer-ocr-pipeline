@@ -998,6 +998,62 @@ def test_structure_metrics_present_when_no_gt_grid():
     assert m["row_alignment_rate"] == 0.0
 
 
+# --- Column alignment ---
+# The column twin of the §2.42 row-shift problem. Measured on a real run: surya
+# recovered 184/184 GT numeric values on budget p4 yet scored 0.000 numeric
+# accuracy, purely because it emitted 17 columns instead of 16 and shifted every
+# cell one position. Rows are aligned; columns were not.
+
+def test_leading_phantom_column_does_not_destroy_accuracy():
+    gt_grid = [["aa", "bb", "cc"], ["11", "22", "33"], ["44", "55", "66"]]
+    # A spurious FIRST column shifts every real column one to the right.
+    pred_table = _make_table_from_grid(
+        [["", "aa", "bb", "cc"], ["", "11", "22", "33"], ["", "44", "55", "66"]]
+    )
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["cell_accuracy"] == pytest.approx(1.0)
+    assert m["numeric_cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_middle_phantom_column_does_not_destroy_accuracy():
+    gt_grid = [["aa", "bb", "cc"], ["11", "22", "33"], ["44", "55", "66"]]
+    pred_table = _make_table_from_grid(
+        [["aa", "", "bb", "cc"], ["11", "", "22", "33"], ["44", "", "55", "66"]]
+    )
+    m = evaluate_table([pred_table], gt_grid)
+    assert m["cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_dropped_column_counts_as_missing_not_shifted():
+    # Losing a column must still cost accuracy — alignment may not invent matches.
+    gt_grid = [["aa", "bb", "cc"], ["11", "22", "33"], ["44", "55", "66"]]
+    pred_table = _make_table_from_grid([["aa", "cc"], ["11", "33"], ["44", "66"]])
+    m = evaluate_table([pred_table], gt_grid)
+    # 6 of 9 cells recoverable (the "bb"/"22"/"55" column is gone).
+    assert m["cell_accuracy"] == pytest.approx(6 / 9)
+
+
+def test_col_alignment_rate_full_and_partial():
+    gt_grid = [["aa", "bb", "cc"], ["11", "22", "33"]]
+    exact = _make_table_from_grid(gt_grid)
+    assert evaluate_table([exact], gt_grid)["col_alignment_rate"] == 1.0
+    dropped = _make_table_from_grid([["aa", "cc"], ["11", "33"]])
+    assert evaluate_table([dropped], gt_grid)["col_alignment_rate"] == pytest.approx(2 / 3)
+
+
+def test_col_alignment_rate_present_when_no_gt_grid():
+    assert evaluate_table([], None)["col_alignment_rate"] == 0.0
+
+
+def test_column_alignment_does_not_reorder_columns():
+    # Monotonic alignment only. Swapped columns are genuinely wrong and must NOT
+    # be silently "fixed" by matching them out of order.
+    gt_grid = [["aa", "bb"], ["11", "22"], ["44", "55"]]
+    swapped = _make_table_from_grid([["bb", "aa"], ["22", "11"], ["55", "44"]])
+    m = evaluate_table([swapped], gt_grid)
+    assert m["cell_accuracy"] < 1.0
+
+
 def test_structure_metrics_do_not_perturb_existing_metrics():
     gt_grid = [["a", "b"], ["1", "2"]]
     pred_table = _make_table_from_grid(gt_grid)

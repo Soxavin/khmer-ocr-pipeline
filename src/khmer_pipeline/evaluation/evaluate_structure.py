@@ -200,6 +200,14 @@ def _grid_cols(grid: list[list[str]]) -> int:
     return max((len(row) for row in grid), default=0)
 
 
+def _cell(grid: list[list[str]], r: int, c: int) -> str:
+    # Normalized cell text, treating out-of-range positions as empty — ragged
+    # rows are normal in predicted grids.
+    if 0 <= r < len(grid) and 0 <= c < len(grid[r]):
+        return _norm(grid[r][c])
+    return ""
+
+
 # Two rows pair only if they are at least this similar (1 - normalized edit
 # distance over the joined row text). Real OCR rows are garbled but recognisable
 # (§2.42 measured ~0.8 on budget p3); genuinely different rows score far lower.
@@ -283,6 +291,7 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             "grid_shape_match": False,
             "col_count_match": False,
             "row_alignment_rate": 0.0,
+            "col_alignment_rate": 0.0,
         }
 
     tables_found = len(pred_tables)
@@ -323,15 +332,32 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # third caller made a full re-score time out.
     row_pairs = _align_rows(gt_sigs, pred_sigs)
     row_alignment_rate = len(row_pairs) / gt_rows if gt_rows > 0 else 0.0
-    cells_correct = 0
-    for gi, pj in row_pairs:
-        gt_row = gt_stripped[gi]
-        pred_row = pred_stripped[pj]
-        for c in range(gt_cols):
-            gt_val = _norm(gt_row[c]) if c < len(gt_row) else ""
-            pred_val = _norm(pred_row[c]) if c < len(pred_row) else ""
-            if gt_val == pred_val:
-                cells_correct += 1
+
+    # Columns need the same treatment as rows, for the same reason. Measured: an
+    # engine recovered 184/184 GT numeric values on budget p4 yet scored 0.000,
+    # because it emitted one extra column and shifted every cell. A column's
+    # identity is the values down it, so the column signatures are built from the
+    # ALREADY-ALIGNED rows and fed to the same monotonic aligner — which keeps
+    # genuinely swapped columns wrong (monotonicity forbids reordering).
+    # Signatures are digit-FOLDED: alignment answers "which column is this?", not
+    # "is it correct?". An engine that renders ១២៣ where the GT has 123 is still
+    # the same column, and must align so the numeric metric can then judge it on
+    # value. Scoring below uses the raw text, so folding here loses nothing.
+    col_pairs = _align_rows(
+        [tuple(_fold_numeric(_cell(gt_stripped, gi, c)) for gi, _ in row_pairs)
+         for c in range(gt_cols)],
+        [tuple(_fold_numeric(_cell(pred_stripped, pj, c)) for _, pj in row_pairs)
+         for c in range(pred_cols)],
+    ) if row_pairs else []
+    col_alignment_rate = len(col_pairs) / gt_cols if gt_cols > 0 else 0.0
+
+    # Every consumer scores at aligned (row, column) intersections.
+    cell_pairs = [((gi, gc), (pj, pc)) for gi, pj in row_pairs for gc, pc in col_pairs]
+
+    cells_correct = sum(
+        1 for (gi, gc), (pj, pc) in cell_pairs
+        if _cell(gt_stripped, gi, gc) == _cell(pred_stripped, pj, pc)
+    )
     cell_accuracy = cells_correct / cells_total if cells_total > 0 else 0.0
 
     # multiset content recall: non-empty GT cells present in pred multiset
@@ -391,24 +417,21 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # GT row has a predicted counterpart).
     empty_gt_cells_total = 0
     empty_gt_cells_clean = 0
-    for gi, pj in row_pairs:
-        gt_row = gt_stripped[gi]
-        pred_row = pred_stripped[pj]
-        for c in range(gt_cols):
-            gt_raw = gt_row[c] if c < len(gt_row) else ""
-            pred_raw = pred_row[c] if c < len(pred_row) else ""
-            if not _norm(gt_raw):
-                empty_gt_cells_total += 1
-                if not _norm(pred_raw):
-                    empty_gt_cells_clean += 1
-            if _is_khmer_text(gt_raw) and _norm(pred_raw) == _norm(gt_raw):
-                khmer_cells_correct += 1
-            if not _is_numeric(gt_raw):
-                continue
-            if _fold_numeric(pred_raw) == _fold_numeric(gt_raw):
-                numeric_cells_correct += 1
-            if _has_khmer_digit(pred_raw):
-                numeric_cells_khmer_digit_slips += 1
+    for (gi, gc), (pj, pc) in cell_pairs:
+        gt_raw = _cell(gt_stripped, gi, gc)
+        pred_raw = _cell(pred_stripped, pj, pc)
+        if not gt_raw:
+            empty_gt_cells_total += 1
+            if not pred_raw:
+                empty_gt_cells_clean += 1
+        if _is_khmer_text(gt_raw) and pred_raw == gt_raw:
+            khmer_cells_correct += 1
+        if not _is_numeric(gt_raw):
+            continue
+        if _fold_numeric(pred_raw) == _fold_numeric(gt_raw):
+            numeric_cells_correct += 1
+        if _has_khmer_digit(pred_raw):
+            numeric_cells_khmer_digit_slips += 1
     numeric_cell_accuracy = (
         numeric_cells_correct / numeric_cells_total if numeric_cells_total > 0 else 0.0
     )
@@ -443,6 +466,7 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
         "grid_shape_match": grid_shape_match,
         "col_count_match": col_count_match,
         "row_alignment_rate": row_alignment_rate,
+        "col_alignment_rate": col_alignment_rate,
     }
 
 
