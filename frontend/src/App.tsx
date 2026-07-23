@@ -675,22 +675,30 @@ export default function App() {
   }, [stale, runSettings, engine])
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink">
+    // h-full, not h-screen: 100vh excludes a horizontal scrollbar's height, so the
+    // moment anything forces one the root exceeds the remaining space and creates a
+    // VERTICAL scrollbar too. height:100% chained from html tracks the real client
+    // box and has no such failure mode.
+    <div className="flex h-full flex-col overflow-hidden bg-canvas text-ink">
       {/* Top bar: identity left, run controls right — the one primary action lives here. */}
-      <header className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-line-strong/60 bg-surface px-4 shadow-raised">
+      {/* overflow-hidden + min-w-0 on the clusters below: the top bar is the one
+          region outside main's clipping, so a crowded right side (notes + issues +
+          more + the export split button) could otherwise push the layout wider than
+          the viewport and force a horizontal scrollbar. */}
+      <header className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-line-strong/60 bg-surface px-4 shadow-raised">
         {/* The run's pulse — its 250ms tick renders inside this leaf only. */}
         <HeaderProgress status={status.data} />
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary" aria-hidden>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary" aria-hidden>
             <Grid3x3 size={14} className="text-white" strokeWidth={2.25} />
           </span>
-          <h1 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{t('app_title')}</h1>
+          <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">{t('app_title')}</h1>
           <span
             className={`inline-block h-1.5 w-1.5 self-center rounded-full ${meta.data?.backend_ready ? 'bg-ok' : 'bg-line-strong'}`}
             title={meta.data?.backend_ready ? t('backend_ready') : t('backend_off')}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {/* Processing notes: observations, not errors — a quiet chip, not a banner. */}
           {hasResults && warnings.length > 0 && (
             <span className="relative">
