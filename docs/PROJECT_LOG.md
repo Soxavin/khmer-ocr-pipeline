@@ -3037,6 +3037,53 @@ Verified: 132 frontend tests (22 new), 842 backend, `tsc -b` and build clean.
 
 ---
 
+### 2.81 The moc_gas bug, closed — route low-res scans before running Kiri (2026-07-23)
+
+The originally reported symptom — `auto` giving 0.232 cell accuracy on the MoC gas notification
+where plain surya gives ~0.79 — is fixed. §2.75 proved the confidence signal cannot separate the
+two cases (0.222 where Kiri wins, 0.231 where it fails). This routes on a signal that can: the
+document is a **low-resolution scan**, knowable from the PDF before any inference. Commits
+`591f534`, plus the router change.
+
+**A product bug surfaced on the way in.** `resolve_auto_dpi` measured the density of a page's
+*largest embedded image* and treated it as the scan resolution. On ARDB bulletins that image is a
+499×142 masthead **logo** (~50 DPI), so every born-digital document read as a faint scan and "auto"
+returned **300 for all of them** — it never once picked 200. Fixed (`591f534`): a raster counts as
+the page only when it covers ≥50% of the page area, and density is taken across the image's *placed*
+width. After: ARDB/budget → 200 / not-a-scan; moc_gas → 300 / scan. Accuracy cost of the old bug was
+nil (born-digital renders identically at 200/300, verified 0.959/0.979/0.920 both ways on ARDB0) —
+it cost memory and time. `page_is_scanned()` is the reusable output.
+
+**The routing signal is engine × document, not document alone.** Measured on moc_gas, both engines,
+both DPIs:
+
+| engine | 200 DPI | 300 DPI |
+|---|---|---|
+| Surya (VLM) | 0.750 / khmer 0.467 | **0.786 / khmer 0.600** — more pixels help |
+| Kiri (per-cell CTC) | 0.232 / num 0.242 | **0.196 / num 0.182 — worse** |
+
+Kiri downsamples every crop to 48px, so upscaling a 124-DPI scan only adds resample artifacts;
+Surya's VLM genuinely uses the extra pixels. So the two fixes compose: route the scan to Surya,
+where Auto-DPI already picks 300.
+
+**The fix.** `ingest` sets `low_res_scan` on `IngestResult` (propagated to `PreprocessResult`) when a
+page-covering raster is below the density threshold. `run_auto` checks it **first** and routes to
+surya, skipping the per-cell pass entirely — zero added inference, versus the reactive
+run-then-measure it replaces. `getattr` guards older results without the flag onto the existing
+confidence path.
+
+**End-to-end on the real moc_gas PDF through `auto`:** cell **0.232 → 0.786**, numeric **0.242 →
+0.939**, khmer **0.133 → 0.600**, logging `[AutoRouter] pre-flight surya (low-res scan)`. ARDB is
+untouched: `low_res_scan` False, still `[AutoRouter] kept surya_kiri | frac=0.151`. 850 backend
+tests.
+
+**Limitation.** The flag is populated for PDF inputs only — an image upload (PNG/JPG) has no
+recoverable native density, so it takes the confidence path as before. The cell-aspect-ratio signal
+from the plan (a second geometric predictor) was not needed to close this case and is deferred; the
+scan-density signal alone separates all three document classes.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
