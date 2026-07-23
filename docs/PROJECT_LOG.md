@@ -2899,6 +2899,86 @@ the shortened label before being adjusted), `tsc -b` and build clean.
 
 ---
 
+### 2.79 Kiri was never reading the whole cell — plus the metric that was hiding it (2026-07-23)
+
+§2.75 closed off retuning the router's confidence and called for an independent signal. This
+section answers a prior question: **why** is `surya_kiri` catastrophic on moc_gas and excellent on
+ARDB? The answer is not "Khmer is hard" — it is a hard architectural limit, and it is partly
+fixable. Four commits: `9d58ffb`, `2edfb54`, `2f92364`, `31c3ced`.
+
+**Root cause.** Kiri is a fixed-input line recognizer. `ResizeKeepRatioPadNoCrop` scales a cell
+crop to `IMG_H` then calls `crop((0, 0, IMG_W, IMG_H))` — so every pixel past `IMG_W/IMG_H`
+(≈13.3:1) was **silently discarded before the model ran**. Measured on real cell crops extracted
+from the review sheet:
+
+| document | cells over 13.3:1 | native source | Kiri Khmer acc |
+|---|---|---|---|
+| ARDB bulletins | ~0% (median AR 2.2) | born-digital vector | **0.920** |
+| budget TOFE | 6% | born-digital vector | 0.122 |
+| **moc_gas** | **21%** (11/52) | **raster scan, ~124 DPI** | 0.133 |
+
+Direct evidence — Kiri returned a fraction of each long cell while Surya returned all of it:
+73ch→42ch (58%), 81ch→49ch (60%), 111ch→row lost entirely. Surya: 100% on every one. **This is
+why the failure was *confident*** — Kiri was decoding a truncated image faithfully, so nothing in
+its own confidence could reveal the missing text (§2.75's point, now with a mechanism).
+
+**Fix (`31c3ced`).** Over-cap cells are split into fitting chunks, decoded, and rejoined. Cuts
+snap to the widest blank gutter near each boundary — Khmer stacks and connects glyphs, so a blind
+cut corrupts the character in *both* chunks; solid-ink cells fall back to a hard cut, still better
+than discarding. Chunks join the existing batch. A cell's confidence is the **minimum** across its
+pieces (the mean would let one clean chunk mask a garbled one). The cap is read from `CFG`, never
+hardcoded.
+
+| target | before | after |
+|---|---|---|
+| ardb0 / ardb1 | 0.959 / 0.920 | **bit-identical** — path correctly never fires |
+| budget_p3 | khmer 0.122, cell 0.721, CER 0.164 | khmer **0.163**, cell 0.724, CER **0.157** |
+| moc_gas_p1 | CER 0.458 | CER **0.424**; long-cell ratios 0.58/0.60 → **0.89/0.94** |
+
+**The limit, stated plainly.** moc_gas exact-match cell accuracy is **unchanged at 0.232**. The
+recovered characters come back *misrecognised*, because that PDF embeds a **1021×1440 raster
+(~124 DPI)** which we render at 200 DPI — pure upscaling. Cell crops are ~46px tall interpolated
+from ~29px native, and Khmer stacks diacritics above *and* below the baseline. One cell's CER even
+worsened (0.47→0.53): the previously-absent tail is now present and wrong. **No DPI setting can
+add information the scan does not contain.** Truncation was real and is fixed; on low-DPI scans
+the ceiling is the input. That makes native raster DPI a *pre-flight* routing signal — knowable
+from the PDF before any inference, unlike the two options §2.75 proposed (both need a second
+engine run).
+
+**The metric was hiding results (`2f92364`).** `numeric_cell_accuracy` read **0.000** for surya on
+budget p4 while surya had recovered **184/184 GT numeric values** — perfect content recall. Cause:
+17 columns emitted instead of 16, shifting every cell. This is the column twin of the §2.42
+row-shift problem, and the column axis had no aligner. Every engine drifts ±1 column on these
+pages, so a bake-off run before this fix would have ranked engines by column-count luck. Now
+`_align_rows` is reused on the column axis (signatures built from already-aligned rows; monotonic,
+so genuinely swapped columns still score wrong) and scoring happens at aligned intersections.
+Signatures are digit-**folded** — alignment answers "which column is this?", not "is it correct?",
+so `១២៣` vs `123` must still align. Effect: **8 of 54** stored records changed, all on the pages
+that exposed it (surya numeric 0.000→0.955/0.975/1.000/1.000); **§2.73 is bit-identical**, those
+documents reporting `col_alignment_rate 1.000` — they never had column drift, which is why the bug
+hid there.
+
+**Eval-set groundwork.** `9d58ffb` added script-independent structure metrics
+(`row_alignment_rate`, `col_count_match` — a challenger with no Khmer can still own the best grid,
+and every other metric conflates structure with recognition), a GT **circularity guard** (refusing
+to score an engine against GT its own model family drafted — our moc_gas GT is Gemini-drafted, and
+§2.75 documents exactly how confidently wrong that can be), and corrected `STAGE3_*`, which claimed
+surya 0.17.1 with two `vikp/*` checkpoints when we run surya-ocr 0.20.0 (one model,
+`datalab-to/surya-ocr-2`). `2edfb54` harvests **free, model-free** numeric+structure GT from
+born-digital text layers via `find_tables()` — validated at **222/222 numeric cells** against the
+hand-verified budget p3, yielding 5 pages / 711 numeric cells at zero human cost. Khmer is blanked
+there (legacy mojibake), so those files declare `scoring_scope: numeric_and_structure` and the
+harness prints "—" rather than a misleading number; the measured pessimistic bias from losing
+row-alignment anchors (mean −0.03, ranking preserved) is recorded in the harvester docstring.
+
+**Also measured, for the router work ahead.** Cross-engine agreement between `surya` and
+`surya_kiri` gives P(error | engines agree) ≤ 0.6% with 99–100% error recall across all three
+document classes, while disagreement rate separates them 33% (ARDB, Kiri correct) vs 76% (moc_gas,
+Kiri wrong) — where self-confidence managed 0.009. `surya_kiri_vlm` is **disqualified** as a voting
+partner: it shares Kiri, so it agrees on wrong answers (P(error|agree) 11.1% on moc_gas).
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
