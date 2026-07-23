@@ -3189,6 +3189,73 @@ a 1000px viewport.
 
 ---
 
+### 2.85 dots.ocr on Apple Silicon: it runs, and it still loses — bake-off Stage A (2026-07-23)
+
+First challenger evaluated against Surya. **Verdict: not viable on this hardware for these
+documents.** Recorded in detail so nobody re-treads it — the integration problems below each cost
+a debugging cycle and are invisible from the model card.
+
+**Why it looked promising.** dots.ocr emits `[{bbox, category, text}]` with **tables as HTML**,
+which `_parse_html_table_with_spans()` → `_build_table_from_grid()` already consume unchanged
+(`surya.py`). HTML natively carries `colspan`/`rowspan`, which **Surya 2 v0.20 dropped** — the root
+of the §2.40 split-header limitation. So it was the candidate most likely to *complement* Surya
+rather than merely compete.
+
+**Four integration gotchas, all fixable, none documented upstream:**
+1. `AutoProcessor` fails — `DotsVLProcessor` subclasses `Qwen2_5_VLProcessor` with a 3-arg
+   `__init__`, but transformers 4.57 made `video_processor` required. Build the tokenizer and
+   image processor directly instead.
+2. It uses its **own chat format** (`<|user|>…<|endofuser|><|assistant|>`), not Qwen's
+   `<|im_start|>`. The wrong format makes it emit EOS immediately — zero tokens, no error.
+3. Image tokens must be `<|imgpad|>` (id 151665) repeated `grid_thw.prod() / merge_size²` times,
+   wrapped in `<|img|>`/`<|endofimg|>`.
+4. `attn_implementation="sdpa"` on `from_pretrained` reaches only the language model. The
+   **vision tower has its own** `config.vision_config.attn_implementation`, defaulting to
+   `flash_attention_2` → which silently degrades to **eager** on Mac and materialises the full
+   patch-attention matrix (OOM trying to allocate 11.67GB on one table crop).
+
+**Measured (M4 Pro, 24GB, MPS, bfloat16):**
+
+| mode | result |
+|---|---|
+| full page, moc_gas | **197s for 3000 tokens and never reached the table** — the Khmer prose above it consumed the whole budget. Projects to 7–11 min/page. |
+| table crop, moc_gas (14×4) | 80s, complete, 6.1GB |
+| table crop, budget p9 (15×16, born-digital) | **OOM at 12GB** even with sdpa in both towers |
+
+**Scored against verified GT (moc_gas, the one complete run):**
+
+| engine | cell | numeric | Khmer | time |
+|---|---|---|---|---|
+| **surya** | **0.750** | **0.939** | **0.467** | 40s |
+| dots.ocr (table crop) | 0.286 | 0.333 | 0.133 | 80s + layout |
+| surya_kiri | 0.232 | 0.242 | 0.133 | 35s |
+
+Its **structure** is respectable — `col_alignment_rate 1.000`, `row_alignment_rate 0.929`, 13×4
+against a 14×4 GT — which is exactly the split GlotOCR Bench predicts: layout generalises across
+scripts, recognition does not. But **`colspan=0, rowspan=0`**: the span capability that motivated
+the whole attempt did not appear on the one table it completed.
+
+**Why we are not pursuing the MLX fallback** (authorised, and it would likely fix speed and
+memory): the blocker is **accuracy, not runtime**. The moc_gas number is a complete, untruncated,
+properly scored generation — 0.286 against Surya's 0.750. A faster runtime does not make a model
+read Khmer better. Spending the MLX conversion effort could only have improved the axis that was
+not failing.
+
+**Honest limitation of this verdict.** Only *one* document produced a complete scored comparison,
+and it is the 124-DPI scan — the hardest case, where §2.81 showed even Kiri collapses. The
+born-digital run OOM'd before finishing, so dots.ocr was never fairly measured on the page type it
+should suit best. If it is revisited, do it on Colab's T4 (CUDA, flash-attention, where the model
+is designed to run) rather than fighting MPS — that is a notebook round-trip, not a local fix.
+
+**Consequence for the bake-off.** Autoregressive HTML generation costs tokens proportional to
+*cell count*, so it scales badly precisely where our documents are hardest (a 34×16 budget table is
+544 cells). The remaining challengers are re-ordered accordingly: **cloud APIs first** (Gemini free
+tier, Mistral ~$0.001/page — zero local memory, no MPS risk), then **PaddleOCR-VL at 0.96B**, three
+times smaller than dots.ocr's 3.0B and therefore the local model most likely to fit where this one
+did not.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
