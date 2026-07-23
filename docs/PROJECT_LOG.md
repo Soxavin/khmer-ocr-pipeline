@@ -2844,6 +2844,61 @@ anything.
 
 ---
 
+### 2.78 The export arrow was a View Transition, not a CSS one (2026-07-23)
+
+Three UI refinements. The interesting part is that two of the three briefs described the
+wrong mechanism, and following them literally would have made the workspace worse.
+
+**The "arrow artifact" had nothing to do with transitions.** The chevron trigger carried
+`viewTransitionName: 'export-menu'` while closed, and the menu panel carried the same name
+while open. The View Transitions API morphs the element holding a name in the old snapshot
+into the element holding it in the new one — so the browser was being asked to stretch a
+~28px chevron button into a 256px panel, and dutifully distorted the arrow on the way. The
+morph *was* the artifact. No `transition-*` class was involved, and adding one would not
+have touched it. Removed the shared name and the `withViewTransition` wrapper; the panel
+already rose via `.overlay-enter` in `menuCls`, so the morph was never carrying the
+animation, only damaging the icon.
+
+**"Unify on 150ms ease-out" would have made everything slower.** The brief cited the delete
+popover as the standard to copy — but that popover uses `.overlay-enter`, which is **90ms
+expo-out**, not 150ms ease-out. The 150ms/ease-out figure is the `trans` token from
+`ui.ts`, which governs hover and colour *state* changes on controls: a different concern
+from entrance animation. Applying it to entrances meant +67% duration and a softer attack
+on every menu — the opposite of "snappy". Raised it, and the user chose to keep the real
+90ms profile. **Item 3 therefore required no timing change at all**: every floating surface
+already shared `.overlay-enter`, so unifying meant deleting the one outlier (item 2), not
+rewriting the vocabulary. The honest outcome was a smaller diff than the brief implied.
+
+The audit did surface one real stray: the **help modal had no `.overlay-enter`**, animating
+solely through its view transition. That meant ~250ms (the browser default) where the API
+exists, and **no entrance whatsoever** in a browser without it, while every other overlay
+animated. Folded onto the shared class.
+
+**The label fix was a key split, not a string edit.** `remove_doc` served four roles — the
+row button's `aria-label` (`"Remove document: foo.pdf"`), its `title`, the popover title,
+and the popover action label. Only the last needed shortening; editing the shared key would
+have degraded the screen-reader name to `"Remove: foo.pdf"`. The sibling case already
+modelled the answer (`delete_all_title` / `delete_all_action`), so the single-document case
+simply gained the action key it never had. Khmer left unchanged per the brief — it already
+fits.
+
+`whitespace-nowrap` went onto the shared `btnCls` / `btnSmCls` / `dangerBtnCls` /
+`primaryBtnCls` tokens rather than the one button: these are fixed-height controls, a
+wrapped label always breaks out of that height, and fixing it at the token is what stops the
+next narrow container from rediscovering it.
+
+Two small scope calls worth recording: `aria-expanded` was added to the export trigger
+because the other three menu triggers already had it (it was the outlier), but
+`aria-haspopup` was *dropped* after being briefly added — no trigger carries it, and adding
+it to one would trade one inconsistency for another. `withViewTransition` survives at
+exactly one call site, the grid⇄single canvas switch, which is a genuine single-region
+cross-fade rather than a morph between two different elements.
+
+Verified: 110 frontend tests (1 new, 1 updated — the updated one failed correctly against
+the shortened label before being adjusted), `tsc -b` and build clean.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
