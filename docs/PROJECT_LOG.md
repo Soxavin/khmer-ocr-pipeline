@@ -3154,6 +3154,41 @@ visual check deferred — no screenshot tool in this harness; the manual pass in
 
 ---
 
+### 2.84 The viewport was never actually locked — found by opening a browser (2026-07-23)
+
+§2.80 and §2.82 both asserted the document was structurally unscrollable. Driving the running
+app with Playwright disproved it in one measurement: `html` reported `scrollHeight 1497` against
+`clientHeight 950` — a **547px programmatic scroll range** — and `window.scrollTo(0, 5000)` really
+moved the document to 547. `body`, `#root` and the app root all reported range 0, which is why
+reading the code kept producing the wrong conclusion.
+
+The cause was this session's own copy-status live region. Tailwind's `sr-only` is
+`position:absolute` with auto offsets, and it had **no positioned ancestor** — so its containing
+block was the initial containing block, not the pane. Rather than being clipped by the panel's
+`overflow-y:auto`, it took its static position from deep inside the tall, scrolled Page Text
+panel and landed ~1496px down the *document*, extending `html`. `overflow:hidden` hid the
+resulting scrollbar without removing the range, which is exactly the reported symptom: a stray
+`scrollIntoView`/`focus()` shifts the page and the analyst has no way to scroll back.
+
+One word — `relative` on the panel's `<details>` — gives it a local containing block. Verified
+the same way it was found: html range **547 → 0**, and a forced `window.scrollTo(0, 5000)` now
+leaves `scrollY` at **0**.
+
+**The method note is the real lesson.** Three sessions in a row I reported this area as "verified
+by tests + reading" while noting I had no way to see it. Playwright was declared in this repo's
+own `pyproject.toml` the whole time (`eval-extras`) and went uninstalled; the user asked why it
+wasn't being used. One `uv pip install playwright` plus a 93MB headless shell turned an
+unverifiable claim into a measurement, and immediately surfaced a real bug that the 143 passing
+tests could not — because jsdom has no layout, so no unit test can ever catch a containing-block
+escape. Prefer measuring the running app over reasoning about it whenever the claim is geometric.
+
+Also confirmed in-browser for §2.83: the filter track and the Blocks|Raw toggle both render at
+`h=24` on an identical `y`, band chips read `5 / 3 / 5` with no band word, the active band tints
+with its ring, filtering to Check yields exactly 5 cards, and there is no horizontal overflow at
+a 1000px viewport.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
