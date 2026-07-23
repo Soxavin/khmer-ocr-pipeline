@@ -4,6 +4,29 @@ import type { RunSettings } from '../api/types'
     before any run, or the review of a finished analysis. */
 export type CanvasMode = 'pre-upload' | 'post-analysis'
 
+/** The settings that describe WHICH pages to run. They are inherently per-document
+    — a `page_start:2, page_end:4` from a 10-page bulletin is meaningless on a 3-page
+    one — so they must never persist across documents. */
+export const PAGE_SCOPE_KEYS = ['page_scope', 'page_num', 'page_start', 'page_end', 'page_list'] as const
+
+/** The "all pages" reset, applied when a document is opened or switched to. Field
+    values mirror the backend Settings defaults (webapp/settings.py). */
+export const PAGE_SCOPE_DEFAULTS: RunSettings = {
+  page_scope: 'all',
+  page_num: 1,
+  page_start: 1,
+  page_end: 5,
+  page_list: [],
+}
+
+/** `settings` with every page-scope field removed — what gets persisted to
+    localStorage, so a range set on one document never rides onto the next. */
+export function withoutPageScope(settings: RunSettings): RunSettings {
+  const out = { ...settings }
+  for (const k of PAGE_SCOPE_KEYS) delete out[k]
+  return out
+}
+
 /** Grid checkboxes derive from runSettings and encode back to the MINIMAL scope —
     one source of truth, no parallel selection state to desync. */
 export function pagesFromSettings(s: RunSettings, pageCount: number): Set<number> {

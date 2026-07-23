@@ -17,7 +17,7 @@ const TablesPanel = lazy(() => import('./components/review/TablesPanel').then((m
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useFocusTrap } from './hooks/useFocusTrap'
 import { useRunStatus } from './hooks/useRunStatus'
-import { encodePages, gridPages, pagesFromSettings, processedIndex } from './lib/pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex, withoutPageScope, PAGE_SCOPE_DEFAULTS } from './lib/pages'
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
 import { useT } from './i18n.tsx'
@@ -343,7 +343,12 @@ export default function App() {
     onMutate: () => ({ before: new Set(documents.map((d) => d.id)) }),
     onSuccess: (res, _files, ctx) => {
       qc.invalidateQueries({ queryKey: ['documents'] })
-      if (res.documents.length) setActiveId(res.documents[res.documents.length - 1].id)
+      if (res.documents.length) {
+        setActiveId(res.documents[res.documents.length - 1].id)
+        // A freshly uploaded document opens on "all pages", even if a range was set
+        // on the previous one this session (that scope only lived in memory).
+        setRunSettings((s) => ({ ...s, ...PAGE_SCOPE_DEFAULTS }))
+      }
       setError(null)
       const dup = res.documents.find((d) => ctx?.before.has(d.id))
       setDupNotice(dup ? dup.name : null)
@@ -390,7 +395,9 @@ export default function App() {
 
   const rememberSettings = useCallback(() => {
     localStorage.setItem('engine', engine)
-    localStorage.setItem('runSettings', JSON.stringify(runSettings))
+    // Page scope is per-document (a range means nothing on a different document),
+    // so it is stripped before persisting — otherwise it rides onto the next one.
+    localStorage.setItem('runSettings', JSON.stringify(withoutPageScope(runSettings)))
     localStorage.setItem('combineExport', String(combineExport))
   }, [engine, runSettings, combineExport])
 
@@ -432,6 +439,9 @@ export default function App() {
     clearBlockLink()
     setIssueIdx(-1)
     setDismissedIssues(new Set())
+    // Page scope belongs to the document you were on, not the one you're opening —
+    // reset to "all" so a new/switched document never inherits a stale range.
+    setRunSettings((s) => ({ ...s, ...PAGE_SCOPE_DEFAULTS }))
   }, [clearBlockLink])
 
   // "Run all": sequential client-side loop (single GPU — the server 409s overlap).

@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { encodePages, gridPages, pagesFromSettings, processedIndex } from './pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex, withoutPageScope, PAGE_SCOPE_DEFAULTS } from './pages'
+
+describe('withoutPageScope', () => {
+  it('strips every page-scope field, keeping the rest untouched', () => {
+    const s = {
+      page_scope: 'range', page_num: 2, page_start: 2, page_end: 4, page_list: [1, 3],
+      dpi: 300, remove_stamps: true,
+    }
+    expect(withoutPageScope(s)).toEqual({ dpi: 300, remove_stamps: true })
+  })
+
+  it('is a no-op when there is no page scope to strip', () => {
+    expect(withoutPageScope({ dpi: 200 })).toEqual({ dpi: 200 })
+  })
+
+  it('does not mutate its argument', () => {
+    const s = { page_scope: 'range', dpi: 200 }
+    withoutPageScope(s)
+    expect(s.page_scope).toBe('range')
+  })
+
+  it('PAGE_SCOPE_DEFAULTS resets scope to all pages', () => {
+    // The reset applied on a document switch: whatever range was set, the next
+    // document opens on "all".
+    expect(PAGE_SCOPE_DEFAULTS.page_scope).toBe('all')
+    expect(pagesFromSettings(PAGE_SCOPE_DEFAULTS, 7)).toEqual(new Set([0, 1, 2, 3, 4, 5, 6]))
+  })
+})
 
 describe('gridPages (post-analysis filtering)', () => {
   it('pre-upload mode shows every document page', () => {
