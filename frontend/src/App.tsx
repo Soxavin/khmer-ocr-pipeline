@@ -851,7 +851,7 @@ export default function App() {
                     className={`${menuItemCls} flex items-center gap-2`}
                     onClick={() => {
                       setShowMore(false)
-                      withViewTransition(() => setShowHelp(true))
+                      setShowHelp(true)
                     }}
                   >
                     <CircleHelp size={ICON_SM} aria-hidden />
@@ -1154,15 +1154,19 @@ export default function App() {
           <CommandPalette commands={commands} onClose={() => setShowPalette(false)} />
         )}
         {showHelp && (
-          <div className="backdrop-enter fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => withViewTransition(() => setShowHelp(false))}>
+          <div className="backdrop-enter fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowHelp(false)}>
             <div
               ref={helpRef}
               role="dialog"
               aria-modal="true"
               aria-label={t('shortcuts')}
               tabIndex={-1}
-              style={{ viewTransitionName: 'help' }}
-              className="w-96 rounded-xl border border-line bg-raised p-5 shadow-modal focus:outline-none"
+              // overlay-enter, like every other floating surface. It previously
+              // animated ONLY through a view transition, which meant a browser
+              // without that API showed no entrance at all while every other
+              // overlay animated — and where it was supported it ran at the ~250ms
+              // default rather than the workspace's 90ms.
+              className="overlay-enter w-96 rounded-xl border border-line bg-raised p-5 shadow-modal focus:outline-none"
               onClick={(e) => e.stopPropagation()}
             >
               <h2 className="mb-3 text-sm font-semibold text-ink">{t('shortcuts')}</h2>

@@ -16,20 +16,25 @@ export const selectCls =
   `h-7 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink ${trans} ` +
   `hover:border-ink-3 hover:bg-rail/30 ${focus}`
 
+// Buttons are fixed-height controls: a wrapped label breaks out of that height and
+// spills past the border. Set at the token, not per instance, so the next narrow
+// container cannot rediscover the bug — the answer to a long label is shorter copy.
+const nowrap = 'whitespace-nowrap'
+
 export const btnCls =
   `inline-flex h-7 items-center gap-1.5 rounded-md border border-line-strong bg-surface px-2.5 text-sm ` +
-  `font-medium text-ink-2 ${trans} ${press} hover:bg-rail hover:text-ink hover:border-ink-3 ` +
+  `font-medium text-ink-2 ${nowrap} ${trans} ${press} hover:bg-rail hover:text-ink hover:border-ink-3 ` +
   `disabled:opacity-40 disabled:pointer-events-none ${focus}`
 
 export const btnSmCls =
   `inline-flex h-6 items-center gap-1 rounded-md border border-line-strong bg-surface px-1.5 text-xs ` +
-  `font-medium text-ink-2 ${trans} ${press} hover:bg-rail hover:text-ink ` +
+  `font-medium text-ink-2 ${nowrap} ${trans} ${press} hover:bg-rail hover:text-ink ` +
   `disabled:opacity-40 disabled:pointer-events-none ${focus}`
 
 // Modernized primary button with subtle depth instead of a flat fill
 export const primaryBtnCls =
   `inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-semibold text-white ` +
-  `shadow-md shadow-primary/10 ${trans} ${press} hover:bg-primary-strong hover:shadow-lg hover:shadow-primary/15 ` +
+  `${nowrap} shadow-md shadow-primary/10 ${trans} ${press} hover:bg-primary-strong hover:shadow-lg hover:shadow-primary/15 ` +
   `disabled:cursor-default disabled:opacity-50 ${focus}`
 
 export const iconBtnCls =
@@ -38,7 +43,7 @@ export const iconBtnCls =
 
 export const dangerBtnCls =
   `inline-flex h-7 items-center gap-1.5 rounded-md border border-danger/40 bg-surface px-2.5 text-sm ` +
-  `font-medium text-danger-ink ${trans} ${press} hover:bg-danger-soft hover:border-danger ` +
+  `font-medium text-danger-ink ${nowrap} ${trans} ${press} hover:bg-danger-soft hover:border-danger ` +
   `disabled:opacity-40 disabled:pointer-events-none ${focus}`
 
 export const chipCls =

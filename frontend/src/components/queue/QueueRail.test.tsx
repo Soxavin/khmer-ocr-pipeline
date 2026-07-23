@@ -98,10 +98,19 @@ describe('QueueRail clear-all guard', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(props.onRemove).not.toHaveBeenCalled()
 
-    // Exact match: the trigger's own label is "Remove document: a.pdf".
-    await user.click(screen.getByRole('button', { name: /^remove document$/i }))
+    // The action button is the short verb — it has the popover's title and body
+    // for context, so the noun would only make it wrap out of its border.
+    await user.click(screen.getByRole('button', { name: /^remove$/i }))
     expect(props.onRemove).toHaveBeenCalledWith('a')
     expect(props.onRemove).toHaveBeenCalledTimes(1)
+  })
+
+  it('shortening the action button does not strip the noun from the row control', () => {
+    // The row's trash icon has no surrounding context, so its accessible name must
+    // still say WHAT is being removed. These two labels are deliberately different
+    // strings; collapsing them to one key would silently degrade this to "Remove".
+    renderRail()
+    expect(screen.getByRole('button', { name: 'Remove document: a.pdf' })).toBeInTheDocument()
   })
 
   it('keeps the remove control reachable (not display:none at rest)', () => {

@@ -3,7 +3,7 @@ import { ChevronDown, Download, FileUp, Play, RotateCw, ShieldCheck, Square } fr
 import { api } from '../../api/client'
 import type { RunStatus } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
-import { ICON, btnCls, dangerBtnCls, menuCls, menuItemCls, primaryBtnCls, withViewTransition } from '../../ui'
+import { ICON, btnCls, dangerBtnCls, menuCls, menuItemCls, primaryBtnCls } from '../../ui'
 
 // Server stage labels (webapp/runner.py emits English), mapped to display keys.
 const STAGES: [string, Key][] = [
@@ -134,10 +134,20 @@ export function RunControls(props: {
               <ShieldCheck size={13} aria-hidden className="opacity-90" />
             )}
           </a>
+          {/* The trigger and the panel deliberately share NO viewTransitionName.
+              They used to: the button carried 'export-menu' while closed and the
+              panel carried it while open, so the View Transitions API was asked to
+              morph a 28px chevron into a 256px panel — and stretched the arrow on
+              the way. The panel already rises via .overlay-enter in menuCls, which
+              is the entrance every other floating surface uses, so the morph was
+              never carrying the animation, only distorting the icon. */}
           <button
             className="inline-flex items-center rounded-md rounded-l-none border-l border-primary-strong bg-primary px-1.5 text-white transition-colors duration-150 hover:bg-primary-strong focus-visible:outline-2 focus-visible:outline-primary"
-            style={{ viewTransitionName: exportMenu ? undefined : 'export-menu' }}
-            onClick={() => withViewTransition(() => setExportMenu((m) => !m))}
+            onClick={() => setExportMenu((m) => !m)}
+            // The other three menu triggers already carry aria-expanded; this one
+            // was the outlier. (None carries aria-haspopup — adding it here alone
+            // would just trade one inconsistency for another.)
+            aria-expanded={exportMenu}
             aria-label={t('other_formats_aria')}
             title={t('other_formats')}
           >
@@ -145,8 +155,8 @@ export function RunControls(props: {
           </button>
           {exportMenu && docId && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => withViewTransition(() => setExportMenu(false))} />
-              <div className={`${menuCls} absolute right-0 top-full z-50 mt-1 w-64`} style={{ viewTransitionName: "export-menu" }}>
+              <div className="fixed inset-0 z-40" onClick={() => setExportMenu(false)} />
+              <div className={`${menuCls} absolute right-0 top-full z-50 mt-1 w-64`}>
                 {/* Joining continuation tables lives HERE — it is a shape-of-the-export
                     decision, so it never has to compromise page-linked review. */}
                 {multiPage && (

@@ -249,6 +249,11 @@ body {
   from { opacity: 0; transform: translateY(4px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* THE entrance for every floating surface — menus, popovers, the command palette,
+   the help modal. One class, one timing, no per-component durations: 90ms expo-out
+   with a 0.98 scale reads as "appeared" rather than "flew in", which is what a
+   control anchored to its trigger should do. If a new overlay needs an entrance, it
+   uses this; a bespoke duration is how a motion vocabulary stops being one. */
 .overlay-enter {
   animation: overlay-in 90ms cubic-bezier(0.19, 1, 0.22, 1);
 }

@@ -290,7 +290,7 @@ export const QueueRail = memo(function QueueRail(props: {
               : t('remove_confirm')
           }
           subject={confirm.kind === 'doc' ? confirm.name : undefined}
-          actionLabel={confirm.kind === 'all' ? t('delete_all_action') : t('remove_doc')}
+          actionLabel={confirm.kind === 'all' ? t('delete_all_action') : t('remove_action')}
           cancelLabel={t('cancel')}
           anchor={confirm.anchor}
           onConfirm={() => (confirm.kind === 'all' ? onRemoveAll() : onRemove(confirm.id))}

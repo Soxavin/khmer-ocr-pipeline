@@ -113,6 +113,11 @@ const en = {
   status_error: 'error',
   verified_count: '{a}/{b} verified',
   remove_doc: 'Remove document',
+  // The popover's ACTION button, distinct from remove_doc (which names the row
+  // button for screen readers and titles the popover). Same split delete_all_title
+  // / delete_all_action already uses: a verb fits the button, the noun belongs to
+  // the label that has to stand alone.
+  remove_action: 'Remove',
   // Split from the old one-sentence form so the filename gets its own bounded
   // slot: interpolated mid-sentence, a long name could only overflow the card.
   remove_confirm: 'Its results and any edits will be discarded.',
@@ -474,6 +479,8 @@ const km: Record<Key, string> = {
   status_error: 'បញ្ហា',
   verified_count: 'បានផ្ទៀងផ្ទាត់ {a}/{b}',
   remove_doc: 'លុបឯកសារ',
+  // Unchanged wording: the Khmer already fits the button on one line.
+  remove_action: 'លុបឯកសារ',
   // Split from the verified one-sentence form at its own seam — this is that
   // string's second clause verbatim, so no new Khmer is authored here.
   remove_confirm: 'លទ្ធផល និងការកែប្រែទាំងអស់នឹងបាត់បង់។',
