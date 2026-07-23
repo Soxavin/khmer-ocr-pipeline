@@ -3191,9 +3191,10 @@ a 1000px viewport.
 
 ### 2.85 dots.ocr on Apple Silicon: it runs, and it still loses — bake-off Stage A (2026-07-23)
 
-First challenger evaluated against Surya. **Verdict: not viable on this hardware for these
-documents.** Recorded in detail so nobody re-treads it — the integration problems below each cost
-a debugging cycle and are invisible from the model card.
+First challenger evaluated against Surya. **Verdict: not proven for us — and, on reflection, not
+fairly tested either.** Our one complete score was on the hardest possible document, on MPS, in an
+off-label mode; the page it should ace OOM'd first. See `docs/ENGINE_EVALUATION.md §6` for the
+fair-test caveats; the reusable engineering findings are below so nobody re-treads them.
 
 **Why it looked promising.** dots.ocr emits `[{bbox, category, text}]` with **tables as HTML**,
 which `_parse_html_table_with_spans()` → `_build_table_from_grid()` already consume unchanged
@@ -3232,20 +3233,22 @@ rather than merely compete.
 
 Its **structure** is respectable — `col_alignment_rate 1.000`, `row_alignment_rate 0.929`, 13×4
 against a 14×4 GT — which is exactly the split GlotOCR Bench predicts: layout generalises across
-scripts, recognition does not. But **`colspan=0, rowspan=0`**: the span capability that motivated
-the whole attempt did not appear on the one table it completed.
+scripts, recognition does not. And note it **beat surya_kiri** (0.286 vs 0.232) on the very
+document type Kiri specialises in failing. But **`colspan=0, rowspan=0`**: the span capability that
+motivated the whole attempt did not appear on the one table it completed.
 
-**Why we are not pursuing the MLX fallback** (authorised, and it would likely fix speed and
-memory): the blocker is **accuracy, not runtime**. The moc_gas number is a complete, untruncated,
-properly scored generation — 0.286 against Surya's 0.750. A faster runtime does not make a model
-read Khmer better. Spending the MLX conversion effort could only have improved the axis that was
-not failing.
+**The verdict is a lower bound, not a ceiling.** That 0.286 is the 124-DPI scan — document-limited,
+the same ceiling that put Kiri at 0.13. dots.ocr's own benchmarks (which look excellent) measure
+broad document parsing, not Khmer; the born-digital page where it should genuinely compete OOM'd
+before scoring; and MPS carries a documented correctness risk. "It loses" would overstate one
+adverse data point. The honest claim is: **not a drop-in Khmer win (nothing is), and its
+complement value on structure/spans is untested fairly.** A fair test is Colab T4, not MPS.
 
-**Honest limitation of this verdict.** Only *one* document produced a complete scored comparison,
-and it is the 124-DPI scan — the hardest case, where §2.81 showed even Kiri collapses. The
-born-digital run OOM'd before finishing, so dots.ocr was never fairly measured on the page type it
-should suit best. If it is revisited, do it on Colab's T4 (CUDA, flash-attention, where the model
-is designed to run) rather than fighting MPS — that is a notebook round-trip, not a local fix.
+**Why we are not pursuing the MLX fallback here** (authorised, and it would likely fix speed and
+memory): MLX addresses runtime, but the open question is **accuracy on born-digital pages**, which
+needs a correct-and-complete run, not a faster one. The right venue for that is Colab's T4 (CUDA,
+flash-attention, full resolution, full-page mode) — where the model is designed to run and where
+MPS correctness risk is removed. That is a notebook round-trip, deferred, not a local fight.
 
 **Consequence for the bake-off.** Autoregressive HTML generation costs tokens proportional to
 *cell count*, so it scales badly precisely where our documents are hardest (a 34×16 budget table is
