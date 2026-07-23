@@ -137,8 +137,12 @@ def _ingest_pdf(data: bytes, source_name: str, dpi: int,
             )
         mat = fitz.Matrix(dpi / 72, dpi / 72)
         images: list[np.ndarray] = []
+        low_res_scan = False
         for i in indices:
             page = doc.load_page(i)
+            density = _page_native_density(page)  # None unless a page-covering scan
+            if density is not None and density < _AUTO_DPI_DENSITY_THRESHOLD:
+                low_res_scan = True
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
             arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
             images.append(arr.copy())
@@ -147,6 +151,7 @@ def _ingest_pdf(data: bytes, source_name: str, dpi: int,
         page_images=images,
         dpi=dpi,
         page_count=len(images),
+        low_res_scan=low_res_scan,
     )
 
 

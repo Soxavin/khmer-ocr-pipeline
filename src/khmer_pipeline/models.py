@@ -72,6 +72,12 @@ class IngestResult:
     page_images: list[np.ndarray]       # RGB uint8, shape (H, W, 3), one per page
     dpi: int                            # 0 means native image resolution (image inputs)
     page_count: int
+    # True when the source is a low-resolution raster scan (a page-covering image
+    # below the per-cell recognition density). Read by the auto engine to route
+    # such docs to Surya's VLM rather than a per-cell recognizer that cannot
+    # resolve Khmer diacritics at that density. False for born-digital PDFs; also
+    # False (unknown) for image inputs, whose native density is unrecoverable.
+    low_res_scan: bool = False
 
 
 @dataclass
@@ -86,6 +92,8 @@ class PreprocessResult:
     # photometric changes. None when unavailable (older callers / benchmark
     # harness) — engines fall back to page_images.
     recognition_page_images: list[np.ndarray] | None = None
+    # Propagated from IngestResult.low_res_scan (see there); read by the auto engine.
+    low_res_scan: bool = False
 
 
 @dataclass

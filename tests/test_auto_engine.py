@@ -27,10 +27,60 @@ def _result(confs: list[float], source: str = "doc.pdf") -> SuryaResult:
     return SuryaResult(source_name=source, pages=[page])
 
 
-def _preprocess_stub():
-    # auto_engine never inspects the PreprocessResult itself (it delegates), so a
-    # bare object suffices as the argument.
-    return object()
+class _PreStub:
+    """Minimal stand-in for PreprocessResult carrying only what the router reads."""
+    def __init__(self, low_res_scan: bool = False):
+        self.low_res_scan = low_res_scan
+
+
+def _preprocess_stub(low_res_scan: bool = False):
+    return _PreStub(low_res_scan=low_res_scan)
+
+
+# --- pre-flight routing: low-res scans go straight to Surya ---
+# §2.75 proved Kiri's self-confidence cannot detect a low-res scan (frac 0.222
+# where it wins vs 0.231 where it fails — 0.009 apart). But the scan is knowable
+# from the source BEFORE running anything, so the router shortcuts on it: skip
+# Kiri entirely, run Surya, at zero extra inference.
+
+def test_low_res_scan_routes_straight_to_surya_without_running_kiri():
+    surya = _result([0.99] * 10)
+    with patch.object(ae, "run_surya_kiri") as rk, \
+         patch.object(ae, "run_surya", return_value=surya) as rs:
+        out = ae.run_auto(_preprocess_stub(low_res_scan=True))
+    assert out is surya
+    rk.assert_not_called()   # the whole point: no wasted per-cell pass
+    rs.assert_called_once()
+
+
+def test_low_res_scan_decision_is_machine_readable():
+    surya = _result([0.99] * 10)
+    with patch.object(ae, "run_surya_kiri"), \
+         patch.object(ae, "run_surya", return_value=surya):
+        out = ae.run_auto(_preprocess_stub(low_res_scan=True))
+    joined = " ".join(out.warnings)
+    assert "[AutoRouter] pre-flight surya (low-res scan)" in joined
+
+
+def test_non_scan_still_runs_the_confidence_path():
+    # A born-digital doc (low_res_scan False) must reach the existing Kiri path.
+    kiri = _result([0.99] * 10)
+    with patch.object(ae, "run_surya_kiri", return_value=kiri) as rk, \
+         patch.object(ae, "run_surya") as rs:
+        out = ae.run_auto(_preprocess_stub(low_res_scan=False))
+    assert out is kiri
+    rk.assert_called_once()
+    rs.assert_not_called()
+
+
+def test_router_tolerates_result_without_the_flag():
+    # Older PreprocessResults / bare stubs lacking low_res_scan must not crash —
+    # absence means "unknown", i.e. take the confidence path.
+    kiri = _result([0.99] * 10)
+    with patch.object(ae, "run_surya_kiri", return_value=kiri), \
+         patch.object(ae, "run_surya"):
+        out = ae.run_auto(object())
+    assert out is kiri
 
 
 # --- routing behaviour ---

@@ -52,6 +52,7 @@ def preprocess(result: IngestResult, config: PreprocessConfig | None = None) -> 
         dpi=result.dpi,
         page_count=result.page_count,
         recognition_page_images=recognition_page_images,
+        low_res_scan=result.low_res_scan,
     )
 
 

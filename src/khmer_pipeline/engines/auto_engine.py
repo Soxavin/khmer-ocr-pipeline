@@ -62,12 +62,29 @@ def run_auto(
     on_page: Optional[Callable[[int, int], None]] = None,
     on_step: Optional[Callable[[str], None]] = None,
 ) -> SuryaResult:
-    """Route a document to surya_kiri or surya by surya_kiri's own confidence.
+    """Route a document to surya_kiri or surya.
 
-    Runs surya_kiri; if its low-confidence cell fraction exceeds
-    ``_FALLBACK_LOW_CONF_FRACTION`` the document is re-run with surya and that
-    result returned. Either way a machine-readable ``[AutoRouter] …`` note is
-    appended to ``warnings`` recording the decision and the measured fraction."""
+    Two-stage router. First a PRE-FLIGHT check on the source geometry: a low-
+    resolution raster scan goes straight to surya without running surya_kiri at
+    all. §2.75 proved Kiri's per-cell confidence cannot detect this case — it
+    reports 0.222 low-conf on the ARDB page it wins and 0.231 on the moc_gas scan
+    it destroys, 0.009 apart — but the scan is knowable from the PDF before any
+    inference (see ingest.page_is_scanned). So it is caught for free rather than
+    run-then-measured.
+
+    Otherwise the reactive path: run surya_kiri; if its low-confidence cell
+    fraction exceeds ``_FALLBACK_LOW_CONF_FRACTION`` re-run with surya. Either way
+    a machine-readable ``[AutoRouter] …`` note records the decision."""
+    # Pre-flight: bypass the per-cell recognizer on a low-res scan. getattr keeps
+    # older PreprocessResults (no flag) on the reactive path — absence = unknown.
+    if getattr(result, "low_res_scan", False):
+        surya = run_surya(result, on_page=on_page, on_step=on_step)
+        surya.warnings.append(
+            "[AutoRouter] pre-flight surya (low-res scan) | "
+            "per-cell recognition unreliable below the scan-density threshold"
+        )
+        return surya
+
     kiri = run_surya_kiri(result, on_page=on_page, on_step=on_step)
     frac = _low_conf_fraction(kiri)
     cutoff = _FALLBACK_LOW_CONF_FRACTION
