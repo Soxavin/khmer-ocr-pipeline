@@ -113,6 +113,55 @@ metrics (no paid AI judge). Tools: `evaluation/run_benchmark.py` (runs OCR over 
 > For the exact **formulas** and the *how/why* of each metric (plus the NFC / title-strip / row-alignment
 > steps applied before scoring), see [`eval/README.md` §5.1](../eval/README.md#51-how-each-metric-is-computed--and-why-with-formulas).
 
+### Confidence ≠ accuracy — what the % badges in the UI mean
+
+Every metric above is measured **against hand-verified ground truth**: it tells you how good
+the system *is*. The percentages in the workspace (the Page-text block badges, the coloured
+boxes on the page image, the cell tints) are a different kind of number entirely — they are
+the **model's own self-report**, produced at run time, with no ground truth anywhere in
+sight. They tell you where to *look*, not how good the answer is.
+
+**Where the number comes from.** For a Page-text block it is Surya's `mean_token_prob`: the
+model generates the block's text one token at a time, assigning each a probability; the badge
+is the **arithmetic mean of those probabilities**. So "67%" reads as *"averaged over the
+pieces of this block, the model gave about 0.67 probability to the piece it chose."*
+
+**What it therefore cannot tell you.** It measures how *unsurprised the model was by its own
+output* — not whether that output matches the page. A model can be fluently, confidently
+wrong, and Khmer is under-represented in Surya's training data, so there is no reason to
+assume these numbers are well calibrated for our documents. Treat a high score as "no
+internal red flag", never as "verified". This is precisely why the review loop exists and why
+export never silently trusts an unverified table.
+
+**They are not reproducible.** Surya is non-deterministic on identical input (§2.73), so
+re-running the same page shifts these percentages. Do not quote a specific block's confidence
+as a finding in the report; quote the evaluation metrics above instead, which are computed
+deterministically against fixed GT.
+
+**Bands.** The workspace buckets every confidence into one vocabulary — **Check < 80% ·
+Skim 80–95% · Clean ≥ 95%** (`frontend/src/lib/confidence.ts`, thresholds calibrated in
+§2.33). The same three words are used for text blocks and for table cells.
+
+**Which engine produced it — the answer is almost always "Surya".**
+
+| Engine | Page-text block confidence |
+|---|---|
+| `surya` | Surya's `mean_token_prob` |
+| `surya_kiri` | **the same number** — it calls `run_surya(skip_tables=True)` for the text layer and reuses those blocks untouched |
+| `auto` | routes between the two above, so Surya's either way |
+| `surya_kiri_vlm` | same Surya base; Kiri confidence appears only on re-read *table cells* |
+| `tesseract` | different source — mean of Tesseract's per-word `conf`, grouped into lines |
+
+Kiri never reads the non-table text layer, so it never produces a text-block confidence.
+**Switching between `auto`, `surya` and `surya_kiri` does not change what the Page-text
+percentages mean** — only the table cells change hands.
+
+> ⚠️ **Text-block and table-cell percentages are not comparable.** A block's score comes from
+> Surya's average token probability; a cell's comes from Kiri's CTC recognizer. Two different
+> models, two different calibrations, one shared set of colour bands. The shared vocabulary is
+> deliberate (an analyst should learn one scale, not two), but a 90% cell and a 90% block are
+> not the same claim.
+
 ---
 
 ## 6. Architecture & workflow concepts

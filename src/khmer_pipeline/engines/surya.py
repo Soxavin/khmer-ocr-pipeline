@@ -343,6 +343,12 @@ def _process_page(
             _step("text")
             _log(f"Page {page_index}: OCR recognition...")
             t0 = time.perf_counter()
+            # Passing layout_results forces Surya's BLOCK mode (it computes
+            # `full_page = layout_results is None`). That is load-bearing for the
+            # confidence numbers, not just for layout: in full-page mode Surya
+            # computes ONE mean_token_prob for the whole page and copies it onto
+            # every block, so the UI's per-block badges would all show the same
+            # value while still looking per-block. Keep layout_results non-None.
             page_ocr = rec_pred([pil_img], layout_results=[layout_result])[0]
             _log(f"Page {page_index}: OCR done in {time.perf_counter()-t0:.1f}s → {len(page_ocr.blocks)} blocks")
         except Exception as e:

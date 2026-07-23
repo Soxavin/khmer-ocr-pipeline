@@ -116,7 +116,10 @@ linking (`components/viewer/PageViewer.tsx`), and AG Grid table editing with
 undo/redo, row context menu, diff view, ✓ verify, and per-table CSV
 (`components/review/`). One morphing primary action (Upload → Run → Export);
 Issues (N) triage panel jumps to low-confidence cells (`n`/`p`); Ctrl-F
-find/replace; settings drawer; `?` shortcuts overlay. Server state lives in
+find/replace; settings drawer; `?` shortcuts overlay. The confidence percentages
+these surfaces show are the recognizer's own self-report, NOT an accuracy measure,
+and text blocks and table cells derive them from different models — see
+`docs/GLOSSARY.md` §5 "Confidence ≠ accuracy" before treating one as evidence. Server state lives in
 `webapp/registry.py` (process-global `Document` dict + a global `run_lock` —
 one GPU, concurrent runs get 409), so the React app is **refresh-safe**:
 reloading the tab keeps queue/results/edits; ■ Stop is the cancel path (page-
