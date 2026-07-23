@@ -8,6 +8,7 @@ import { HeaderProgress } from './components/run/HeaderProgress'
 import { RunControls } from './components/run/RunControls'
 import { SettingsDrawer } from './components/run/SettingsDrawer'
 import { CommandPalette, type Command } from './components/CommandPalette'
+import { AnchoredMenu } from './components/AnchoredMenu'
 import { GridThumb, PageGrid, ViewToggle } from './components/viewer/PageGrid'
 import { PageViewer } from './components/viewer/PageViewer'
 // AG-Grid (~1 MB) lives entirely inside TablesPanel and is only ever rendered
@@ -21,7 +22,7 @@ import { encodePages, gridPages, pagesFromSettings, processedIndex, withoutPageS
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
 import { useT } from './i18n.tsx'
-import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
+import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
 
 type ThemePref = 'light' | 'dark' | 'system'
 
@@ -148,6 +149,8 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
   const [showMore, setShowMore] = useState(false)
+  const notesAnchor = useRef<HTMLSpanElement>(null)
+  const moreAnchor = useRef<HTMLSpanElement>(null)
   const [showPalette, setShowPalette] = useState(false)
   const [issueIdx, setIssueIdx] = useState(-1)
   const [canvasView, setCanvasView] = useState<'single' | 'grid'>('single')
@@ -691,14 +694,16 @@ export default function App() {
     // box and has no such failure mode.
     <div className="flex h-full flex-col overflow-hidden bg-canvas text-ink">
       {/* Top bar: identity left, run controls right — the one primary action lives here. */}
-      {/* overflow-hidden + min-w-0 on the clusters below: the top bar is the one
-          region outside main's clipping, so a crowded right side (notes + issues +
-          more + the export split button) could otherwise push the layout wider than
-          the viewport and force a horizontal scrollbar. */}
-      <header className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-line-strong/60 bg-surface px-4 shadow-raised">
+      {/* Clipping is scoped to the title cluster below, NOT the header: the header
+          used to carry overflow-hidden as a horizontal-scrollbar guard, but that
+          also clipped away every dropdown hanging beneath it (§2.84). The title is
+          the only compressible thing on this row — the right cluster is shrink-0 —
+          so truncating it there is what actually prevents the overflow, and the
+          menus (now AnchoredMenu, position:fixed) clear the header freely. */}
+      <header className="relative z-30 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line-strong/60 bg-surface px-4 shadow-raised">
         {/* The run's pulse — its 250ms tick renders inside this leaf only. */}
         <HeaderProgress status={status.data} />
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5 overflow-hidden">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary" aria-hidden>
             <Grid3x3 size={14} className="text-white" strokeWidth={2.25} />
           </span>
@@ -711,7 +716,7 @@ export default function App() {
         <div className="flex shrink-0 items-center gap-2">
           {/* Processing notes: observations, not errors — a quiet chip, not a banner. */}
           {hasResults && warnings.length > 0 && (
-            <span className="relative">
+            <span ref={notesAnchor} className="relative">
               <button
                 className={`${chipCls} bg-warn-soft text-warn-ink hover:bg-warn-soft/70`}
                 onClick={() => setShowNotes((n) => !n)}
@@ -722,9 +727,7 @@ export default function App() {
                 {t('notes', { n: warnings.length })}
               </button>
               {showNotes && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowNotes(false)} />
-                  <div className={`${menuCls} absolute right-0 top-full z-50 mt-1 w-96 p-3`}>
+                <AnchoredMenu anchorRef={notesAnchor} onClose={() => setShowNotes(false)} width="w-96" className="p-3">
                     <p className="mb-0.5 text-sm font-semibold text-ink">{t('processing_notes')}</p>
                     <p className="mb-2 text-xs text-ink-2">
                       {t('notes_intro')}
@@ -754,8 +757,7 @@ export default function App() {
                         )
                       })}
                     </ul>
-                  </div>
-                </>
+                </AnchoredMenu>
               )}
             </span>
           )}
@@ -831,7 +833,7 @@ export default function App() {
           >
             <Search size={ICON} aria-hidden />
           </button>
-          <span className="relative">
+          <span ref={moreAnchor} className="relative">
             <button
               className={`${iconBtnCls} ${showMore ? 'bg-primary-soft text-primary' : ''}`}
               onClick={() => setShowMore((m) => !m)}
@@ -842,9 +844,7 @@ export default function App() {
               <MoreHorizontal size={ICON} aria-hidden />
             </button>
             {showMore && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMore(false)} />
-                <div className={`${menuCls} absolute right-0 top-full z-50 mt-1 w-56`}>
+              <AnchoredMenu anchorRef={moreAnchor} onClose={() => setShowMore(false)} width="w-56">
                   <button
                     className={`${menuItemCls} flex items-center gap-2`}
                     onClick={() => {
@@ -876,8 +876,7 @@ export default function App() {
                     {t('shortcuts')}
                     <kbd className={`${kbdCls} ml-auto`}>?</kbd>
                   </button>
-                </div>
-              </>
+              </AnchoredMenu>
             )}
           </span>
         </div>

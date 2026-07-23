@@ -72,3 +72,35 @@ describe('TableEditor undo-history survival', () => {
     expect(screen.getByRole('button', { name: /verified/i })).toBeInTheDocument()
   })
 })
+
+// The diff control had no coverage at all before §2.84, which is how it kept an
+// action's appearance and shipped without aria-pressed. Now that it is icon-only,
+// its accessible name is the ONLY thing naming it — so these assertions are what
+// stands between the toggle and becoming an unlabelled mystery button.
+describe('TableEditor diff toggle', () => {
+  const diff = () => screen.getByRole('button', { name: /^diff$/i })
+
+  it('announces its state through aria-pressed and flips on click', () => {
+    renderEditor(table({ edited: true }))
+    expect(diff()).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(diff())
+    expect(diff()).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(diff())
+    expect(diff()).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('is icon-only: reachable by accessible name, with no visible label text', () => {
+    renderEditor(table({ edited: true }))
+    // Named for assistive tech...
+    expect(diff()).toBeInTheDocument()
+    // ...but carrying no rendered word, which is the point of the icon-only form.
+    expect(diff().textContent).toBe('')
+  })
+
+  it('stays disabled until the table has actually been edited', () => {
+    renderEditor(table({ edited: false }))
+    expect(diff()).toBeDisabled()
+  })
+})

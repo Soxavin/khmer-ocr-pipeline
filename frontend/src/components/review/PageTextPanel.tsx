@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, PenLine, TextCursorInput } from 'lucide-react'
+import { Check, ChevronRight, Copy, PenLine, TextCursorInput } from 'lucide-react'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { useT } from '../../i18n.tsx'
@@ -230,10 +230,20 @@ export function PageTextPanel(props: {
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
     >
-      <summary className="cursor-pointer text-sm font-medium text-ink-2">
+      {/* The native ::marker triangle is suppressed in favour of a real icon: `gap`
+          does not apply to a marker, so the disclosure arrow could never be spaced
+          off the label, and a marker takes no colour or transition from the theme. */}
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-ink-2 [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          size={14}
+          aria-hidden
+          className={`shrink-0 text-ink-3 transition-transform duration-150 motion-reduce:transition-none ${
+            open ? 'rotate-90' : ''
+          }`}
+        />
         {t('page_text')}
         {rows.length > 0 && (
-          <span className="ml-1.5 text-xs font-normal text-ink-3">
+          <span className="text-xs font-normal text-ink-3">
             {t('text_blocks_count', { n: rows.length })}
           </span>
         )}

@@ -8,14 +8,14 @@ import {
   type ColDef,
   type GridApi,
 } from 'ag-grid-community'
-import { Check, Diff, Download, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Download, GitCompare, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
 import { cellMatches } from '../../lib/search'
 import { scrollIntoViewWithin } from '../../lib/scroll'
 import { useT } from '../../i18n.tsx'
-import { btnSmCls, menuCls, menuItemCls } from '../../ui'
+import { ICON_XS, menuCls, menuItemCls } from '../../ui'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
@@ -52,6 +52,47 @@ function toRows(grid: string[][]): Row[] {
 }
 
 type Menu = { x: number; y: number; rowIndex: number }
+
+// The toolbar's micro-control vocabulary. Deliberately the same recipe as
+// SegmentedToggle (PageGrid.tsx) — one bordered shell, h-6 segments, hairline
+// seams — so the table toolbar and the view toggles read as one control family
+// instead of two hand-rolled dialects.
+const TRACK = 'inline-flex h-6 w-fit shrink-0 items-stretch overflow-hidden rounded-md border border-line-strong align-middle'
+
+function segCls(active = false) {
+  return (
+    'inline-flex items-center gap-1 px-2 text-xs font-medium transition-colors duration-150 ' +
+    'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ' +
+    'disabled:opacity-40 disabled:pointer-events-none ' +
+    (active ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail hover:text-ink')
+  )
+}
+
+function Track(props: { label: string; children: React.ReactNode }) {
+  return (
+    <span className={TRACK} role="group" aria-label={props.label}>
+      {props.children}
+    </span>
+  )
+}
+
+/** Hairline between segments — a border on the button itself would double up
+    against the shell's own border at the track ends. */
+function Seam() {
+  return <span className="w-px shrink-0 self-stretch bg-line-strong" aria-hidden />
+}
+
+function Seg({
+  active = false,
+  children,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  return (
+    <button type="button" className={segCls(active)} {...rest}>
+      {children}
+    </button>
+  )
+}
 
 export function TableEditor(props: {
   docId: string
@@ -307,37 +348,56 @@ export function TableEditor(props: {
         {saveState === 'error' && (
           <span className="font-medium text-danger-ink">{t('not_saved')}</span>
         )}
-        {/* Contextual toolbar: only on the focused table (residency: contextual tier). */}
+        {/* Contextual toolbar: only on the focused table (residency: contextual tier).
+            Four tracks, grouped by what each control does to the data — history,
+            view toggle, edit, export — so the seams carry meaning rather than
+            rhythm. Reset rides with undo/redo: it is the extreme of the same axis. */}
         {focused && (
-          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-            <button className={btnSmCls} onClick={undoEdit} disabled={!history.length}
-                    aria-label={t('undo')} title={t('undo_tip')}>
-              <Undo2 size={13} aria-hidden />
-            </button>
-            <button className={btnSmCls} onClick={redoEdit} disabled={!redo.length}
-                    aria-label={t('redo')} title={t('redo_tip')}>
-              <Redo2 size={13} aria-hidden />
-            </button>
-            <button className={`${btnSmCls} ${diffOn ? 'border-primary text-primary' : ''}`}
-                    onClick={() => setDiffOn((d) => !d)} disabled={!edited}
-                    title={t('diff_tip')}>
-              <Diff size={13} aria-hidden />
-              {t('diff')}
-            </button>
-            <button className={btnSmCls} onClick={() => insertRow(grid.length)} title={t('row_tip')}>
-              <ListPlus size={13} aria-hidden />
-              {t('row')}
-            </button>
-            <a className={btnSmCls} href={api.exportCsvUrl(docId, table.table_id)} download
-               title={t('csv_tip')}>
-              <Download size={13} aria-hidden />
-              CSV
-            </a>
-            <button className={btnSmCls} onClick={reset} disabled={!edited}
-                    title={t('reset_tip')}>
-              <RotateCcw size={13} aria-hidden />
-              {t('reset')}
-            </button>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+            <Track label={t('undo')}>
+              <Seg onClick={undoEdit} disabled={!history.length} aria-label={t('undo')} title={t('undo_tip')}>
+                <Undo2 size={ICON_XS} aria-hidden />
+              </Seg>
+              <Seam />
+              <Seg onClick={redoEdit} disabled={!redo.length} aria-label={t('redo')} title={t('redo_tip')}>
+                <Redo2 size={ICON_XS} aria-hidden />
+              </Seg>
+              <Seam />
+              <Seg onClick={reset} disabled={!edited} title={t('reset_tip')}>
+                <RotateCcw size={ICON_XS} aria-hidden />
+                {t('reset')}
+              </Seg>
+            </Track>
+
+            {/* Icon-only, and a toggle rather than an action: it changes how the grid
+                is rendered, it does not mutate it. aria-pressed was missing entirely
+                before — this was the one toggle in the app that never announced state. */}
+            <Track label={t('diff')}>
+              <Seg
+                onClick={() => setDiffOn((d) => !d)}
+                disabled={!edited}
+                active={diffOn}
+                aria-pressed={diffOn}
+                aria-label={t('diff')}
+                title={t('diff_tip')}
+              >
+                <GitCompare size={ICON_XS} aria-hidden />
+              </Seg>
+            </Track>
+
+            <Track label={t('row')}>
+              <Seg onClick={() => insertRow(grid.length)} title={t('row_tip')}>
+                <ListPlus size={ICON_XS} aria-hidden />
+                {t('row')}
+              </Seg>
+            </Track>
+
+            <Track label="CSV">
+              <a className={segCls()} href={api.exportCsvUrl(docId, table.table_id)} download title={t('csv_tip')}>
+                <Download size={ICON_XS} aria-hidden />
+                CSV
+              </a>
+            </Track>
           </span>
         )}
       </div>

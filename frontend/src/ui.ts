@@ -68,6 +68,9 @@ export const kbdCls =
   'bg-surface px-1 font-mono text-2xs font-medium text-ink-2 shadow-raised'
 
 export const ICON = 15
+// Toolbar icons inside h-6 segmented tracks. Named so the next toolbar doesn't
+// re-guess it — these used to be a scatter of inline 13s.
+export const ICON_XS = 14
 export const ICON_SM = 12
 
 import { flushSync } from 'react-dom'

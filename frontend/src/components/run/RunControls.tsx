@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Download, FileUp, Play, RotateCw, ShieldCheck, Square } from 'lucide-react'
 import { api } from '../../api/client'
 import type { RunStatus } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
-import { ICON, btnCls, dangerBtnCls, menuCls, menuItemCls, primaryBtnCls } from '../../ui'
+import { ICON, btnCls, dangerBtnCls, menuItemCls, primaryBtnCls } from '../../ui'
+import { AnchoredMenu } from '../AnchoredMenu'
 
 // Server stage labels (webapp/runner.py emits English), mapped to display keys.
 const STAGES: [string, Key][] = [
@@ -44,6 +45,7 @@ export function RunControls(props: {
   const active = status?.active ?? false
   const [stopping, setStopping] = useState(false)
   const [exportMenu, setExportMenu] = useState(false)
+  const exportAnchor = useRef<HTMLSpanElement>(null)
 
   // Reset the Stop debounce when the run actually ends.
   useEffect(() => {
@@ -109,7 +111,7 @@ export function RunControls(props: {
       )}
 
       {primary.href ? (
-        <span className="relative flex items-stretch">
+        <span ref={exportAnchor} className="relative flex items-stretch">
           <a
             className={`${primaryBtnCls} rounded-r-none`}
             href={primary.href}
@@ -154,9 +156,7 @@ export function RunControls(props: {
             <ChevronDown size={ICON} aria-hidden />
           </button>
           {exportMenu && docId && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setExportMenu(false)} />
-              <div className={`${menuCls} absolute right-0 top-full z-50 mt-1 w-64`}>
+            <AnchoredMenu anchorRef={exportAnchor} onClose={() => setExportMenu(false)} width="w-64">
                 {/* Joining continuation tables lives HERE — it is a shape-of-the-export
                     decision, so it never has to compromise page-linked review. */}
                 {multiPage && (
@@ -201,8 +201,7 @@ export function RunControls(props: {
                     {label}
                   </a>
                 ))}
-              </div>
-            </>
+            </AnchoredMenu>
           )}
         </span>
       ) : (

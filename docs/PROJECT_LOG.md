@@ -3256,6 +3256,65 @@ did not.
 
 ---
 
+### 2.86 Three top-bar menus that never painted — and the guard that ate them (2026-07-23)
+
+A polish pass across the workspace chrome (`/impeccable craft`): top-bar dropdowns, the Page
+Text disclosure, and the table toolbar. Two of the three briefed fixes turned out to be
+aimed at the wrong mechanism, which is the useful part of the entry.
+
+**The bug: every top-bar dropdown was clipped to nothing.** `Notes`, `Export`, and the ⋯
+`More` menu are all `position:absolute` hanging *below* a `h-12` header — and §2.82 had put
+`overflow-hidden` on that header as a horizontal-scrollbar guard. So the panels were clipped
+away entirely. Worse, their click-catching scrims are `position:fixed`, and a fixed element's
+containing block is the viewport, so the scrim was *not* clipped: opening a menu armed a
+full-screen invisible overlay and showed nothing, then swallowed the next click. Three
+menus, silently dead, shipped in the built bundle.
+
+**What the layout API will not tell you.** My first probe read each menu's
+`getBoundingClientRect()` and found a healthy `107×256` box clearing the header — so the
+menus looked fine. They were not. `overflow:hidden` is a *paint* operation; it does not
+touch layout geometry, so a fully clipped element still reports its full rect. The bug only
+became visible in a screenshot, where the menu is a 4px sliver at the header's edge. **A
+rect is not evidence of visibility.** This is the second time on this project that driving
+a real browser overturned a conclusion I had reached from the DOM (§2.84 was the first).
+
+**Why the brief's fix would not have worked.** The instruction was to set the header
+`overflow-visible`. That alone changes nothing: the header's parent shell *and* `#root`
+(index.css) both clip too, so the menu would simply be eaten one level up. Stripping all
+three re-arms the scrollbar bug §2.82 closed. The fix that actually holds is to stop
+fighting the clippers and step outside them — `position:fixed`, whose containing block is
+the viewport. New `AnchoredMenu` measures its trigger and positions itself there; the three
+call sites collapse onto it, so a triplicated scrim/panel pattern became one component.
+Clipping is now scoped to the *title cluster*, which is the only compressible thing on the
+row (the right cluster is `shrink-0`) — so the truncation happens where it belongs, and the
+guard is stronger, not weaker. Swept 1600→560px: zero document overflow on either axis.
+
+**Two more premises that did not survive contact with the code.** The brief asked for
+`gap-2` between the Page Text chevron and its label — but that chevron is the native
+`<summary>` `::marker`, and `gap` does not apply to a marker. It had to be suppressed and
+replaced with a real `ChevronRight` before it could be spaced (or themed, or animated) at
+all. And the requested `hover:bg-surface-2` names a token this project does not have; it
+would have compiled to nothing and produced a silently hover-less control. The idiom here
+is `hover:bg-rail`.
+
+**Table toolbar.** Six loose buttons became four segmented tracks reusing the
+`SegmentedToggle` recipe verbatim, grouped by what each control does to the data —
+history (`Undo·Redo·Reset`) · toggle · edit · export. `Reset` rides with undo/redo because
+it is the extreme of that same axis, so the seams encode meaning rather than rhythm. `Diff`
+became an icon-only `GitCompare` toggle: it changes how the grid renders, it does not mutate
+it, and it was **the one toggle in the app with no `aria-pressed`** — it had no test
+coverage at all, which is how it stayed that way. Now covered, and both new assertions were
+mutation-tested (drop `aria-pressed` → 1 fail; restore the text label → 1 fail). Renaming it
+proved unnecessary: the Khmer string was already `ភាពខុសគ្នា` ("differences"), so going
+icon-only means the label question disappears and **no Khmer was authored**.
+
+Verified: 146 frontend tests (3 new), `tsc -b` clean, build clean, detector shows only the 3
+known `<img>` false positives; all three menus re-checked in Chromium (fixed, clearing the
+header, doc scroll range 0) in light and dark. Numbered 2.86 — the parallel session holds
+2.85.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
