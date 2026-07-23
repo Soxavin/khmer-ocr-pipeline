@@ -60,7 +60,9 @@ function renderPanel(page: PageData) {
 function openRawTextarea(container: HTMLElement): HTMLTextAreaElement {
   const details = container.querySelector('details')!
   details.open = true
-  fireEvent.click(screen.getByRole('button', { name: /raw/i }))
+  // Exact: the block cards now also carry an "Edit in Raw" action, so /raw/i is
+  // ambiguous. This is the view toggle.
+  fireEvent.click(screen.getByRole('button', { name: 'Raw' }))
   return container.querySelector('textarea')!
 }
 

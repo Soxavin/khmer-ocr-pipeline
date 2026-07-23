@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockLabel, mergedText, orderedBlockEntries, orderedBlocks } from './blocks'
+import { blockLabel, orderedBlockEntries, orderedBlocks } from './blocks'
 import type { TextBlock } from '../api/types'
 
 const b = (over: Partial<TextBlock> = {}): TextBlock => ({ bbox: [0, 0, 1, 1], ...over })
@@ -58,12 +58,3 @@ describe('blockLabel', () => {
   })
 })
 
-describe('mergedText', () => {
-  it('joins with a blank line, matching how the backend builds ocr_text', () => {
-    expect(mergedText([b({ text: 'one' }), b({ text: 'two' })])).toBe('one\n\ntwo')
-  })
-
-  it('skips empties so the copy output has no ragged gaps', () => {
-    expect(mergedText([b({ text: 'one' }), b({ text: '' }), b({ text: 'two' })])).toBe('one\n\ntwo')
-  })
-})

@@ -215,7 +215,15 @@ const en = {
   copied: 'Copied',
   copy_failed: 'Could not copy — select the text and copy manually.',
   block_untitled: 'Block',
-  blocks_readonly: 'Blocks show what the recogniser read, for checking against the page. Edit in Raw.',
+  // Blocks and Raw are two views of ONE string now, so the old "blocks are
+  // read-only, edit in Raw" note is gone rather than left saying something untrue.
+  filter_all: 'All {n}',
+  filter_empty: 'No blocks in this band.',
+  blocks_unmatched: 'Block details could not be matched to this text — showing the text only.',
+  block_edit: 'Edit this block',
+  block_edit_done: 'Done editing',
+  block_edit_raw: 'Edit in Raw',
+  block_copy: 'Copy text',
   no_text_blocks: 'No text outside the tables on this page.',
 
   verify: 'Verify',
@@ -581,7 +589,13 @@ const km: Record<Key, string> = {
   copied: 'បានចម្លង',
   copy_failed: 'មិនអាចចម្លងបានទេ — សូមជ្រើសរើសអត្ថបទ រួចចម្លងដោយដៃ។',
   block_untitled: 'ប្លុក',
-  blocks_readonly: 'ប្លុកបង្ហាញអ្វីដែលប្រព័ន្ធអានបាន សម្រាប់ផ្ទៀងផ្ទាត់ជាមួយទំព័រ។ សូមកែប្រែនៅក្នុងទិដ្ឋភាពអត្ថបទឆៅ។',
+  filter_all: 'ទាំងអស់ {n}',
+  filter_empty: 'គ្មានប្លុកក្នុងកម្រិតនេះទេ។',
+  blocks_unmatched: 'មិនអាចផ្គូផ្គងព័ត៌មានប្លុកជាមួយអត្ថបទនេះបានទេ — បង្ហាញតែអត្ថបទប៉ុណ្ណោះ។',
+  block_edit: 'កែប្រែប្លុកនេះ',
+  block_edit_done: 'កែប្រែរួចរាល់',
+  block_edit_raw: 'កែប្រែក្នុងអត្ថបទឆៅ',
+  block_copy: 'ចម្លងអត្ថបទ',
   no_text_blocks: 'គ្មានអត្ថបទនៅខាងក្រៅតារាងលើទំព័រនេះទេ។',
 
   verify: 'ផ្ទៀងផ្ទាត់',

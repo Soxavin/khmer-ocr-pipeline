@@ -34,8 +34,3 @@ export function blockLabel(b: TextBlock, fallback: string): string {
   return raw.length > 0 ? raw : fallback
 }
 
-/** The merged plain-text rendering of a page's blocks — the same blank-line join
-    the backend uses to build `ocr_text`, so Raw view and the blocks agree. */
-export function mergedText(blocks: TextBlock[]): string {
-  return blocks.map((b) => (b.text ?? '').trim()).filter(Boolean).join('\n\n')
-}
