@@ -3084,6 +3084,44 @@ scan-density signal alone separates all three document classes.
 
 ---
 
+### 2.82 Page scope leaked across documents; and overflow:hidden never stopped the scroll (2026-07-23)
+
+Two bugs the analyst diagnosed from use, both confirmed by reading.
+
+**"Range" was sticky across documents.** `page_scope` lives in the single global `runSettings`
+object, `rememberSettings` writes that whole object to localStorage on every run, and the seed
+effect overlays it on the server defaults — so once anyone ran a `range`,
+`{page_scope:'range', page_start, page_end}` was burned into storage and rode onto every future
+document, including brand-new ones. Page scope is inherently per-document (a 2–4 range means
+nothing on a 3-page file), so the fix is to treat it that way: `withoutPageScope` strips the five
+page fields before persisting, and `selectDoc` + the upload path reset to `PAGE_SCOPE_DEFAULTS`
+(`page_scope:'all'`). A document you'd scoped returns to "all" when reopened — the requested
+behaviour; per-document memory would be a separate feature.
+
+**The viewport jump the user traced to box clicks — and why §2.80's `overflow:hidden` didn't stop
+it.** The mechanism is the lesson: `Element.scrollIntoView()` and `.focus()` scroll
+`overflow:hidden` containers *programmatically*. `overflow:hidden` blocks user scrolling, not
+scripted scrolling, so a card revealed with `scrollIntoView({block:'center'})` on a text-block box
+click, or the table flash's `scrollIntoView` on a table box click, walked every scroll ancestor up
+to the document and yanked the whole page — inside a viewport that §2.80 had "locked". The
+containment CSS was necessary but never sufficient; I recorded that belief in §2.80 and it was
+wrong about coverage.
+
+The real fix works the scroll, not the CSS: `lib/scroll.ts` `scrollIntoViewWithin` writes only the
+nearest scrollable ancestor's `scrollTop` (walking up, stopping *before* body/documentElement), so
+the window is never a candidate. Its geometry is a pure `scrollTopFor` — unit-tested and
+mutation-checked, since native `scrollIntoView` is a jsdom no-op and can't be tested directly. Both
+selection scrolls now call it; the Edit-in-Raw `.focus()` gained `{preventScroll:true}`. The
+AG-Grid triage path (`setFocusedCell`/`ensureIndexVisible`) is left alone — it fires on issue/band
+jumps, not box clicks, and scrolls the grid's own viewport. `overflow:hidden` stays, now with a
+comment stating plainly that it does not stop scripted scrolling, so the hole isn't "closed" again
+with more CSS.
+
+Verified: 141 frontend tests (9 new), 850 backend, `tsc -b` and build clean. Numbered 2.82 — the
+parallel session holds 2.79 and 2.81.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
