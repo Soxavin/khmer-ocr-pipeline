@@ -295,3 +295,173 @@ def test_local_weights_missing_fails_loud(monkeypatch, tmp_path):
     monkeypatch.setenv("KHMER_KIRI_WEIGHTS", str(tmp_path / "ghost"))
     with pytest.raises(FileNotFoundError, match="KHMER_KIRI_WEIGHTS"):
         loader._local_weights_path()
+
+
+# ---------------------------------------------------------------------------
+# Wide-cell chunking — pure NumPy, no model needed
+# ---------------------------------------------------------------------------
+# Kiri's input is a fixed IMG_H x IMG_W (48x640) and ResizeKeepRatioPadNoCrop
+# scales by HEIGHT then crops the overflow, so anything past ~13.3:1 was silently
+# discarded before the model ever ran. Measured on the MoC gas notification: 21%
+# of cells exceeded the cap, and a 73-char cell came back as 42 chars (58%).
+
+def _bars(h: int, w: int, bars: list[tuple[int, int]]) -> np.ndarray:
+    """White (255) binary canvas with black (0) ink bars at the given x-ranges."""
+    img = np.full((h, w), 255, dtype=np.uint8)
+    for x0, x1 in bars:
+        img[:, x0:x1] = 0
+    return img
+
+
+class TestSplitWideBinary:
+    def test_narrow_cell_returned_unchanged(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        img = _bars(48, 200, [(10, 60), (80, 150)])  # 4.2:1, well under the cap
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        assert len(parts) == 1
+        assert parts[0] is img  # identity: the sub-cap path must not copy or alter
+
+    def test_exactly_at_cap_not_split(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        img = _bars(48, int(48 * 13.33), [(10, 60)])
+        assert len(_split_wide_binary(img, max_aspect=13.33)) == 1
+
+    def test_over_cap_is_split_into_fitting_chunks(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        h, w = 48, 48 * 40  # 40:1, needs >= 3 chunks to fit under 13.33:1
+        img = _bars(h, w, [(100, 300), (700, 900), (1400, 1600)])
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        assert len(parts) >= 3
+        for p in parts:
+            assert p.shape[1] / p.shape[0] <= 13.33 + 1e-6
+
+    def test_split_is_lossless_in_width(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        img = _bars(48, 48 * 30, [(100, 300), (900, 1100)])
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        assert sum(p.shape[1] for p in parts) == img.shape[1]
+
+    def test_cuts_land_in_whitespace_not_through_ink(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        # Ink bars separated by wide blank gutters; every cut must fall in a gutter,
+        # because slicing through a Khmer glyph corrupts it in BOTH chunks.
+        h = 48
+        bars = [(i * 400, i * 400 + 300) for i in range(6)]  # gutters at 300-400 mod 400
+        img = _bars(h, 2400, bars)
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        offset = 0
+        for p in parts[:-1]:
+            offset += p.shape[1]
+            column = img[:, offset]          # first column of the NEXT chunk
+            assert column.min() == 255, f"cut at x={offset} sliced through ink"
+
+    def test_all_blank_cell_still_splits_without_error(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        img = np.full((48, 48 * 30), 255, dtype=np.uint8)
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        assert sum(p.shape[1] for p in parts) == img.shape[1]
+
+    def test_solid_ink_cell_falls_back_to_hard_cuts(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        # No gutter anywhere: there is no good cut, but it must still fit the cap
+        # rather than raise or return an over-wide chunk.
+        img = np.full((48, 48 * 30), 0, dtype=np.uint8)
+        parts = _split_wide_binary(img, max_aspect=13.33)
+        for p in parts:
+            assert p.shape[1] / p.shape[0] <= 13.33 + 1e-6
+
+    def test_zero_height_is_safe(self):
+        from khmer_pipeline.engines.kiri_recognizer import _split_wide_binary
+        img = np.zeros((0, 10), dtype=np.uint8)
+        assert len(_split_wide_binary(img, max_aspect=13.33)) == 1
+
+
+class TestChunkedReassembly:
+    """Wide cells are split, decoded piecewise, then rejoined — with a fake model
+    so the wiring is tested without downloading weights."""
+
+    @staticmethod
+    def _fake_kiri(monkeypatch, piece_texts, piece_confs):
+        """Patch _get_kiri + the decode path to return scripted per-piece results."""
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        import torch
+
+        state = {"n": 0}
+
+        class _Tok:
+            blank_id = 0
+
+            def decode_ctc(self, row):
+                i = state["n"]
+                state["n"] += 1
+                return piece_texts[i]
+
+        class _Model:
+            def encode(self, batch):
+                return batch
+
+            def ctc_head(self, mem):
+                # (N, T=1, V=2); softmax max later reads the scripted confidence.
+                n = mem.shape[0]
+                out = torch.zeros(n, 1, 2)
+                for i in range(n):
+                    c = piece_confs[state["n"] + i]
+                    # logits chosen so softmax max ~= c is not needed; we only
+                    # assert ordering/joining, so make argmax != blank.
+                    out[i, 0, 1] = 10.0 * c
+                return out
+
+        from khmer_pipeline.engines.kiri_vendor.model import CFG
+        monkeypatch.setattr(kr, "_get_kiri", lambda: (_Model(), CFG(), _Tok()))
+        return state
+
+    def test_wide_cell_pieces_are_joined_in_order(self, monkeypatch):
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        wide = np.full((48, 48 * 30, 3), 255, dtype=np.uint8)
+        wide[10:20, 100:200] = 0
+        self._fake_kiri(monkeypatch, ["AAA", "BBB", "CCC"], [0.9, 0.9, 0.9])
+        out = kr.recognize_cells_conf([wide])
+        assert len(out) == 1
+        assert out[0][0] == "AAA BBB CCC"
+
+    def test_confidence_is_driven_by_the_worst_piece_not_the_mean(self, monkeypatch):
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        wide = np.full((48, 48 * 30, 3), 255, dtype=np.uint8)
+        wide[10:20, 100:200] = 0
+
+        # Identical except ONE chunk is poor. Under min-semantics that single bad
+        # chunk drives the cell's confidence down; under mean-semantics the two
+        # good chunks would mask it. Comparing the two runs asserts the semantics
+        # without hardcoding the fake model's softmax arithmetic.
+        self._fake_kiri(monkeypatch, ["A", "B", "C"], [0.9, 0.9, 0.9])
+        all_good = kr.recognize_cells_conf([wide])[0][1]
+
+        self._fake_kiri(monkeypatch, ["A", "B", "C"], [0.9, 0.02, 0.9])
+        one_bad = kr.recognize_cells_conf([wide])[0][1]
+
+        assert one_bad < all_good
+
+    def test_chunking_emits_a_warning_to_the_sink(self, monkeypatch):
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        wide = np.full((48, 48 * 30, 3), 255, dtype=np.uint8)
+        self._fake_kiri(monkeypatch, ["A"] * 10, [0.9] * 10)
+        sink = []
+        kr.recognize_cells_conf([wide], warning_sink=sink)
+        assert any("split into chunks" in w for w in sink)
+
+    def test_narrow_cells_emit_no_chunking_warning(self, monkeypatch):
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        narrow = np.full((48, 200, 3), 255, dtype=np.uint8)
+        self._fake_kiri(monkeypatch, ["A"], [0.9])
+        sink = []
+        kr.recognize_cells_conf([narrow], warning_sink=sink)
+        assert not any("split into chunks" in w for w in sink)
+
+    def test_mixed_batch_keeps_cell_order(self, monkeypatch):
+        import khmer_pipeline.engines.kiri_recognizer as kr
+        narrow = np.full((48, 200, 3), 255, dtype=np.uint8)
+        wide = np.full((48, 48 * 30, 3), 255, dtype=np.uint8)
+        # narrow -> 1 piece, wide -> 3 pieces, narrow -> 1 piece
+        self._fake_kiri(monkeypatch, ["N1", "W1", "W2", "W3", "N2"], [0.9] * 5)
+        out = kr.recognize_cells_conf([narrow, wide, narrow])
+        assert [t for t, _ in out] == ["N1", "W1 W2 W3", "N2"]

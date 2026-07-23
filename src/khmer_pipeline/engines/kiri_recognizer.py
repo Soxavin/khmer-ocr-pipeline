@@ -96,6 +96,69 @@ def otsu_cell(rgb: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Wide-cell chunking
+# ---------------------------------------------------------------------------
+# Kiri is a fixed-input line recognizer: ResizeKeepRatioPadNoCrop scales a crop
+# by HEIGHT to IMG_H and then `crop((0, 0, IMG_W, IMG_H))` — so every pixel past
+# IMG_W/IMG_H (~13.3:1) was silently thrown away before the model ran. Measured
+# on the MoC gas notification: 21% of cells exceeded the cap and a 73-char cell
+# returned 42 chars. Splitting over-wide cells into fitting chunks lets the
+# recognizer see the whole cell.
+
+# A cut must land in whitespace: Khmer stacks and connects glyphs, so slicing
+# mid-glyph corrupts it in BOTH chunks. Search this fraction of a chunk's width
+# either side of the ideal boundary for a blank gutter.
+_CUT_SNAP_WINDOW_FRAC = 0.25
+_INK_MAX_VALUE = 127  # binarized ink is 0, background 255
+
+
+def _widest_gap_center(ink: np.ndarray, lo: int, hi: int) -> Optional[int]:
+    """Center of the widest zero-ink run within [lo, hi), or None if fully inked."""
+    best_len, best_center = 0, None
+    run_start = None
+    for x in range(lo, hi + 1):
+        blank = x < hi and ink[x] == 0
+        if blank:
+            if run_start is None:
+                run_start = x
+        elif run_start is not None:
+            if x - run_start > best_len:
+                best_len, best_center = x - run_start, (run_start + x) // 2
+            run_start = None
+    return best_center
+
+
+def _split_wide_binary(binary: np.ndarray, max_aspect: float) -> list[np.ndarray]:
+    """Split a binarized cell into chunks that each fit within *max_aspect*.
+
+    Returns ``[binary]`` unchanged (same object) when it already fits, so the
+    common case costs nothing. Cuts are snapped to the widest blank gutter near
+    each ideal boundary; a cell with no gutter (solid ink) falls back to a hard
+    cut, which still beats silently discarding the overflow."""
+    h, w = binary.shape[:2]
+    if h <= 0 or w <= 0 or w <= h * max_aspect:
+        return [binary]
+
+    n_chunks = int(np.ceil(w / (h * max_aspect)))
+    ink = (binary <= _INK_MAX_VALUE).sum(axis=0)
+    window = max(1, int(w / n_chunks * _CUT_SNAP_WINDOW_FRAC))
+
+    cuts: list[int] = []
+    for k in range(1, n_chunks):
+        target = round(k * w / n_chunks)
+        lo, hi = max(0, target - window), min(w, target + window)
+        center = _widest_gap_center(ink, lo, hi)
+        # Cuts must stay strictly increasing, else a chunk would be empty.
+        cut = center if center is not None else target
+        if cuts and cut <= cuts[-1]:
+            cut = min(w - 1, cuts[-1] + 1)
+        cuts.append(cut)
+
+    bounds = [0, *cuts, w]
+    return [binary[:, a:b] for a, b in zip(bounds, bounds[1:]) if b > a]
+
+
+# ---------------------------------------------------------------------------
 # Recognition
 # ---------------------------------------------------------------------------
 
@@ -148,14 +211,33 @@ def recognize_cells_conf(crops_rgb: list[np.ndarray],
         )
         return [("", 0.0)] * len(crops_rgb)
 
-    results: list[tuple[str, float]] = [("", 0.0)] * len(crops_rgb)
-    for start in range(0, len(crops_rgb), _BATCH_SIZE):
-        chunk = crops_rgb[start:start + _BATCH_SIZE]
+    # Binarize once, then split any cell too wide for the model's fixed input.
+    # `pieces` is the flat list actually fed to the model; `owners[i]` says which
+    # input cell piece i belongs to, so batching still spans whole batches rather
+    # than being confined within a cell.
+    max_aspect = cfg.IMG_W / cfg.IMG_H
+    pieces: list[np.ndarray] = []
+    owners: list[int] = []
+    chunked_cells = 0
+    for idx, crop_rgb in enumerate(crops_rgb):
+        parts = _split_wide_binary(otsu_cell(crop_rgb), max_aspect)
+        if len(parts) > 1:
+            chunked_cells += 1
+        for part in parts:
+            pieces.append(part)
+            owners.append(idx)
+    if chunked_cells:
+        _emit_kiri_warning(
+            f"Kiri: {chunked_cells} cell(s) exceeded the recognizer's "
+            f"{max_aspect:.1f}:1 input and were split into chunks to be read in full",
+            warning_sink,
+        )
+
+    piece_results: list[tuple[str, float]] = [("", 0.0)] * len(pieces)
+    for start in range(0, len(pieces), _BATCH_SIZE):
+        chunk = pieces[start:start + _BATCH_SIZE]
         try:
-            tensors = []
-            for crop_rgb in chunk:
-                binary = otsu_cell(crop_rgb)
-                tensors.append(preprocess_pil(cfg, Image.fromarray(binary)))
+            tensors = [preprocess_pil(cfg, Image.fromarray(binary)) for binary in chunk]
             batch = torch.cat(tensors, dim=0)
 
             with torch.inference_mode():
@@ -179,9 +261,22 @@ def recognize_cells_conf(crops_rgb: list[np.ndarray],
                 nb = [maxp[i, t].item() for t, pid in enumerate(row) if pid != tokenizer.blank_id]
                 conf = float(sum(nb) / len(nb)) if nb else 0.0
 
-                results[start + i] = (text, conf)
+                piece_results[start + i] = (text, conf)
         except Exception as exc:
             _emit_kiri_warning(f"Kiri recognition failed on a cell batch: {exc}", warning_sink)
-            # Affected chunk falls back to ("", 0.0) (already the default in results).
+            # Affected pieces fall back to ("", 0.0) (already the default).
 
-    return results
+    # Reassemble: pieces of a cell are left-to-right, so joining in order
+    # reconstructs the line. Confidence is the MINIMUM across a cell's pieces — a
+    # cell is only as trustworthy as its worst fragment, and taking the mean would
+    # let one clean chunk mask a garbled one.
+    texts: list[list[str]] = [[] for _ in crops_rgb]
+    confs: list[list[float]] = [[] for _ in crops_rgb]
+    for (text, conf), owner in zip(piece_results, owners):
+        if text:
+            texts[owner].append(text)
+        confs[owner].append(conf)
+    return [
+        (" ".join(parts).strip(), min(cs) if cs else 0.0)
+        for parts, cs in zip(texts, confs)
+    ]
