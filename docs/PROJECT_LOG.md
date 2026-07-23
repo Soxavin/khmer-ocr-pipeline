@@ -2979,6 +2979,64 @@ partner: it shares Kiri, so it agrees on wrong answers (P(error|agree) 11.1% on 
 
 ---
 
+### 2.80 Page Text becomes one string, and a test that certified a bug (2026-07-23)
+
+**Blocks and Raw were showing different text, and nothing said so.** The block cards
+rendered `text_blocks[].text` — the RAW OCR, shipped straight from Surya
+([api.py:332](webapp/api.py#L332)) — while the textarea edited `corrected_text`, the string
+*after* rule correction, Qwen and the foreign-script scrub. Wherever the correction pass had
+done its job the two panes disagreed, silently, about the same page. That is also why blocks
+were read-only: an edit to a raw-OCR card had nowhere to go, since `putPageText` persists
+only the whole page string and no per-block endpoint exists.
+
+The unlock was in `postprocess.py`: `corrected_text` is assembled **block-wise**,
+`"\n\n".join(t for t in corrected_block_texts if t)` over `page.text_blocks` in order. So
+the corrected string decomposes back into per-block segments exactly. Blocks now render
+those segments — same string as Raw, just divided — which makes inline editing, per-segment
+copy, and an exact character range for "Edit in Raw" all fall out of one model instead of
+needing three mechanisms.
+
+**Alignment is refused rather than guessed.** Segment and block counts diverge for real
+reasons: a block whose corrected text came out empty is dropped by the backend's `if t` but
+survives the frontend's raw-text filter; a block containing its own blank line splits into
+two; any analyst edit adding or removing a blank line shifts everything after it. None of
+those reveal *where* the drift began, so when the counts differ **every** block is withheld —
+text still renders and still edits, but no confidence badge and no canvas link. A confidence
+score attached to text it does not describe is worse than no score, because the badge's only
+job is to be trusted.
+
+**The part worth remembering: a test of mine passed and certified a bug.** Two indices exist
+here and they are not interchangeable — `segIndex` (position in the corrected text, what
+editing and the raw range address) and `srcIndex` (position in `page.text_blocks`, what the
+page canvas looks a bbox up by). They differ whenever reading order is not array order or an
+empty block was filtered out, which is routine. My first implementation passed `segIndex` to
+the canvas link, and the test I wrote alongside it asserted exactly that value and went
+green. Card 1 would have haloed the wrong region on the scan while the list looked perfectly
+correct. Caught by re-deriving the expected value by hand rather than trusting the green
+check — the second time in three sessions that "it passes" turned out to be no evidence at
+all (cf. §2.77's vacuous NFC test). Both index paths are now mutation-checked: reintroducing
+the conflation fails two tests.
+
+**Viewport.** The reported phantom scrollbar had a prescribed fix that was already in the
+code — root already `h-screen flex-col overflow-hidden`, `main` already `flex-1 min-h-0
+overflow-hidden`, `html, body, #root` already `height: 100%`, and Tailwind v4 preflight
+already zeroes body margin. Applying it again would have changed nothing. Without a browser
+to identify the escaping element the fix is structural instead: `overflow: hidden` on
+`html, body, #root` removes the document scrollport outright, and the root moves from
+`h-screen` to `h-full` because `100vh` excludes a horizontal scrollbar's height — so the
+moment anything forces one, `100vh` exceeds the remaining space and *creates* a vertical
+scrollbar. The header, the one region outside `main`'s clipping, gained `overflow-hidden` and
+`min-w-0` so a crowded top bar cannot push the layout wide in the first place.
+
+Two dead exports removed along the way: `panelCanvasCls` (carried `min-h-screen`, used
+nowhere — a loaded gun beside a layout that depends on nothing exceeding the viewport) and
+`mergedText` (its only caller was the copy button, which now copies the text directly). The
+`blocks_readonly` string went too, rather than being left asserting something no longer true.
+
+Verified: 132 frontend tests (22 new), 842 backend, `tsc -b` and build clean.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
