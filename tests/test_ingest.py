@@ -248,3 +248,50 @@ def test_auto_dpi_worst_page_drives_decision():
         buf = io.BytesIO(); pil.save(buf, format="PNG")
         page.insert_image(page.rect, stream=buf.getvalue())
     assert resolve_auto_dpi(doc.tobytes(), "mixed.pdf") == 300
+
+
+# Real-world regression: ARDB bulletins are born-digital text pages that embed a
+# small masthead logo. Reading the density of that LOGO (≈50 DPI) instead of a
+# page scan made "auto" return 300 for every document — the setting never once
+# chose 200. A page is only a scan when a raster actually covers it.
+
+def _make_pdf_with_logo(logo_w: int = 499, logo_h: int = 142) -> bytes:
+    """Born-digital text page carrying a small low-resolution logo, as ARDB does."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 200), "Born-digital Khmer table content", fontsize=12)
+    pil = Image.new("RGB", (logo_w, logo_h), color=(120, 120, 120))
+    buf = io.BytesIO(); pil.save(buf, format="PNG")
+    # Placed small, near the top — a masthead, not a page scan.
+    page.insert_image(fitz.Rect(72, 40, 272, 97), stream=buf.getvalue())
+    return doc.tobytes()
+
+
+def test_auto_dpi_ignores_a_small_logo_on_a_born_digital_page():
+    from khmer_pipeline.ingest import resolve_auto_dpi
+    # The logo is low-density, but the PAGE is vector text — upscaling buys nothing.
+    assert resolve_auto_dpi(_make_pdf_with_logo(), "ardb.pdf") == 200
+
+
+def test_page_is_scanned_true_for_full_page_raster():
+    import fitz as _f
+    from khmer_pipeline.ingest import page_is_scanned
+    doc = _f.open(stream=_make_scanned_pdf(850, 1100), filetype="pdf")
+    assert page_is_scanned(doc[0]) is True
+    doc.close()
+
+
+def test_page_is_scanned_false_for_logo_page():
+    import fitz as _f
+    from khmer_pipeline.ingest import page_is_scanned
+    doc = _f.open(stream=_make_pdf_with_logo(), filetype="pdf")
+    assert page_is_scanned(doc[0]) is False
+    doc.close()
+
+
+def test_page_is_scanned_false_for_pure_vector():
+    import fitz as _f
+    from khmer_pipeline.ingest import page_is_scanned
+    doc = _f.open(stream=_make_pdf(), filetype="pdf")
+    assert page_is_scanned(doc[0]) is False
+    doc.close()

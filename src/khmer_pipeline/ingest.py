@@ -24,19 +24,54 @@ _AUTO_DPI_FALLBACK = 300
 _AUTO_DPI_DENSITY_THRESHOLD = 250.0
 
 
+# A raster must cover at least this fraction of the page to BE the page — below
+# it the image is decoration (masthead, logo, stamp) sitting on a vector page.
+# ARDB bulletins embed a 499x142 logo whose density reads ~50 DPI; treating that
+# as the page's resolution made every document look like a faint scan.
+_SCAN_MIN_PAGE_COVERAGE = 0.5
+
+
+def _page_raster_coverage(page) -> tuple[float, float | None]:
+    """(fraction of the page covered by the largest raster, that raster's density).
+
+    Density is px per inch across the image's PLACED width, which is the real
+    resolution the renderer can recover — not the raw pixel count over the page
+    width, which conflates a small dense logo with a full-page scan."""
+    best_area, best_density = 0.0, None
+    page_area = abs(page.rect.width * page.rect.height)
+    if page_area <= 0:
+        return 0.0, None
+    for img in page.get_images(full=True):
+        try:
+            rect = page.get_image_bbox(img)
+        except Exception:
+            continue  # images without a resolvable placement can't be judged
+        area = abs(rect.width * rect.height)
+        if area <= best_area or rect.width <= 0:
+            continue
+        best_area = area
+        px_w = img[2]  # get_images tuple: (xref, smask, width, …)
+        best_density = (px_w / (rect.width / 72.0)) if px_w else None
+    return best_area / page_area, best_density
+
+
+def page_is_scanned(page) -> bool:
+    """True when the page IS a raster scan rather than a vector page with images.
+
+    Requires a raster covering most of the page. Used both to pick a render DPI
+    and, by the engine router, to keep low-resolution scans away from per-cell
+    recognizers that cannot resolve Khmer diacritics at that density."""
+    coverage, _ = _page_raster_coverage(page)
+    return coverage >= _SCAN_MIN_PAGE_COVERAGE
+
+
 def _page_native_density(page) -> float | None:
-    """Native horizontal density (px per inch) of a PDF page's largest embedded
-    image, or None for a vector/born-digital page. Assumes a full-page scan image
-    (the ARDB/scanned-document case) — a partial image only skews the estimate
-    toward a lower density, which biases safely toward the higher render DPI."""
-    imgs = page.get_images(full=True)
-    if not imgs:
-        return None
-    page_w_in = page.rect.width / 72.0
-    if page_w_in <= 0:
-        return None
-    widest = max(img[2] for img in imgs)  # get_images tuple: (xref, smask, width, …)
-    return (widest / page_w_in) if widest else None
+    """Native density (px per inch) of a page-covering scan, else None.
+
+    None means "nothing to upscale": either a vector/born-digital page, or one
+    whose only rasters are decoration."""
+    coverage, density = _page_raster_coverage(page)
+    return density if coverage >= _SCAN_MIN_PAGE_COVERAGE else None
 
 
 def resolve_auto_dpi(source: bytes, source_name: str) -> int:
