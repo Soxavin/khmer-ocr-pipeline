@@ -225,18 +225,17 @@ body {
   border-top: 6px solid var(--color-primary);
   border-left: 6px solid transparent;
 }
-/* Low/mid confidence: a 2px status stripe down the cell's leading edge (rose /
-   amber, matching the Check / Skim band dots), NOT a full fill — on a bad page
-   hundreds of cells are flagged and a wash turns the grid into wallpaper. It
-   rides the background channel (a gradient, not border-left), so it leaves the
-   box-shadow rings free and shifts no layout. Check keeps a dotted underline so
-   the signal survives colour-blindness and washed-out projectors. */
+/* Low/mid confidence: a soft, even wash (rose for Check, amber for Skim), mixed
+   into the surface so text contrast stays predictable and it themes for dark on
+   its own. Kept light (~12%) because a bad page flags hundreds of cells and a
+   loud fill turns the grid into wallpaper. It rides the background channel, so
+   the box-shadow rings and the edited corner still compose on top. */
 .cell-conf-low {
-  background: linear-gradient(to right, var(--color-conf-low) 0 2px, transparent 2px);
-  text-decoration: underline dotted var(--cell-low-line) 1.5px;
-  text-underline-offset: 3px;
+  background: color-mix(in oklab, var(--color-conf-low) 12%, var(--color-surface));
 }
-.cell-conf-mid { background: linear-gradient(to right, var(--color-conf-mid) 0 2px, transparent 2px); }
+.cell-conf-mid {
+  background: color-mix(in oklab, var(--color-conf-mid) 12%, var(--color-surface));
+}
 
 /* Search hits: an inset RING, never a background. The confidence washes and the
    diff tint above are persistent trust signals the analyst is searching in order

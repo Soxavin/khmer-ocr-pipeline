@@ -8,7 +8,7 @@ import {
   type ColDef,
   type GridApi,
 } from 'ag-grid-community'
-import { Check, Download, Eye, EyeOff, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Download, FileText, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
@@ -50,6 +50,21 @@ type Row = { __r: number; [col: `c${number}`]: string }
     the analyst can still type words containing n/p. Exported for direct unit test. */
 export function suppressNpWhenFocused(params: { editing: boolean; event: { key: string } }): boolean {
   return !params.editing && (params.event.key === 'n' || params.event.key === 'p')
+}
+
+/** Force every row to exactly `width` cells (pad with '', drop overflow). The
+    column count is a fixed property of the table — only rows are added/removed by
+    editing — so a jagged grid (which the non-persisting reset endpoint or a stale
+    cross-session write can leave, §2.87) must never reach the grid, or columns
+    built from row 0's length render blank for the rows that lack that index.
+    Exported for direct unit + mutation testing. */
+export function toRectangular(grid: string[][], width: number): string[][] {
+  return grid.map((row) => {
+    if (row.length === width) return row
+    const out = row.slice(0, width)
+    while (out.length < width) out.push('')
+    return out
+  })
 }
 
 function toRows(grid: string[][]): Row[] {
@@ -124,8 +139,12 @@ export function TableEditor(props: {
   const qc = useQueryClient()
   const { t } = useT()
   const gridApi = useRef<GridApi | null>(null)
+  // The table's true column count comes from the OCR original (editing only ever
+  // adds/removes rows, never columns). Everything the grid renders is squared to
+  // it, so a jagged edited grid can't produce a phantom blank column.
+  const nCols = table.original_grid[0]?.length ?? table.grid[0]?.length ?? 0
   const [verified, setVerified] = useState(table.verified)
-  const [grid, setGrid] = useState<string[][]>(table.grid)
+  const [grid, setGrid] = useState<string[][]>(() => toRectangular(table.grid, nCols))
   const [history, setHistory] = useState<string[][][]>([])
   const [redo, setRedo] = useState<string[][][]>([])
   const [rawView, setRawView] = useState(false)
@@ -143,8 +162,9 @@ export function TableEditor(props: {
   // reset therefore destroyed the undo stack at the exact moment the analyst
   // committed trust. Confirmation is not new data.
   useEffect(() => {
-    if (JSON.stringify(grid) === JSON.stringify(table.grid)) return
-    setGrid(table.grid)
+    const incoming = toRectangular(table.grid, nCols)
+    if (JSON.stringify(grid) === JSON.stringify(incoming)) return
+    setGrid(incoming)
     setHistory([])
     setRedo([])
     // `grid` read from the render that delivered the new table.grid — current by
@@ -175,6 +195,16 @@ export function TableEditor(props: {
   useEffect(() => {
     gridApi.current?.refreshCells({ force: true })
   }, [findQuery, activeMatch, focusCell, hoverCell, showConf, rawView])
+
+  // autoHeight rows are absolutely positioned and cache their measured height by
+  // row id; a structural change (insert/delete) or a raw⇄edited content swap can
+  // leave that cache stale, so a tall wrapped row overlaps its neighbour and cells
+  // read as blank. Re-measure on those two triggers (not per keystroke — a plain
+  // edit re-measures its own row) to keep the layout honest.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => gridApi.current?.resetRowHeights())
+    return () => cancelAnimationFrame(id)
+  }, [grid.length, rawView])
 
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
@@ -242,8 +272,6 @@ export function TableEditor(props: {
     setEdited(false)
     setRawView(false)
   }, [docId, table])
-
-  const nCols = grid[0]?.length ?? 0
 
   const insertRow = (at: number) => {
     const next = [...grid.slice(0, at), Array.from({ length: nCols }, () => ''), ...grid.slice(at)]
@@ -389,6 +417,15 @@ export function TableEditor(props: {
           {verified ? t('verified') : t('verify')}
         </button>
         {edited && !isPristine && <span className="rounded-full bg-primary-soft px-2 py-0.5 font-medium text-primary-strong">{t('edited')}</span>}
+        {/* Raw-view indicator lives IN the toolbar row (fixed height), not a banner
+            above the grid — so toggling views never shifts the table and the eye
+            stays on the same cell. */}
+        {rawView && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2 py-0.5 font-medium text-primary-strong">
+            <FileText size={11} aria-hidden />
+            {t('raw_banner')}
+          </span>
+        )}
         {/* Fixed-width slot so the toolbar doesn't jump as save state flickers. */}
         {saveState === 'saving' && <span className="w-14 text-ink-3">{t('saving')}</span>}
         {saveState === 'error' && (
@@ -418,8 +455,9 @@ export function TableEditor(props: {
             </Track>
 
             {/* View toggle: Raw (read-only OCR ground truth) vs Edited (this table).
-                Not a mutation — it swaps what the grid renders. Eye = viewing raw;
-                EyeOff = editing. Disabled until there is an edit to compare against. */}
+                Not a mutation — it swaps what the grid renders. FileText (distinct
+                from the Confidence Eye), lit while viewing raw. Disabled until there
+                is an edit to compare against. */}
             <Track label={t('raw_view')}>
               <Seg
                 onClick={() => setRawView((v) => !v)}
@@ -430,7 +468,7 @@ export function TableEditor(props: {
                 title={t('raw_view_tip')}
                 className="w-7"
               >
-                {rawView ? <Eye size={ICON_XS} aria-hidden /> : <EyeOff size={ICON_XS} aria-hidden />}
+                <FileText size={ICON_XS} aria-hidden />
               </Seg>
             </Track>
 
@@ -451,12 +489,6 @@ export function TableEditor(props: {
         )}
       </div>
 
-      {rawView && (
-        <div className="mb-1.5 flex items-center gap-1.5 rounded-md bg-primary-soft px-2 py-1 text-xs font-medium text-primary-strong">
-          <Eye size={ICON_XS} aria-hidden />
-          {t('raw_banner')}
-        </div>
-      )}
       <div className="ag-theme-workspace" onContextMenu={(e) => e.preventDefault()}>
         <AgGridReact
           theme={theme}

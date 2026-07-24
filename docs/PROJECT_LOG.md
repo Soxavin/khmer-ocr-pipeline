@@ -3431,6 +3431,62 @@ terms), flagged for review.
 
 ---
 
+### 2.89 The "blank column" was never data loss — plus soft tints, icon split, one worklist (2026-07-24)
+
+Four items off the user's screenshots of the §2.88 build.
+
+**Item 1 — "editing one cell blanks the whole column." The headline finding: no data is ever
+lost.** Fetching the edited grid straight from the API showed it perfectly rectangular, with
+only the one intended cell changed; the raw-OCR view (original_grid) was intact throughout.
+So this is a *render-layer* symptom, not corruption. I could not reproduce a persistent blank
+across six scenarios in a real browser — plain edit, editing a tall wrapped cell, force-refresh
+via issue-hover / n·p / confidence-toggle, and raw⇄edited swaps — every rendered cell stayed
+correct. What I *did* catch is the real fragility: AG Grid's `autoHeight` rows are absolutely
+positioned and cache their height by row id, and a 192px wrapped Khmer row intermittently
+intercepts pointer events over its neighbour — a height-cache desync that can momentarily read
+as a covered/blank cell. Two honest fixes, no speculation dressed as certainty: (1) a
+`toRectangular(grid, width)` helper squares every grid to the OCR original's column count on
+ingest and keeps commits rectangular, closing the *class* of jagged-grid blank-column bug the
+flaky multi-worker reset endpoint could otherwise cause (§2.87); (2) `resetRowHeights()` on the
+two structural desync triggers — row insert/delete and the raw⇄edited swap — so autoHeight
+re-measures instead of trusting a stale cache. Data was never at risk; this hardens the
+rendering.
+
+**Item 2 — soft tints.** The §2.88 2px left-stripe read as broken table borders. Replaced with
+a soft `color-mix(... 12%, --color-surface)` wash (rose Check / amber Skim), and the loud red
+dotted underline is gone. Opaque blend over the surface keeps text contrast predictable and
+themes for dark on its own. Verified crisp and legible in both themes.
+
+**Item 3 — icon split + zero layout shift.** The Confidence toggle and the raw-view toggle both
+wore an Eye — a collision. Confidence keeps the Eye (now icon-only, label stripped); the
+raw-view toggle moves to `FileText`. The read-only banner that pushed the table down on every
+toggle is gone; a compact "Raw OCR · read only" pill now lives *inside* the fixed-height toolbar
+row. Measured in-browser: a target cell's top stays at the same Y (0px shift) across the toggle,
+so the eye never has to chase the cell.
+
+**Item 4 — Check vs Issues, unified (Model A).** Analysis: Issues (`/lowconf`) = validator flags
+∪ low-confidence non-blank cells, global + dismissable; the Check band = confidence < 0.8 (same
+threshold, incl. blanks), per-page + not dismissable — two counters and two steppers for nearly
+the same cells. Resolution: **Issues is the one worklist** (drawer + n·p + dismiss); the bands
+become a **passive per-page confidence gauge + the colour legend** for the tints — the
+click-to-cycle and its cursor state are deleted, removing the duplicate stepper. Roles are now
+distinct and non-competing: an objective health gauge that never moves on dismiss vs. a worklist
+that shrinks as you act. The tint stays an honest model-confidence signal (the user's Model-A
+choice — dismissal must not erase it).
+
+Verified: 160 frontend tests (4 new `toRectangular` cases, mutation-checked; toolbar/icon tests
+updated), `tsc -b` + build clean, detector only the 3 known `<img>` false positives. In Chromium
+light + dark: soft tint (no stripe/underline), Eye/FileText split, 0px shift on the raw toggle,
+passive bands (0 clickable band buttons). Numbered 2.89 — parallel session holds 2.85. Compact
+Khmer for the raw indicator reuses existing vocabulary, flagged for review.
+
+**Runtime caveat (not repo):** the shared demo doc still shows one stray edited cell
+(`row5col0`); the server's multi-worker `edited_tables` + non-persisting reset means neither a
+curl PUT nor a UI edit reliably reaches every worker (§2.87). A re-run of the doc or a server
+restart clears it — the user's call. Not part of this commit.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

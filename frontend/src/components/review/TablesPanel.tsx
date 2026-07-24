@@ -6,9 +6,9 @@ import type { PageData } from '../../api/types'
 import { TableEditor } from './TableEditor'
 import { PageTextPanel } from './PageTextPanel'
 import { useT } from '../../i18n.tsx'
-import { bandCells, nextInBand, type Band } from '../../lib/confidence'
+import { bandCells, type Band } from '../../lib/confidence'
 import { findMatches } from '../../lib/search'
-import { btnSmCls, chipCls, ICON_SM, iconBtnCls, inputCls } from '../../ui'
+import { btnSmCls, ICON_SM, iconBtnCls, inputCls } from '../../ui'
 
 // Stepper inside the match cluster — same geometry and states as the page
 // viewer's zoom segment, so the two clusters are visibly one control family.
@@ -155,21 +155,12 @@ export function TablesPanel(props: {
     setTextSaved(true)
   }, [page.corrected_text])
 
-  // Grid-cell confidence bands + a per-band jump cursor (§2.70). Clicking a chip
-  // cycles focus to the next cell in that band; the counter shows the position.
+  // Per-page confidence bands — a passive health gauge + the colour legend for the
+  // cell tints. Not a worklist: the Issues drawer (+ n/p) is the one place cells are
+  // stepped and actioned, so the bands no longer cycle (§2.89 — that removed the
+  // duplicate stepper and its cursor state). The counts stay objective (model
+  // confidence), independent of what's been dismissed.
   const bands = useMemo(() => bandCells(page.tables), [page.tables])
-  const [cursor, setCursor] = useState<Record<Band, number>>({ check: -1, skim: -1, clean: -1 })
-  // Band contents differ per page/doc — reset the cursors so they never index
-  // out of range on a page turn.
-  useEffect(() => setCursor({ check: -1, skim: -1, clean: -1 }), [docId, pageIdx])
-  const jumpBand = (b: Band) => {
-    const list = bands[b]
-    if (!list.length) return
-    const next = nextInBand(list.length, Math.min(cursor[b], list.length - 1))
-    setCursor((c) => ({ ...c, [b]: next }))
-    const cell = list[next]
-    onFocusCell(cell.table_id, cell.row, cell.col)
-  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -206,41 +197,38 @@ export function TablesPanel(props: {
           )}
         </span>
 
-        {/* ── Triage ── clickable band chips; click cycles to the next cell in the
-            band and flies the page image. Colour is redundant: each chip shows the
-            band word + count (+ live position while cycling) and an aria-label. */}
-        <span className="flex shrink-0 items-center gap-1.5">
+        {/* ── Confidence gauge ── a passive per-page health readout AND the colour
+            legend for the cell tints (rose Check · amber Skim · green Clean). Not a
+            worklist and not clickable — stepping/actioning lives in the Issues
+            drawer + n/p. The Eye toggles the tints; its label is the legend itself. */}
+        <span className="flex shrink-0 items-center gap-2.5">
           {BAND_ORDER.map((b) => {
             const total = bands[b].length
             if (total === 0) return null
             const style = BAND_STYLE[b]
-            const active = cursor[b] >= 0
             return (
-              <button
+              <span
                 key={b}
-                className={`${chipCls} ${style.chip}`}
-                onClick={() => jumpBand(b)}
-                aria-label={t(`triage_aria_${b}` as Parameters<typeof t>[0], { n: total })}
-                title={t('triage_tip')}
+                className="inline-flex items-center gap-1.5 text-ink-2"
+                title={t(`triage_aria_${b}` as Parameters<typeof t>[0], { n: total })}
               >
                 <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden />
-                {active ? t('band_progress', { band: t(`band_${b}` as Parameters<typeof t>[0]), i: cursor[b] + 1, n: total })
-                        : <>{total} {t(`band_${b}` as Parameters<typeof t>[0])}</>}
-              </button>
+                <span className="tabular-nums">{total}</span> {t(`band_${b}` as Parameters<typeof t>[0])}
+              </span>
             )
           })}
-          {/* Show/hide the confidence marks. Lives beside the band chips because
-              those chips ARE the colour legend — the toggle de-noises the grid
-              without ever erasing the model's signal (dismissal never does either). */}
+          {/* Icon-only: the Eye is dedicated to Confidence show/hide. It de-noises
+              the grid without ever erasing the model's signal (dismissal never does
+              either) — a reversible view, not a state change. */}
           {bands.check.length + bands.skim.length > 0 && (
             <button
-              className={`${btnSmCls} ${showConf ? '' : 'text-ink-3'}`}
+              className={`${iconBtnCls} ${showConf ? '' : 'text-ink-3'}`}
               onClick={toggleConf}
               aria-pressed={showConf}
+              aria-label={t('conf_toggle')}
               title={t('conf_toggle_tip')}
             >
               {showConf ? <Eye size={ICON_SM} aria-hidden /> : <EyeOff size={ICON_SM} aria-hidden />}
-              {t('conf_toggle')}
             </button>
           )}
         </span>

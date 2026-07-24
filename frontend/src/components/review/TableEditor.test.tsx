@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TableEditor, suppressNpWhenFocused } from './TableEditor'
+import { TableEditor, suppressNpWhenFocused, toRectangular } from './TableEditor'
 import type { PageTable } from '../../api/types'
 
 vi.mock('../../api/client', () => ({
@@ -103,15 +103,13 @@ describe('TableEditor raw/edited view toggle', () => {
     expect(view()).toBeDisabled()
   })
 
-  it('shows EyeOff in the edited view and Eye when viewing raw', () => {
+  it('uses the FileText icon (distinct from the Confidence Eye), never an eye', () => {
     renderEditor(edited())
-    expect(view().querySelector('.lucide-eye-off')).not.toBeNull()
-    expect(view().querySelector('.lucide-eye')).toBeNull()
-
+    // The raw toggle must NOT share the Eye glyph the Confidence toggle owns.
+    expect(view().querySelector('.lucide-file-text')).not.toBeNull()
+    expect(view().querySelector('[class*="lucide-eye"]')).toBeNull()
     fireEvent.click(view())
-    // .lucide-eye must match Eye exactly, not the EyeOff prefix.
-    expect(view().querySelector('svg.lucide-eye')).not.toBeNull()
-    expect(view().querySelector('.lucide-eye-off')).toBeNull()
+    expect(view().querySelector('.lucide-file-text')).not.toBeNull()
   })
 })
 
@@ -157,5 +155,31 @@ describe('suppressNpWhenFocused', () => {
         expect(suppressNpWhenFocused({ editing, event: { key } })).toBe(false)
       }
     }
+  })
+})
+
+// A jagged grid (row 0 a different width than the rest) made columns built from
+// row 0's length render blank for every row missing that index — the "editing
+// blanks a column" report. Squaring the grid to the true width closes that path.
+describe('toRectangular', () => {
+  it('pads short rows with empty strings to the target width', () => {
+    expect(toRectangular([['a'], ['b', 'c', 'd']], 3)).toEqual([['a', '', ''], ['b', 'c', 'd']])
+  })
+
+  it('truncates overflow so a longer row 0 cannot invent a phantom column', () => {
+    expect(toRectangular([['a', 'b', 'c', 'X'], ['d', 'e', 'f']], 3)).toEqual([['a', 'b', 'c'], ['d', 'e', 'f']])
+  })
+
+  it('is idempotent on an already-rectangular grid (same width)', () => {
+    const g = [['a', 'b'], ['c', 'd']]
+    expect(toRectangular(toRectangular(g, 2), 2)).toEqual(g)
+  })
+
+  it('never changes a cell that is within bounds — only fills/drops the edges', () => {
+    // The reported failure mode: editing one cell must not disturb its siblings.
+    const g = [['keep', 'me'], ['and', 'me', 'too']]
+    const out = toRectangular(g, 2)
+    expect(out[0]).toEqual(['keep', 'me'])
+    expect(out[1]).toEqual(['and', 'me']) // overflow 'too' dropped, siblings intact
   })
 })
