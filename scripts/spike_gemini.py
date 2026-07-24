@@ -78,8 +78,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--image", type=Path,
                     default=_REPO / "eval/datasets/real/CambodiaBudgetExecutioninApr-2024_p3.png")
-    ap.add_argument("--model", default="gemini-2.5-flash",
-                    help="pin a version, not the drifting -latest alias")
+    # A stable alias by default: specific versions (e.g. gemini-2.5-flash) get
+    # retired for new keys and 404. Pin a concrete version for a benchmark once
+    # --list-models shows what this key can reach.
+    ap.add_argument("--model", default="gemini-flash-latest",
+                    help="a Flash model or alias; run --list-models to see valid names")
+    ap.add_argument("--list-models", action="store_true",
+                    help="print the models this key can call, then exit")
     ap.add_argument("--out", type=Path, default=None, help="where to save raw output")
     args = ap.parse_args()
 
@@ -95,13 +100,38 @@ def main() -> int:
         return 2
 
     client = genai.Client(api_key=key)
+
+    def _list_generate_models() -> list[str]:
+        names = []
+        for mdl in client.models.list():
+            actions = getattr(mdl, "supported_actions", None) or \
+                getattr(mdl, "supported_generation_methods", None) or []
+            if "generateContent" in actions and "flash" in (mdl.name or "").lower():
+                names.append(mdl.name)
+        return names
+
+    if args.list_models:
+        print("Flash models this key can call:")
+        for n in _list_generate_models():
+            print("  ", n)
+        return 0
+
     t0 = time.perf_counter()
-    resp = client.models.generate_content(
-        model=args.model,
-        contents=[types.Part.from_bytes(data=args.image.read_bytes(), mime_type="image/png"),
-                  _PROMPT],
-        config=types.GenerateContentConfig(temperature=0.0),
-    )
+    try:
+        resp = client.models.generate_content(
+            model=args.model,
+            contents=[types.Part.from_bytes(data=args.image.read_bytes(), mime_type="image/png"),
+                      _PROMPT],
+            config=types.GenerateContentConfig(temperature=0.0),
+        )
+    except Exception as exc:
+        if "NOT_FOUND" in str(exc) or "404" in str(exc):
+            print(f"Model {args.model!r} is not available to this key. Available Flash models:")
+            for n in _list_generate_models():
+                print("  ", n)
+            print("Re-run with --model <one of the above>.")
+            return 1
+        raise
     raw = resp.text or ""
     print(f"{args.model}: {time.perf_counter()-t0:.0f}s, {len(raw)} chars")
     out = args.out or args.image.with_suffix(".gemini.json")
