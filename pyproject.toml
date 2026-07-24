@@ -32,6 +32,7 @@ dev = [
 # (synthetic-doc rendering) and openai (optional cloud LLM judge — contradicts
 # the local-first stance). Installed by CI's `uv sync --all-extras`.
 eval-extras = [
+    "google-genai>=1.0,<2.0",
     "openai>=1.0,<2.0",
     "playwright>=1.44,<2.0",
 ]

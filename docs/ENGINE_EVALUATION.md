@@ -147,3 +147,47 @@ Autoregressive HTML generation costs output tokens proportional to **cell count*
 table is 544 cells, so these models scale worst exactly where our documents are hardest — the
 opposite of what we want. Cloud APIs (no local memory) and the smallest local model (PaddleOCR-VL,
 0.96B) are therefore tried before any larger local VLM.
+
+---
+
+## 7. Cloud engines — setup and the free-tier reality
+
+Cloud engines are **opt-in and clearly labelled**: they send the page image to a third party. The
+picker groups engines under **Local** / **Cloud** so an analyst never selects one by accident, and
+the guidance text says plainly *"do not use for confidential documents."*
+
+### Gemini (Google) — setup
+
+Is it free? **Free in money, not in data.** The free tier needs no credit card (~250–1500
+requests/day, ~10–15/min on Flash), but **Google uses free-tier inputs and outputs to improve its
+models, and human reviewers may see them** — the terms warn against confidential data. The paid
+tier is data-private but requires billing. We ship the free tier *with the cloud label*; the eval
+documents are already-published public bulletins, so benchmarking on it discloses nothing new.
+
+Steps (one-time, ~3 minutes):
+1. Go to **https://aistudio.google.com** and sign in with a Google account.
+2. **Get API key** (left sidebar) → **Create API key** → let it create a new Google Cloud project.
+   No credit card.
+3. Copy the key and export it where the tools read it (mirrors the existing `OPENAI_API_KEY`
+   pattern in `src/khmer_pipeline/evaluation/evaluate_judge.py`):
+   ```bash
+   export GEMINI_API_KEY="AIza…"        # add to your shell profile or a local .env
+   ```
+   The webapp backend reads the same variable from its environment.
+4. Install the SDK (optional dependency group, like `openai`):
+   ```bash
+   uv add --optional eval-extras google-genai
+   ```
+5. Verify with the spike (public docs only — the moc_gas GT is Gemini-drafted, so the circularity
+   guard refuses it):
+   ```bash
+   uv run --extra eval-extras python scripts/spike_gemini.py \
+       --image eval/datasets/real/CambodiaBudgetExecutioninApr-2024_p3.png
+   ```
+   It runs one page, scores it against local GT via the shared HTML-table parser, and refuses any
+   Gemini-drafted GT (moc_gas) so a circular score can't slip in.
+
+Model: pin **`gemini-2.5-flash`** for reproducible benchmarking (the `-latest` alias drifts).
+
+**EEA/UK/Switzerland exception:** the paid-services data terms apply to the free tier there too, so
+the free tier will not activate without billing. Not relevant in Cambodia, noted for completeness.
