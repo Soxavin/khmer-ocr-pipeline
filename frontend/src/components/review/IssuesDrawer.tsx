@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Check, ShieldCheck, X } from 'lucide-react'
+import { Check, ListX, ShieldCheck, X } from 'lucide-react'
 import type { Issue } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
-import { iconBtnCls } from '../../ui'
+import { btnSmCls, iconBtnCls } from '../../ui'
 
 // Failure-mode taxonomy (validate.py) → plain localized phrase. An analyst reads
 // WHY a cell is flagged in her own language, not a cryptic Latin badge.
@@ -25,9 +25,10 @@ export function IssuesDrawer(props: {
   currentIdx: number
   onJump: (idx: number) => void
   onDismiss: (key: string) => void
+  onDismissAll: () => void
   onClose: () => void
 }) {
-  const { issues, currentIdx, onJump, onDismiss, onClose } = props
+  const { issues, currentIdx, onJump, onDismiss, onDismissAll, onClose } = props
   const { t } = useT()
   // Exit animation only lives here; the removal itself is App state (onDismiss).
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
@@ -46,12 +47,20 @@ export function IssuesDrawer(props: {
   const visible = issues
   return (
     <div className="flex h-full w-80 shrink-0 flex-col bg-surface">
-      <div className="flex h-10 shrink-0 items-center justify-between whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 whitespace-nowrap border-b border-line-strong/50 bg-rail/30 px-3">
         <span className="text-sm font-semibold text-ink">{t('issues_n', { n: visible.length })}</span>
-        <span className="text-xs text-ink-3">{t('np_step')}</span>
-        <button className={iconBtnCls} onClick={onClose} aria-label={t('close_issues')}>
-          <X size={14} aria-hidden />
-        </button>
+        <span className="flex items-center gap-2">
+          <span className="text-xs text-ink-3">{t('np_step')}</span>
+          {visible.length > 0 && (
+            <button className={btnSmCls} onClick={onDismissAll} title={t('dismiss_all')}>
+              <ListX size={13} aria-hidden />
+              {t('dismiss_all')}
+            </button>
+          )}
+          <button className={iconBtnCls} onClick={onClose} aria-label={t('close_issues')}>
+            <X size={14} aria-hidden />
+          </button>
+        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {visible.length === 0 && (

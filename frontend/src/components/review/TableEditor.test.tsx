@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { TableEditor } from './TableEditor'
+import { TableEditor, suppressNpWhenFocused } from './TableEditor'
 import type { PageTable } from '../../api/types'
 
 vi.mock('../../api/client', () => ({
@@ -102,5 +102,41 @@ describe('TableEditor diff toggle', () => {
   it('stays disabled until the table has actually been edited', () => {
     renderEditor(table({ edited: false }))
     expect(diff()).toBeDisabled()
+  })
+
+  // The Eye/EyeOff swap is the only visible signal of diff state now, so if the
+  // icon stopped tracking the toggle the control would silently lie.
+  it('shows EyeOff when off and Eye when on', () => {
+    renderEditor(table({ edited: true }))
+    expect(diff().querySelector('.lucide-eye-off')).not.toBeNull()
+    expect(diff().querySelector('.lucide-eye')).toBeNull()
+
+    fireEvent.click(diff())
+    // .lucide-eye must match Eye exactly, not the EyeOff prefix.
+    expect(diff().querySelector('svg.lucide-eye')).not.toBeNull()
+    expect(diff().querySelector('.lucide-eye-off')).toBeNull()
+  })
+})
+
+// The n/p issue-stepping fix rests entirely on this predicate telling AG Grid to
+// stand down for n/p on a focused cell — but keep its edit behaviour everywhere
+// else. A regression here silently reopens the "typing n into the cell" bug.
+describe('suppressNpWhenFocused', () => {
+  it('suppresses n and p only when the cell is NOT editing', () => {
+    expect(suppressNpWhenFocused({ editing: false, event: { key: 'n' } })).toBe(true)
+    expect(suppressNpWhenFocused({ editing: false, event: { key: 'p' } })).toBe(true)
+  })
+
+  it('lets n and p through while the cell IS editing, so words can be typed', () => {
+    expect(suppressNpWhenFocused({ editing: true, event: { key: 'n' } })).toBe(false)
+    expect(suppressNpWhenFocused({ editing: true, event: { key: 'p' } })).toBe(false)
+  })
+
+  it('never suppresses any other key, editing or not', () => {
+    for (const editing of [true, false]) {
+      for (const key of ['a', 'z', 'Enter', ' ', 'ArrowDown', 'N', 'P']) {
+        expect(suppressNpWhenFocused({ editing, event: { key } })).toBe(false)
+      }
+    }
   })
 })

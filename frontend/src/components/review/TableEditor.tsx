@@ -8,7 +8,7 @@ import {
   type ColDef,
   type GridApi,
 } from 'ag-grid-community'
-import { Check, Download, GitCompare, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, Download, Eye, EyeOff, ListPlus, Redo2, RotateCcw, Undo2 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageTable } from '../../api/types'
@@ -42,6 +42,15 @@ const CELL_CONF_LOW = 0.8
 const CELL_CONF_MID = 0.95
 
 type Row = { __r: number; [col: `c${number}`]: string }
+
+/** Stop AG Grid from starting a cell edit when `n`/`p` is pressed on a focused
+    (non-editing) cell — those keys step the issue list (App's window handler), and
+    without this the second press would type the letter into the cell instead. While
+    the cell IS editing, or for any other key, AG Grid keeps its normal behaviour so
+    the analyst can still type words containing n/p. Exported for direct unit test. */
+export function suppressNpWhenFocused(params: { editing: boolean; event: { key: string } }): boolean {
+  return !params.editing && (params.event.key === 'n' || params.event.key === 'p')
+}
 
 function toRows(grid: string[][]): Row[] {
   return grid.map((row, r) => {
@@ -84,11 +93,12 @@ function Seam() {
 
 function Seg({
   active = false,
+  className = '',
   children,
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
   return (
-    <button type="button" className={segCls(active)} {...rest}>
+    <button type="button" className={`${segCls(active)} ${className}`} {...rest}>
       {children}
     </button>
   )
@@ -252,6 +262,16 @@ export function TableEditor(props: {
         // truncation; reading never requires clicking into the cell.
         wrapText: true,
         autoHeight: true,
+        suppressKeyboardEvent: suppressNpWhenFocused,
+        // Diff mode only: reveal what the OCR originally read for an edited cell,
+        // on hover, without a second column or a taller row. undefined = no tooltip
+        // (unchanged cells, or diff off), so the grid stays quiet.
+        tooltipValueGetter: (p) => {
+          if (!diffOn) return undefined
+          const r = (p.data as Row).__r
+          const orig = table.original_grid[r]?.[c] ?? ''
+          return orig !== (p.value ?? '') ? t('ocr_original_tt', { v: orig || t('empty_cell') }) : undefined
+        },
         cellClassRules: {
           'cell-diff': (p) => {
             if (!diffOn) return false
@@ -282,7 +302,7 @@ export function TableEditor(props: {
           },
         },
       })),
-    [nCols, diffOn, table, findQuery, activeMatch],
+    [nCols, diffOn, table, findQuery, activeMatch, t],
   )
 
   const rows = useMemo(() => toRows(grid), [grid])
@@ -380,8 +400,11 @@ export function TableEditor(props: {
                 aria-pressed={diffOn}
                 aria-label={t('diff')}
                 title={t('diff_tip')}
+                className="w-7"
               >
-                <GitCompare size={ICON_XS} aria-hidden />
+                {/* Eye = comparison is being shown; EyeOff = hidden. The icon states
+                    what the toggle currently does, not what pressing it will do. */}
+                {diffOn ? <Eye size={ICON_XS} aria-hidden /> : <EyeOff size={ICON_XS} aria-hidden />}
               </Seg>
             </Track>
 
@@ -410,6 +433,7 @@ export function TableEditor(props: {
           getRowId={(p) => String((p.data as Row).__r)}
           domLayout="autoHeight"
           headerHeight={26}
+          tooltipShowDelay={200}
           stopEditingWhenCellsLoseFocus
           onGridReady={(e) => (gridApi.current = e.api)}
           onCellValueChanged={(e) => {

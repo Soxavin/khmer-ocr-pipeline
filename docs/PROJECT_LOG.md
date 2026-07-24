@@ -3318,6 +3318,64 @@ header, doc scroll range 0) in light and dark. Numbered 2.86 — the parallel se
 
 ---
 
+### 2.87 The n/p bug was AG Grid starting an edit, not a listener leak (2026-07-24)
+
+Four changes to the review surface: Dismiss-all for the Issues drawer, the `n`/`p`
+focus-hijack fix, the Diff icon → Eye/EyeOff, and revealing the original OCR value in diff
+mode. Two of the four were premised on things that were not true, which is the reusable part.
+
+**The n/p bug, correctly diagnosed.** Stepping issues with `n`/`p` typed the letter into the
+grid instead of advancing. The tempting reading is a stale listener or a missing guard — but
+the window handler *already* bailed on `.ag-cell`. The real chain: `jumpToIssue` →
+`setFocusedCell` *focuses* a cell (it does not edit it); AG Grid's default is that a printable
+key on a focused, non-editing cell **starts an edit with that character**; and because the
+handler bailed on any `.ag-cell` target, the second `n` never reached the navigation branch —
+it went straight into AG Grid's edit-start. So the fix is two coordinated halves, and neither
+alone works: (1) `suppressKeyboardEvent` tells AG Grid to stand down for `n`/`p` when
+`!editing`, so no edit starts; (2) the window handler now handles `n`/`p` *before* the
+`.ag-cell` bail, gated on the target not being a real text input, so stepping fires from a
+focused cell. While a cell IS editing, both keys type normally — the analyst can still write
+words with n/p. Proven in a real browser: focus a cell, press `n`, assert **no editor opens**
+and focus advances to the next issue's cell; the whole-grid text is unchanged; then a genuine
+double-click edit still lands text containing n/p.
+
+**Item 4 was a presentation change wearing a data-model costume.** The brief asked to "track
+both rawText and editedText." That dual state already exists — `PageTable.original_grid` (raw
+OCR) and `grid` (edited) — and diff mode already tints the cells that differ. Nothing was
+added to `types.ts`. What was missing was *showing* the original: a `tooltipValueGetter` now
+returns `OCR: {original}` on hover for changed cells in diff mode only, reusing the stored
+value. The tint says *which* cells changed; the tooltip says *what* the OCR had. No new
+column, no cell-renderer rework, no taller rows.
+
+**Icon and Dismiss-all.** Diff's `GitCompare` (from §2.86, two commits old) became `Eye` when
+the comparison is shown / `EyeOff` when hidden — the icon now states the current state, and
+since it is the only visible signal, a test pins that the swap tracks it. Dismiss-all clears
+the whole triage list at once behind a `window.confirm`, matching the Replace-all bulk-action
+guard, because there is no per-item un-dismiss within a session.
+
+**No new Khmer authored.** `dismiss_all` reuses the existing លុបចេញ vocabulary; the confirm
+reuses the verified `dismiss_issue` parenthetical; the tooltip value is the stored OCR string,
+never re-typed. Flagged for the user's review as usual.
+
+The `suppressKeyboardEvent` predicate is a pure exported function so it is unit-tested in
+isolation (n/p only when not editing; every other key and the editing case pass through);
+that assertion and the Eye/EyeOff swap were both mutation-checked (invert each → exactly one
+test dies).
+
+Verified: 152 frontend tests (6 new across `TableEditor` + a new `IssuesDrawer` test),
+`tsc -b` clean, build clean, detector only the 3 known `<img>` false positives; n/p, the diff
+tooltip (light + dark), and Dismiss-all all confirmed in Chromium. Numbered 2.87 — the
+parallel session holds 2.85.
+
+**Caveat (runtime, not repo).** The in-browser verification wrote two probe cells into the
+running demo doc (`d16b0292019f`, table `p1_t1`). The reset endpoint did not restore them —
+the standing server appears to be multi-worker with per-worker in-memory `edited_tables`, so a
+single DELETE cannot clear every worker and a curl PUT lands on a cold worker (404). This is
+runtime state of a server this session does not own; a re-run of that document (or a server
+restart) clears it. It is not part of this commit.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates

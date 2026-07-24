@@ -197,6 +197,18 @@ export default function App() {
     setDismissedIssues((prev) => new Set(prev).add(key))
     setIssueIdx(-1) // indexes renumber after a removal: drop the highlight, n restarts cleanly
   }, [])
+  // Bulk dismiss: clears the whole current list at once. Confirmed first (the same
+  // guard Replace-all uses) because there is no per-item un-dismiss within a session.
+  const dismissAllIssues = useCallback(() => {
+    if (!issues.length) return
+    if (!window.confirm(t('dismiss_all_confirm', { n: issues.length }))) return
+    setDismissedIssues((prev) => {
+      const next = new Set(prev)
+      for (const it of issues) next.add(`${it.table_id}:${it.row}:${it.col}`)
+      return next
+    })
+    setIssueIdx(-1)
+  }, [issues, t])
 
   // Auto preprocessing suggestions: advisory values computed from the page
   // images. Applied at most once per document; the user's changes always win.
@@ -503,6 +515,22 @@ export default function App() {
         setShowPalette((s) => !s)
         return
       }
+      // n/p issue-stepping works even when a grid cell is FOCUSED, so repeated
+      // presses walk the list instead of the second press landing in the cell.
+      // Gated on the cell not being in text entry (an open editor renders an
+      // <input>); AG Grid's own suppressKeyboardEvent stops it starting an edit
+      // on these keys, so this branch is what actually advances. Handled before
+      // the .ag-cell bail below, which still guards every OTHER shortcut.
+      const editing = target.closest('input,textarea,select,[contenteditable]')
+      if (!editing && issues.length && (e.key === 'n' || e.key === 'p')) {
+        e.preventDefault()
+        jumpToIssue(
+          e.key === 'n'
+            ? (issueIdx + 1) % issues.length
+            : (issueIdx - 1 + issues.length) % issues.length,
+        )
+        return
+      }
       if (target.closest('input,textarea,select,[contenteditable],.ag-cell')) return
       if (e.key === 'Escape') {
         setShowPalette(false)
@@ -523,10 +551,6 @@ export default function App() {
             qc.invalidateQueries({ queryKey: ['page'] })
           }).catch((err) => setError(friendlyError(err, t('err_unreachable'))))
         }
-      } else if (e.key === 'n' && issues.length) {
-        jumpToIssue((issueIdx + 1) % issues.length)
-      } else if (e.key === 'p' && issues.length) {
-        jumpToIssue((issueIdx - 1 + issues.length) % issues.length)
       } else if (e.key === 'ArrowLeft' && pageIdx > 0) {
         setPageIdx(pageIdx - 1)
       } else if (e.key === 'ArrowRight' && pageIdx < pageCount - 1) {
@@ -1163,6 +1187,7 @@ export default function App() {
               currentIdx={issueIdx}
               onJump={jumpToIssue}
               onDismiss={dismissIssue}
+              onDismissAll={dismissAllIssues}
               onClose={() => setDrawer(null)}
             />
           )}
