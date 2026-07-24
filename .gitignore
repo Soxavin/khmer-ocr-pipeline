@@ -48,3 +48,8 @@ docs/presentations/
 # React frontend
 frontend/node_modules/
 frontend/dist/
+
+# Secrets — API keys live in the environment or a local .env, never committed
+.env
+.env.*
+*.gemini.json
