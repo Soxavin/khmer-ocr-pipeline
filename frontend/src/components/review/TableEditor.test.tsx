@@ -73,48 +73,67 @@ describe('TableEditor undo-history survival', () => {
   })
 })
 
-// The diff control had no coverage at all before §2.84, which is how it kept an
-// action's appearance and shipped without aria-pressed. Now that it is icon-only,
-// its accessible name is the ONLY thing naming it — so these assertions are what
-// stands between the toggle and becoming an unlabelled mystery button.
-describe('TableEditor diff toggle', () => {
-  const diff = () => screen.getByRole('button', { name: /^diff$/i })
+// The Raw/Edited view toggle is icon-only, so its accessible name ("Original")
+// is the only thing naming it, and the Eye/EyeOff swap is the only visible signal
+// of which view is showing. A non-pristine table (grid ≠ original) is required —
+// with nothing to compare against, the toggle is deliberately disabled.
+describe('TableEditor raw/edited view toggle', () => {
+  const view = () => screen.getByRole('button', { name: /^raw ocr$/i })
+  const edited = () => table({ edited: true, grid: [['b']], original_grid: [['a']] })
 
   it('announces its state through aria-pressed and flips on click', () => {
-    renderEditor(table({ edited: true }))
-    expect(diff()).toHaveAttribute('aria-pressed', 'false')
+    renderEditor(edited())
+    expect(view()).toHaveAttribute('aria-pressed', 'false')
 
-    fireEvent.click(diff())
-    expect(diff()).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(view())
+    expect(view()).toHaveAttribute('aria-pressed', 'true')
 
-    fireEvent.click(diff())
-    expect(diff()).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(view())
+    expect(view()).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('is icon-only: reachable by accessible name, with no visible label text', () => {
-    renderEditor(table({ edited: true }))
-    // Named for assistive tech...
-    expect(diff()).toBeInTheDocument()
-    // ...but carrying no rendered word, which is the point of the icon-only form.
-    expect(diff().textContent).toBe('')
+    renderEditor(edited())
+    expect(view()).toBeInTheDocument()
+    expect(view().textContent).toBe('')
   })
 
-  it('stays disabled until the table has actually been edited', () => {
+  it('is disabled while the table is pristine (grid equals the OCR original)', () => {
     renderEditor(table({ edited: false }))
-    expect(diff()).toBeDisabled()
+    expect(view()).toBeDisabled()
   })
 
-  // The Eye/EyeOff swap is the only visible signal of diff state now, so if the
-  // icon stopped tracking the toggle the control would silently lie.
-  it('shows EyeOff when off and Eye when on', () => {
-    renderEditor(table({ edited: true }))
-    expect(diff().querySelector('.lucide-eye-off')).not.toBeNull()
-    expect(diff().querySelector('.lucide-eye')).toBeNull()
+  it('shows EyeOff in the edited view and Eye when viewing raw', () => {
+    renderEditor(edited())
+    expect(view().querySelector('.lucide-eye-off')).not.toBeNull()
+    expect(view().querySelector('.lucide-eye')).toBeNull()
 
-    fireEvent.click(diff())
+    fireEvent.click(view())
     // .lucide-eye must match Eye exactly, not the EyeOff prefix.
-    expect(diff().querySelector('svg.lucide-eye')).not.toBeNull()
-    expect(diff().querySelector('.lucide-eye-off')).toBeNull()
+    expect(view().querySelector('svg.lucide-eye')).not.toBeNull()
+    expect(view().querySelector('.lucide-eye-off')).toBeNull()
+  })
+})
+
+// Undoing every edit back to the OCR original must retire the "Edited" badge and
+// disable Reset on its own — the content is identical, so a lingering badge or an
+// enabled Reset would misrepresent the table.
+describe('TableEditor pristine derivation', () => {
+  it('hides the Edited badge when grid matches original despite edited=true', () => {
+    renderEditor(table({ edited: true, grid: [['a']], original_grid: [['a']] }))
+    expect(screen.queryByText(/^edited$/i)).toBeNull()
+  })
+
+  it('shows the Edited badge when the grid genuinely differs', () => {
+    renderEditor(table({ edited: true, grid: [['b']], original_grid: [['a']] }))
+    expect(screen.getByText(/^edited$/i)).toBeInTheDocument()
+  })
+
+  it('disables Reset when pristine, enables it once the grid differs', () => {
+    const { rerenderTable } = renderEditor(table({ edited: true, grid: [['a']], original_grid: [['a']] }))
+    expect(screen.getByRole('button', { name: /reset/i })).toBeDisabled()
+    rerenderTable(table({ edited: true, grid: [['b']], original_grid: [['a']] }))
+    expect(screen.getByRole('button', { name: /reset/i })).toBeEnabled()
   })
 })
 

@@ -26,9 +26,11 @@ export function IssuesDrawer(props: {
   onJump: (idx: number) => void
   onDismiss: (key: string) => void
   onDismissAll: () => void
+  /** Hovering a row previews its cell in the grid; null on leave. */
+  onHoverIssue?: (idx: number | null) => void
   onClose: () => void
 }) {
-  const { issues, currentIdx, onJump, onDismiss, onDismissAll, onClose } = props
+  const { issues, currentIdx, onJump, onDismiss, onDismissAll, onHoverIssue, onClose } = props
   const { t } = useT()
   // Exit animation only lives here; the removal itself is App state (onDismiss).
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
@@ -79,6 +81,8 @@ export function IssuesDrawer(props: {
               className={`group flex items-start gap-2 border-b border-line px-3 py-2 transition-colors duration-150 hover:bg-rail ${
                 i === currentIdx ? 'bg-primary-soft' : ''
               } ${leaving.has(k) ? 'issue-out' : ''}`}
+              onMouseEnter={() => onHoverIssue?.(i)}
+              onMouseLeave={() => onHoverIssue?.(null)}
             >
               <button
                 className="min-w-0 flex-1 text-left text-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"

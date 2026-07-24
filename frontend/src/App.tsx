@@ -153,6 +153,7 @@ export default function App() {
   const moreAnchor = useRef<HTMLSpanElement>(null)
   const [showPalette, setShowPalette] = useState(false)
   const [issueIdx, setIssueIdx] = useState(-1)
+  const [hoverIssue, setHoverIssue] = useState<number | null>(null)
   const [canvasView, setCanvasView] = useState<'single' | 'grid'>('single')
   const split = useSplit()
   const [runSettings, setRunSettings] = useState<RunSettings>({})
@@ -193,6 +194,12 @@ export default function App() {
     () => allIssues.filter((it) => !dismissedIssues.has(`${it.table_id}:${it.row}:${it.col}`)),
     [allIssues, dismissedIssues],
   )
+  // The drawer row under the cursor, resolved to a grid cell — TablesPanel rings it
+  // on whichever table owns it. Cleared on leave (null) and whenever the list changes.
+  const hoverCell = useMemo(() => {
+    const it = hoverIssue !== null ? issues[hoverIssue] : null
+    return it ? { tid: it.table_id, row: it.row, col: it.col } : null
+  }, [hoverIssue, issues])
   const dismissIssue = useCallback((key: string) => {
     setDismissedIssues((prev) => new Set(prev).add(key))
     setIssueIdx(-1) // indexes renumber after a removal: drop the highlight, n restarts cleanly
@@ -792,7 +799,15 @@ export default function App() {
                   ? 'bg-danger-soft font-semibold text-danger-ink hover:bg-danger-soft/70'
                   : 'bg-ok-soft text-ok-ink'
               }`}
-              onClick={() => setDrawer((d) => (d === 'issues' ? null : 'issues'))}
+              onClick={() =>
+                setDrawer((d) => {
+                  if (d === 'issues') return null
+                  // Opening the drawer also advances to the next un-dismissed issue,
+                  // so the chip is a one-click "take me to the next thing to check".
+                  if (issues.length) jumpToIssue((issueIdx + 1) % issues.length)
+                  return 'issues'
+                })
+              }
               title={t('issues_tip')}
             >
               {issues.length ? (
@@ -1158,6 +1173,7 @@ export default function App() {
                     blockFocus={blockSel?.from === 'canvas' ? blockSel : null}
                     onSelectBlock={textPickBlock}
                     onHoverBlock={setBlockHover}
+                    hoverCell={hoverCell}
                   />
                 </Suspense>
               ) : (
@@ -1188,6 +1204,7 @@ export default function App() {
               onJump={jumpToIssue}
               onDismiss={dismissIssue}
               onDismissAll={dismissAllIssues}
+              onHoverIssue={setHoverIssue}
               onClose={() => setDrawer(null)}
             />
           )}

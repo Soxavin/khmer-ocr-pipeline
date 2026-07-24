@@ -17,6 +17,7 @@ const issue = (over: Partial<Issue> = {}): Issue => ({
 
 function renderDrawer(issues: Issue[]) {
   const onDismissAll = vi.fn()
+  const onHoverIssue = vi.fn()
   render(
     <IssuesDrawer
       issues={issues}
@@ -24,10 +25,11 @@ function renderDrawer(issues: Issue[]) {
       onJump={vi.fn()}
       onDismiss={vi.fn()}
       onDismissAll={onDismissAll}
+      onHoverIssue={onHoverIssue}
       onClose={vi.fn()}
     />,
   )
-  return { onDismissAll }
+  return { onDismissAll, onHoverIssue }
 }
 
 describe('IssuesDrawer dismiss-all', () => {
@@ -44,5 +46,17 @@ describe('IssuesDrawer dismiss-all', () => {
   it('is absent when there are no issues to dismiss', () => {
     renderDrawer([])
     expect(screen.queryByRole('button', { name: /dismiss all/i })).toBeNull()
+  })
+})
+
+describe('IssuesDrawer hover preview', () => {
+  it('reports the hovered row index on enter and null on leave', () => {
+    const { onHoverIssue } = renderDrawer([issue({ col: 0 }), issue({ col: 1 })])
+    // The jump button carries the cell text; its row is the hover target's parent.
+    const rows = screen.getAllByText('x').map((el) => el.closest('div.group') as HTMLElement)
+    fireEvent.mouseEnter(rows[1])
+    expect(onHoverIssue).toHaveBeenLastCalledWith(1)
+    fireEvent.mouseLeave(rows[1])
+    expect(onHoverIssue).toHaveBeenLastCalledWith(null)
   })
 })

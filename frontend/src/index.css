@@ -211,22 +211,32 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Diff view: cells that differ from the OCR original — primary-tinted, since
-   "edited" is the analyst's own mark, not a warning. */
-.cell-diff {
-  background: var(--color-primary-soft) !important;
-  box-shadow: inset 0 0 0 1px var(--color-primary);
+/* Edited cell: the analyst's own override, marked with a small primary corner
+   fold — a channel of its own (a pseudo-element, not background/shadow) so it
+   composes with a confidence stripe or a ring on the same cell. */
+.cell-edited { position: relative; }
+.cell-edited::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 6px solid var(--color-primary);
+  border-left: 6px solid transparent;
 }
-/* Low-confidence carries a dotted underline as well as the tint — the trust
-   signal must survive color-blindness and washed-out projectors. Tints are
-   deliberately faint: on a bad page hundreds of cells are flagged, and loud
-   tints turn the grid into wallpaper (the signal has to survive volume too). */
+/* Low/mid confidence: a 2px status stripe down the cell's leading edge (rose /
+   amber, matching the Check / Skim band dots), NOT a full fill — on a bad page
+   hundreds of cells are flagged and a wash turns the grid into wallpaper. It
+   rides the background channel (a gradient, not border-left), so it leaves the
+   box-shadow rings free and shifts no layout. Check keeps a dotted underline so
+   the signal survives colour-blindness and washed-out projectors. */
 .cell-conf-low {
-  background: var(--cell-low-bg);
+  background: linear-gradient(to right, var(--color-conf-low) 0 2px, transparent 2px);
   text-decoration: underline dotted var(--cell-low-line) 1.5px;
   text-underline-offset: 3px;
 }
-.cell-conf-mid { background: var(--cell-mid-bg); }
+.cell-conf-mid { background: linear-gradient(to right, var(--color-conf-mid) 0 2px, transparent 2px); }
 
 /* Search hits: an inset RING, never a background. The confidence washes and the
    diff tint above are persistent trust signals the analyst is searching in order
@@ -241,6 +251,18 @@ body {
   box-shadow:
     inset 0 0 0 2px var(--color-primary),
     inset 0 0 0 6px var(--color-find-halo);
+}
+/* Jump target (issue click / n·p / band): a high-contrast "you are here" ring,
+   stronger than AG's own focus outline, so a stepped-to issue reads instantly. */
+.cell-focus-active {
+  box-shadow:
+    inset 0 0 0 2px var(--color-primary),
+    inset 0 0 0 5px color-mix(in oklab, var(--color-primary) 18%, transparent);
+}
+/* A drawer issue merely being hovered: a lighter ring — a preview of where the
+   click would land, without committing focus there. */
+.cell-issue-hover {
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--color-primary) 45%, transparent);
 }
 
 /* Flash a table the user jumped to from the page image. */

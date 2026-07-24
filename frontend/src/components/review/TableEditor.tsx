@@ -115,8 +115,12 @@ export function TableEditor(props: {
   findQuery?: string
   /** The one match currently stepped to, when it belongs to THIS table. */
   activeMatch?: { row: number; col: number } | null
+  /** Page-level: whether low-confidence marks are shown. */
+  showConf?: boolean
+  /** A drawer issue being hovered, when it points at THIS table — soft ring. */
+  hoverCell?: { row: number; col: number } | null
 }) {
-  const { docId, table, focused, onFocus, flash, focusCell, findQuery = '', activeMatch = null } = props
+  const { docId, table, focused, onFocus, flash, focusCell, findQuery = '', activeMatch = null, showConf = true, hoverCell = null } = props
   const qc = useQueryClient()
   const { t } = useT()
   const gridApi = useRef<GridApi | null>(null)
@@ -124,7 +128,7 @@ export function TableEditor(props: {
   const [grid, setGrid] = useState<string[][]>(table.grid)
   const [history, setHistory] = useState<string[][][]>([])
   const [redo, setRedo] = useState<string[][][]>([])
-  const [diffOn, setDiffOn] = useState(false)
+  const [rawView, setRawView] = useState(false)
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [menu, setMenu] = useState<Menu | null>(null)
   const [edited, setEdited] = useState(table.edited)
@@ -170,7 +174,7 @@ export function TableEditor(props: {
   // this the rings would lag a keystroke behind the query the analyst is typing.
   useEffect(() => {
     gridApi.current?.refreshCells({ force: true })
-  }, [findQuery, activeMatch])
+  }, [findQuery, activeMatch, focusCell, hoverCell, showConf, rawView])
 
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
@@ -236,7 +240,7 @@ export function TableEditor(props: {
     setHistory([])
     setRedo([])
     setEdited(false)
-    setDiffOn(false)
+    setRawView(false)
   }, [docId, table])
 
   const nCols = grid[0]?.length ?? 0
@@ -255,7 +259,8 @@ export function TableEditor(props: {
       Array.from({ length: nCols }, (_, c) => ({
         field: `c${c}`,
         headerName: String(c + 1),
-        editable: true,
+        // Raw view shows the OCR ground truth read-only; edited view is where work happens.
+        editable: !rawView,
         minWidth: 60,
         flex: 1,
         // Long Khmer values wrap and the row grows — nothing hides behind a
@@ -263,49 +268,70 @@ export function TableEditor(props: {
         wrapText: true,
         autoHeight: true,
         suppressKeyboardEvent: suppressNpWhenFocused,
-        // Diff mode only: reveal what the OCR originally read for an edited cell,
-        // on hover, without a second column or a taller row. undefined = no tooltip
-        // (unchanged cells, or diff off), so the grid stays quiet.
+        // Edited view only: reveal what the OCR originally read for a changed cell,
+        // on hover. undefined = no tooltip (unchanged cells, or raw view), so the
+        // grid stays quiet. Raw view IS the original, so a tooltip would be circular.
         tooltipValueGetter: (p) => {
-          if (!diffOn) return undefined
+          if (rawView) return undefined
           const r = (p.data as Row).__r
           const orig = table.original_grid[r]?.[c] ?? ''
           return orig !== (p.value ?? '') ? t('ocr_original_tt', { v: orig || t('empty_cell') }) : undefined
         },
         cellClassRules: {
-          'cell-diff': (p) => {
-            if (!diffOn) return false
+          // The analyst's own edits: a small primary corner mark, always visible in
+          // the edited view so overrides read at a glance. Raw view has no edits.
+          'cell-edited': (p) => {
+            if (rawView) return false
             const r = (p.data as Row).__r
             return (table.original_grid[r]?.[c] ?? '') !== (p.value ?? '')
           },
           // Search is a TRANSIENT overlay on persistent trust signals: it rings the
-          // cell rather than tinting it, so a low-confidence wash or a diff tint
-          // stays visible underneath. Replacing the background would hide exactly
-          // the information the analyst is searching in order to check.
+          // cell rather than tinting it, so a low-confidence stripe stays visible
+          // underneath. Replacing the background would hide exactly the information
+          // the analyst is searching in order to check.
           'cell-find': (p) => cellMatches(String(p.value ?? ''), findQuery),
           'cell-find-active': (p) =>
             activeMatch !== null &&
             (p.data as Row).__r === activeMatch.row &&
             c === activeMatch.col,
-          // Empty cells are intentional table structure, not OCR errors — never tint them.
+          // Jump target (issue click / n·p / band) and drawer-hover: high-contrast
+          // "you are here" rings, on the box-shadow channel so they compose with the
+          // confidence stripe underneath.
+          'cell-focus-active': (p) =>
+            focusCell != null && focusCell.n > 0 &&
+            (p.data as Row).__r === focusCell.row && c === focusCell.col,
+          'cell-issue-hover': (p) =>
+            hoverCell != null &&
+            (p.data as Row).__r === hoverCell.row && c === hoverCell.col,
+          // Empty cells are intentional table structure, not OCR errors — never mark them.
+          // Confidence marks reflect the OCR reading, so they show in both views,
+          // gated only by the page-level Confidence toggle.
           'cell-conf-low': (p) => {
-            if (diffOn || !String(p.value ?? '').trim()) return false
+            if (!showConf || !String(p.value ?? '').trim()) return false
             const r = (p.data as Row).__r
             const v = table.confidence[r]?.[c]
             return v !== null && v !== undefined && v < CELL_CONF_LOW
           },
           'cell-conf-mid': (p) => {
-            if (diffOn || !String(p.value ?? '').trim()) return false
+            if (!showConf || !String(p.value ?? '').trim()) return false
             const r = (p.data as Row).__r
             const v = table.confidence[r]?.[c]
             return v !== null && v !== undefined && v >= CELL_CONF_LOW && v < CELL_CONF_MID
           },
         },
       })),
-    [nCols, diffOn, table, findQuery, activeMatch, t],
+    [nCols, rawView, table, findQuery, activeMatch, focusCell, hoverCell, showConf, t],
   )
 
-  const rows = useMemo(() => toRows(grid), [grid])
+  const rows = useMemo(() => toRows(rawView ? table.original_grid : grid), [rawView, table.original_grid, grid])
+
+  // Undoing every change back to the OCR original leaves `edited` true (a server
+  // fact) but the content identical — so the "Edited" badge and Reset would lie.
+  // Derive pristineness from the content itself: no badge, nothing to reset.
+  const isPristine = useMemo(
+    () => JSON.stringify(grid) === JSON.stringify(table.original_grid),
+    [grid, table.original_grid],
+  )
 
   return (
     <section
@@ -362,7 +388,7 @@ export function TableEditor(props: {
           </span>
           {verified ? t('verified') : t('verify')}
         </button>
-        {edited && <span className="rounded-full bg-primary-soft px-2 py-0.5 font-medium text-primary-strong">{t('edited')}</span>}
+        {edited && !isPristine && <span className="rounded-full bg-primary-soft px-2 py-0.5 font-medium text-primary-strong">{t('edited')}</span>}
         {/* Fixed-width slot so the toolbar doesn't jump as save state flickers. */}
         {saveState === 'saving' && <span className="w-14 text-ink-3">{t('saving')}</span>}
         {saveState === 'error' && (
@@ -383,28 +409,28 @@ export function TableEditor(props: {
                 <Redo2 size={ICON_XS} aria-hidden />
               </Seg>
               <Seam />
-              <Seg onClick={reset} disabled={!edited} title={t('reset_tip')}>
+              {/* Reset auto-disables the moment content matches the OCR original
+                  (isPristine), even if that was reached by undoing rather than Reset. */}
+              <Seg onClick={reset} disabled={isPristine || !edited} title={t('reset_tip')}>
                 <RotateCcw size={ICON_XS} aria-hidden />
                 {t('reset')}
               </Seg>
             </Track>
 
-            {/* Icon-only, and a toggle rather than an action: it changes how the grid
-                is rendered, it does not mutate it. aria-pressed was missing entirely
-                before — this was the one toggle in the app that never announced state. */}
-            <Track label={t('diff')}>
+            {/* View toggle: Raw (read-only OCR ground truth) vs Edited (this table).
+                Not a mutation — it swaps what the grid renders. Eye = viewing raw;
+                EyeOff = editing. Disabled until there is an edit to compare against. */}
+            <Track label={t('raw_view')}>
               <Seg
-                onClick={() => setDiffOn((d) => !d)}
-                disabled={!edited}
-                active={diffOn}
-                aria-pressed={diffOn}
-                aria-label={t('diff')}
-                title={t('diff_tip')}
+                onClick={() => setRawView((v) => !v)}
+                disabled={isPristine}
+                active={rawView}
+                aria-pressed={rawView}
+                aria-label={t('raw_view')}
+                title={t('raw_view_tip')}
                 className="w-7"
               >
-                {/* Eye = comparison is being shown; EyeOff = hidden. The icon states
-                    what the toggle currently does, not what pressing it will do. */}
-                {diffOn ? <Eye size={ICON_XS} aria-hidden /> : <EyeOff size={ICON_XS} aria-hidden />}
+                {rawView ? <Eye size={ICON_XS} aria-hidden /> : <EyeOff size={ICON_XS} aria-hidden />}
               </Seg>
             </Track>
 
@@ -425,6 +451,12 @@ export function TableEditor(props: {
         )}
       </div>
 
+      {rawView && (
+        <div className="mb-1.5 flex items-center gap-1.5 rounded-md bg-primary-soft px-2 py-1 text-xs font-medium text-primary-strong">
+          <Eye size={ICON_XS} aria-hidden />
+          {t('raw_banner')}
+        </div>
+      )}
       <div className="ag-theme-workspace" onContextMenu={(e) => e.preventDefault()}>
         <AgGridReact
           theme={theme}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Info, Search, Undo2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Eye, EyeOff, Info, Search, Undo2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
@@ -34,6 +34,19 @@ function useKhmerSize(): [number, (n: number) => void] {
   return [size, setSize]
 }
 
+// Page-level preference: whether the confidence marks are shown. Persisted like
+// khmerSize so a de-noised read survives page turns and reloads. Default on —
+// the model's uncertainty is the whole point of the review loop.
+function useShowConf(): [boolean, () => void] {
+  const [on, setOn] = useState(() => localStorage.getItem('showConf') !== 'false')
+  const toggle = () =>
+    setOn((v) => {
+      localStorage.setItem('showConf', String(!v))
+      return !v
+    })
+  return [on, toggle]
+}
+
 export function TablesPanel(props: {
   docId: string
   pageIdx: number
@@ -52,8 +65,10 @@ export function TablesPanel(props: {
   blockFocus?: { i: number; n: number } | null
   onSelectBlock?: (i: number) => void
   onHoverBlock?: (i: number | null) => void
+  /** A drawer issue being hovered — its cell, on whichever table it belongs to. */
+  hoverCell?: { tid: string; row: number; col: number } | null
 }) {
-  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onOpenFind, onCloseFind, onFocusCell, activeBlock = null, blockFocus = null, onSelectBlock, onHoverBlock } = props
+  const { docId, pageIdx, page, selectedTable, onSelectTable, flashToken, focusCell, showFind, onOpenFind, onCloseFind, onFocusCell, activeBlock = null, blockFocus = null, onSelectBlock, onHoverBlock, hoverCell = null } = props
   const qc = useQueryClient()
   const { t } = useT()
   const findRef = useRef<HTMLInputElement>(null)
@@ -128,6 +143,7 @@ export function TablesPanel(props: {
   }
 
   const [size, setSize] = useKhmerSize()
+  const [showConf, toggleConf] = useShowConf()
   const [text, setText] = useState(page.corrected_text)
   const [textSaved, setTextSaved] = useState(true)
   // Keyed on the TEXT, not the page object: any refetch (a verify flips one
@@ -213,6 +229,20 @@ export function TablesPanel(props: {
               </button>
             )
           })}
+          {/* Show/hide the confidence marks. Lives beside the band chips because
+              those chips ARE the colour legend — the toggle de-noises the grid
+              without ever erasing the model's signal (dismissal never does either). */}
+          {bands.check.length + bands.skim.length > 0 && (
+            <button
+              className={`${btnSmCls} ${showConf ? '' : 'text-ink-3'}`}
+              onClick={toggleConf}
+              aria-pressed={showConf}
+              title={t('conf_toggle_tip')}
+            >
+              {showConf ? <Eye size={ICON_SM} aria-hidden /> : <EyeOff size={ICON_SM} aria-hidden />}
+              {t('conf_toggle')}
+            </button>
+          )}
         </span>
 
         {/* ── Grid utilities ── Find + content size. */}
@@ -333,6 +363,8 @@ export function TablesPanel(props: {
               focusCell={focusCell?.tid === t.table_id ? focusCell : null}
               findQuery={find}
               activeMatch={activeMatch?.table_id === t.table_id ? activeMatch : null}
+              showConf={showConf}
+              hoverCell={hoverCell?.tid === t.table_id ? hoverCell : null}
             />
           </div>
         ))}

@@ -3376,6 +3376,61 @@ restart) clears it. It is not part of this commit.
 
 ---
 
+### 2.88 One honest signal per channel — review-surface sync + clarity (2026-07-24)
+
+A five-part pass over `TableEditor` / `TablesPanel` / `IssuesDrawer` / the header chip. The
+interesting part was not the code but resolving where the requested items disagreed with each
+other and with the data model.
+
+**The confidence-vs-dismiss tension, resolved by the user.** The brief asked dismissing an issue
+to also erase that cell's tint and drop the counts. But tints reflect *model* confidence
+(objective — the recogniser was unsure), while dismissing is the analyst's *acknowledgement*
+(subjective). Erasing the tint on dismiss makes an unverified cell look confident — the §2.40
+"data integrity wins" trap. The user chose the better path: dismiss stays **list-only**, and a
+new page-level **Confidence** show/hide toggle (beside the band chips, which already name the
+colours) de-noises the grid reversibly without lying about any cell. The toggle's label also
+finally answers "what does the red mean?" — previously explained once in the first-run banner
+and never again.
+
+**"Issues" ≠ "Check" — the user caught the conflation.** The header chip's list (validator
+flags + low-conf, dismissable) and the Check band (confidence < 0.8, objective) are different
+sets from different sources; merging or relabelling them would lie. So the chip keeps its name;
+item 5 only makes clicking it *also* jump to the next un-dismissed issue.
+
+**One signal per CSS channel, chosen so nothing collides.** A cell can be low-confidence AND
+edited AND a jump target at once. Confidence became a 2px left **stripe** (a `background`
+gradient, rose/amber matching the band dots) instead of a full fill — no `border-left` (the
+impeccable side-stripe ban) and no layout shift; it stays on the `background` channel so it
+composes with the `box-shadow` rings exactly as the old fill did. Edited cells get a primary
+`::after` corner mark (a third channel). Jump/hover get `box-shadow` rings. The old `cell-diff`
+full tint dissolved into the edited corner + the raw-view toggle.
+
+**Eye became a Raw↔Edited view toggle** (replacing §2.87's diff-highlight): Eye = read-only
+`original_grid` with a banner, EyeOff = editable, the edited view keeping the corner marks +
+OCR-hover so "what I changed" stays visible in place. Reset and the Edited badge now retire
+automatically when the grid matches the original again (derived `isPristine`), even if that was
+reached by undoing rather than by clicking Reset. Issue focus/hover now ring the target cell
+(two-way sync from the drawer).
+
+**Bug found in the browser, not the tests.** The raw-view toggle first appeared dead. The unit
+tests passed and `aria-pressed` flipped, yet the grid never switched. Playwright showed why:
+`getByRole('button', {name: 'Original'})` matched **two** controls — my toggle *and* the canvas
+rendition toggle, which was already named "Original". `.first` was clicking the canvas one.
+Two controls sharing an accessible name is a real a11y ambiguity, so the table toggle was
+renamed "Raw OCR". Only the real app surfaced this — a reminder that a green unit test proves
+the component, not the page.
+
+Verified: 156 frontend tests (7 new; isPristine badge/Reset gating and the Eye swap
+mutation-checked), `tsc -b` + build clean, detector only the 3 known `<img>` false positives.
+In Chromium (light + dark): raw view swaps content read-only + banner (edited-cell count
+1→0), the Confidence toggle drops the stripes 16→0, an edited cell shows the corner + OCR
+hover, hovering a drawer issue rings its exact cell, and the chip opens the drawer AND advances.
+No cell edits made (read-only verification), so nothing to restore. Numbered 2.88 — the
+parallel session holds 2.85. UI Khmer authored for the new labels (reusing ស្កេនដើម / standard
+terms), flagged for review.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
