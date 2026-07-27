@@ -162,21 +162,29 @@ the guidance text says plainly *"do not use for confidential documents."*
 UI under **Cloud**. Model is `GEMINI_MODEL` (env), default `gemini-flash-latest`; set
 `GEMINI_MODEL=gemini-flash-lite-latest` for higher quota / lower latency.
 
-**First scored result (provisional — n=1, one page, one run):** `gemini-3.6-flash` on budget p3
-(born-digital, hand-verified GT):
+**First scored results (provisional — n=1 per cell, born-digital pages, same per-page GT + scorer
+for every engine):** `cell / numeric / khmer`.
 
-| engine | cell | numeric | Khmer | spans | secs |
-|---|---|---|---|---|---|
-| surya | 0.971 | **1.000** | 0.673 | none | ~50 |
-| **gemini-3.6-flash** | 0.963 | 0.977 | **0.694** | **13 attrs** | 16 |
-| surya_kiri | 0.721 | 0.550 | 0.122 | — | 27 |
+| engine | budget p3 (wide, numeric) | ARDB p1 (narrow, Khmer-dense) |
+|---|---|---|
+| surya | **0.971** / 1.000 / 0.673 | 0.671 / 0.890 / 0.180 |
+| surya_kiri | 0.721 / 0.550 / 0.122 | **0.931** / 0.966 / **0.880** |
+| **gemini-3.6-flash** | 0.963 / 0.977 / 0.694 | 0.912 / **1.000** / 0.700 |
 
-Competitive with Surya on the born-digital best case, slightly ahead on Khmer, and it **restores
-colspan/rowspan** (Surya 2 dropped them). Caveats before trusting: **n=1** on a single page;
-Gemini's output schema is non-deterministic (two earlier calls varied bbox shape and key names —
-`category`/`bbox` vs `label`/`box`), so run-to-run spread is unknown; and the decisive tests are
-still open — **ARDB** (Khmer-dense, where surya_kiri hits 0.92) and **scanned** pages. moc_gas
-cannot score Gemini (its GT is Gemini-drafted — circularity guard).
+**Read:** the local engines are specialists that collapse off their turf (surya → 0.18 Khmer on
+ARDB; surya_kiri → 0.55 numeric on budget). **Gemini is the only engine strong on both** — never
+the single best on an axis, but never collapsing: ~0.91–0.96 cell, ~0.98–1.00 numeric everywhere,
+plus it **restores colspan/rowspan** (7–13 span attrs; Surya 2 dropped them). Its Khmer (~0.70) is
+solid but **below the Kiri specialist (0.88)** — expected (GlotOCR: general models trail on Khmer),
+and it matters less for financial tables where Gemini nails the numbers (~1.0) and an analyst fixes
+the few label cells.
+
+**Still open before a ship-as-default call:**
+1. **Scanned pages — the case that started all this — are UNMEASURED for Gemini.** moc_gas is our
+   only scan and its GT is Gemini-drafted, so the circularity guard blocks scoring. This needs an
+   independently-verified scanned GT to answer, and it is the most decision-relevant gap.
+2. **Run-to-run variance** — n=1, and Gemini's envelope already varied across calls (bbox shape,
+   key names). Repeat each page ≥3× for a median before pinning a shipped default model.
 
 Is it free? **Free in money, not in data.** The free tier needs no credit card (~250–1500
 requests/day, ~10–15/min on Flash), but **Google uses free-tier inputs and outputs to improve its
