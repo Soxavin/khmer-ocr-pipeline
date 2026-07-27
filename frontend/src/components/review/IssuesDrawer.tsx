@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ListX, ShieldCheck, X } from 'lucide-react'
+import { Check, ListX, ShieldCheck, TriangleAlert, X } from 'lucide-react'
 import type { Issue } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { btnSmCls, iconBtnCls } from '../../ui'
@@ -28,9 +28,13 @@ export function IssuesDrawer(props: {
   onDismissAll: () => void
   /** Hovering a row previews its cell in the grid; null on leave. */
   onHoverIssue?: (idx: number | null) => void
+  /** Processing notes (pipeline observations) folded in from the old top-bar chip. */
+  warnings?: string[]
+  pageCount?: number
+  onViewPage?: (idx: number) => void
   onClose: () => void
 }) {
-  const { issues, currentIdx, onJump, onDismiss, onDismissAll, onHoverIssue, onClose } = props
+  const { issues, currentIdx, onJump, onDismiss, onDismissAll, onHoverIssue, warnings = [], pageCount = 0, onViewPage, onClose } = props
   const { t } = useT()
   // Exit animation only lives here; the removal itself is App state (onDismiss).
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
@@ -129,6 +133,37 @@ export function IssuesDrawer(props: {
             </div>
           )
         })}
+        {/* Processing notes — pipeline observations, not errors. Folded in from the
+            old top-bar chip so the workspace header keeps one "review" surface, not two.
+            Quiet by default; each note can jump to its page. */}
+        {warnings.length > 0 && (
+          <div className="border-t border-line-strong/50 bg-rail/20 px-3 py-2.5">
+            <p className="mb-0.5 text-xs font-semibold text-ink">{t('processing_notes')}</p>
+            <p className="mb-2 text-2xs text-ink-2">{t('notes_intro')}</p>
+            <ul className="space-y-2">
+              {warnings.map((w, i) => {
+                const m = /Page (\d+)/.exec(w)
+                const target = m ? Number(m[1]) - 1 : null
+                return (
+                  <li key={i} className="flex items-start gap-2 text-xs text-ink">
+                    <TriangleAlert size={13} className="mt-0.5 shrink-0 text-warn" aria-hidden />
+                    <span className="min-w-0">
+                      {w}
+                      {target !== null && target < pageCount && onViewPage && (
+                        <button
+                          className="ml-1.5 font-medium text-primary underline underline-offset-2"
+                          onClick={() => onViewPage(target)}
+                        >
+                          {t('view_page_n', { n: target + 1 })}
+                        </button>
+                      )}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   )

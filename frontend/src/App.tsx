@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CircleHelp, Files, FileUp, Grid3x3, Languages, Monitor, Moon, MoreHorizontal, ScanSearch, Search, Settings2, ShieldCheck, Square, StickyNote, Sun, TriangleAlert, X } from 'lucide-react'
+import { CircleHelp, Files, FileUp, Grid3x3, Languages, Monitor, Moon, MoreHorizontal, ScanSearch, Search, Settings2, ShieldCheck, Square, Sun, TriangleAlert, X } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api/client'
 import type { RunSettings } from './api/types'
@@ -147,9 +147,7 @@ export default function App() {
   const [drawer, setDrawer] = useState<'issues' | 'settings' | null>(null)
   const [showFind, setShowFind] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-  const [showNotes, setShowNotes] = useState(false)
   const [showMore, setShowMore] = useState(false)
-  const notesAnchor = useRef<HTMLSpanElement>(null)
   const moreAnchor = useRef<HTMLSpanElement>(null)
   const [showPalette, setShowPalette] = useState(false)
   const [issueIdx, setIssueIdx] = useState(-1)
@@ -544,7 +542,6 @@ export default function App() {
         setDrawer(null)
         setShowFind(false)
         setShowHelp(false)
-        setShowNotes(false)
         setShowMore(false)
       } else if (e.key === '?') {
         setShowHelp((h) => !h)
@@ -745,53 +742,8 @@ export default function App() {
           />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* Processing notes: observations, not errors — a quiet chip, not a banner. */}
-          {hasResults && warnings.length > 0 && (
-            <span ref={notesAnchor} className="relative">
-              <button
-                className={`${chipCls} bg-warn-soft text-warn-ink hover:bg-warn-soft/70`}
-                onClick={() => setShowNotes((n) => !n)}
-                aria-expanded={showNotes}
-                title={t('notes_tip')}
-              >
-                <StickyNote size={12} aria-hidden />
-                {t('notes', { n: warnings.length })}
-              </button>
-              {showNotes && (
-                <AnchoredMenu anchorRef={notesAnchor} onClose={() => setShowNotes(false)} width="w-96" className="p-3">
-                    <p className="mb-0.5 text-sm font-semibold text-ink">{t('processing_notes')}</p>
-                    <p className="mb-2 text-xs text-ink-2">
-                      {t('notes_intro')}
-                    </p>
-                    <ul className="max-h-72 space-y-2 overflow-y-auto">
-                      {warnings.map((w, i) => {
-                        const m = /Page (\d+)/.exec(w)
-                        const target = m ? Number(m[1]) - 1 : null
-                        return (
-                          <li key={i} className="flex items-start gap-2 text-xs text-ink">
-                            <TriangleAlert size={13} className="mt-0.5 shrink-0 text-warn" aria-hidden />
-                            <span className="min-w-0">
-                              {w}
-                              {target !== null && target < pageCount && (
-                                <button
-                                  className="ml-1.5 font-medium text-primary underline underline-offset-2"
-                                  onClick={() => {
-                                    setPageIdx(target)
-                                    setShowNotes(false)
-                                  }}
-                                >
-                                  {t('view_page_n', { n: target + 1 })}
-                                </button>
-                              )}
-                            </span>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                </AnchoredMenu>
-              )}
-            </span>
-          )}
+          {/* Processing notes used to be a second top-bar chip; they now live inside
+              the Issues drawer so the header keeps ONE review surface (§distill). */}
           {hasResults && (
             <button
               className={`${chipCls} ${
@@ -1205,6 +1157,9 @@ export default function App() {
               onDismiss={dismissIssue}
               onDismissAll={dismissAllIssues}
               onHoverIssue={setHoverIssue}
+              warnings={warnings}
+              pageCount={pageCount}
+              onViewPage={(i) => setPageIdx(i)}
               onClose={() => setDrawer(null)}
             />
           )}

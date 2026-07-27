@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Eye, EyeOff, Info, Search, Undo2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Eye, EyeOff, Info, Search, SlidersHorizontal, Undo2, X } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import type { PageData } from '../../api/types'
 import { TableEditor } from './TableEditor'
 import { PageTextPanel } from './PageTextPanel'
+import { AnchoredMenu } from '../AnchoredMenu'
 import { useT } from '../../i18n.tsx'
 import { bandCells, type Band } from '../../lib/confidence'
 import { findMatches } from '../../lib/search'
-import { btnSmCls, ICON_SM, iconBtnCls, inputCls } from '../../ui'
+import { btnSmCls, ICON_SM, iconBtnCls, inputCls, menuItemCls } from '../../ui'
 
 // Stepper inside the match cluster — same geometry and states as the page
 // viewer's zoom segment, so the two clusters are visibly one control family.
@@ -73,6 +74,8 @@ export function TablesPanel(props: {
   const qc = useQueryClient()
   const { t } = useT()
   const findRef = useRef<HTMLInputElement>(null)
+  const viewAnchor = useRef<HTMLSpanElement>(null)
+  const [showView, setShowView] = useState(false)
   const [find, setFind] = useState('')
   const [repl, setRepl] = useState('')
   const [findMsg, setFindMsg] = useState<string | null>(null)
@@ -200,9 +203,9 @@ export function TablesPanel(props: {
 
         {/* ── Tint legend ── the colour KEY for the cell washes (rose Check · amber
             Skim), not a count. The per-page cell worklist is the Issues drawer + n/p
-            (its top-bar chip owns the number) — showing a count here too was the same
-            16 twice. Clean cells carry no wash, so the key lists only the tinted tiers.
-            Shown only when this page actually has tinted cells. */}
+            (its top-bar chip owns the number). Clean cells carry no wash, so the key
+            lists only the tinted tiers. Shown only when this page has tinted cells.
+            The show/hide toggle now lives in the View-options popover (§distill). */}
         {bands.check.length + bands.skim.length > 0 && (
           <span className="flex shrink-0 items-center gap-2.5" aria-label={t('conf_toggle')}>
             {TINTED_BANDS.map((b) => {
@@ -214,22 +217,12 @@ export function TablesPanel(props: {
                 </span>
               )
             })}
-            {/* Icon-only: the Eye is dedicated to Confidence show/hide. It de-noises
-                the grid without ever erasing the model's signal (dismissal never does
-                either) — a reversible view, not a state change. */}
-            <button
-              className={`${iconBtnCls} ${showConf ? '' : 'text-ink-3'}`}
-              onClick={toggleConf}
-              aria-pressed={showConf}
-              aria-label={t('conf_toggle')}
-              title={t('conf_toggle_tip')}
-            >
-              {showConf ? <Eye size={ICON_SM} aria-hidden /> : <EyeOff size={ICON_SM} aria-hidden />}
-            </button>
           </span>
         )}
 
-        {/* ── Grid utilities ── Find + content size. */}
+        {/* ── Grid utilities ── Find + a View-options popover. The font-size stepper
+            and the confidence-tint toggle moved into the popover so the header holds
+            one primary control (Find) plus a single overflow (§distill). */}
         <span className="flex shrink-0 items-center gap-1">
           <button
             className={`${btnSmCls} ${showFind ? 'border-primary/50 bg-primary-soft text-primary-strong' : ''}`}
@@ -240,15 +233,47 @@ export function TablesPanel(props: {
             <Search size={12} aria-hidden />
             {t('find_btn')}
           </button>
-          <span className="mx-0.5 h-4 w-px bg-line" aria-hidden />
-          <span className="flex items-center gap-1" title={t('size_tip')}>
-            <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label={t('size_smaller')}>
-              A−
+          <span ref={viewAnchor} className="relative">
+            <button
+              className={`${btnSmCls} ${showView ? 'border-primary/50 bg-primary-soft text-primary-strong' : ''}`}
+              onClick={() => setShowView((v) => !v)}
+              aria-expanded={showView}
+              title={t('view_options_tip')}
+            >
+              <SlidersHorizontal size={12} aria-hidden />
+              {t('view_options')}
             </button>
-            <span className="tabular-nums text-ink-2">{size}px</span>
-            <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label={t('size_larger')}>
-              A+
-            </button>
+            {showView && (
+              <AnchoredMenu anchorRef={viewAnchor} onClose={() => setShowView(false)} width="w-64" className="p-1.5">
+                {/* Confidence tints: a reversible view, never a state change — the
+                    model's signal is never erased, only hidden. */}
+                <button
+                  className={`${menuItemCls} flex items-center gap-2`}
+                  role="switch"
+                  aria-checked={showConf}
+                  onClick={toggleConf}
+                  title={t('conf_toggle_tip')}
+                >
+                  {showConf ? <Eye size={ICON_SM} aria-hidden /> : <EyeOff size={ICON_SM} aria-hidden />}
+                  <span className="min-w-0 flex-1 truncate">{t('conf_toggle')}</span>
+                  <span className={`text-2xs font-semibold ${showConf ? 'text-primary-strong' : 'text-ink-3'}`}>
+                    {showConf ? t('toggle_on') : t('toggle_off')}
+                  </span>
+                </button>
+                <div className="mt-0.5 flex items-center justify-between gap-2 px-2 py-1.5" title={t('size_tip')}>
+                  <span className="text-sm text-ink-2">{t('text_size')}</span>
+                  <span className="flex items-center gap-1">
+                    <button className={btnSmCls} onClick={() => setSize(Math.max(11, size - 1))} aria-label={t('size_smaller')}>
+                      A−
+                    </button>
+                    <span className="w-9 text-center tabular-nums text-ink-2">{size}px</span>
+                    <button className={btnSmCls} onClick={() => setSize(Math.min(24, size + 1))} aria-label={t('size_larger')}>
+                      A+
+                    </button>
+                  </span>
+                </div>
+              </AnchoredMenu>
+            )}
           </span>
         </span>
       </div>
