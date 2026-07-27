@@ -91,6 +91,28 @@ def test_ocr_text_is_populated(monkeypatch):
     assert "hello" in result.pages[0].ocr_text
 
 
+def test_nested_polygon_bbox_does_not_crash(monkeypatch):
+    # Live Gemini returned bbox as a nested polygon [[x,y],...], not a flat box.
+    # The engine must coerce it, not crash (the failure the first real call hit).
+    layout = _layout(
+        {"bbox": [[10, 20], [90, 20], [90, 60], [10, 60]], "category": "Text", "text": "poly"},
+        {"bbox": [[0, 0], [100, 200]], "category": "Table",
+         "text": "<table><tr><td>a</td><td>1</td></tr></table>"},
+    )
+    _install_fake(monkeypatch, [layout])
+    page = ge.run_gemini(_pre(1)).pages[0]
+    block = next(b for b in page.text_blocks if b["text"] == "poly")
+    assert block["bbox"] == [10.0, 20.0, 90.0, 60.0]  # bounding rect of the polygon
+    assert page.tables and page.tables[0]["image_bbox"] == [0.0, 0.0, 100.0, 200.0]
+
+
+def test_malformed_bbox_degrades_to_empty(monkeypatch):
+    layout = _layout({"bbox": "garbage", "category": "Text", "text": "x"})
+    _install_fake(monkeypatch, [layout])
+    page = ge.run_gemini(_pre(1)).pages[0]
+    assert page.text_blocks[0]["bbox"] == []  # unusable bbox -> [], not a crash
+
+
 def test_non_table_categories_become_text_blocks(monkeypatch):
     layout = _layout(
         {"bbox": [0, 0, 5, 5], "category": "Section-header", "text": "S"},

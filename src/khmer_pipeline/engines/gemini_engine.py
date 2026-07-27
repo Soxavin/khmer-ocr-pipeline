@@ -79,6 +79,29 @@ def _png_bytes(img: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+def _normalize_bbox(raw) -> list[float]:
+    """Coerce Gemini's bbox to a flat [x1, y1, x2, y2], or [] if unusable.
+
+    Gemini is inconsistent: sometimes a flat 4-number box, sometimes a nested
+    polygon [[x, y], ...] (seen live on the first real call). Nested forms
+    collapse to their bounding rect. bbox is not load-bearing for scoring (the
+    grid comes from the HTML), so anything malformed degrades to []."""
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return []
+    if all(isinstance(p, (list, tuple)) and len(p) >= 2 for p in raw):
+        try:
+            xs = [float(p[0]) for p in raw]
+            ys = [float(p[1]) for p in raw]
+        except (TypeError, ValueError):
+            return []
+        return [min(xs), min(ys), max(xs), max(ys)]
+    try:
+        flat = [float(v) for v in raw]
+    except (TypeError, ValueError):
+        return []
+    return flat if len(flat) == 4 else []
+
+
 def _parse_layout(raw: str) -> list[dict] | None:
     """Decode the layout array; tolerate a ```json fence or a trailing tail, but
     never bracket-slice (bbox values contain brackets)."""
@@ -106,7 +129,7 @@ def _elements_to_page(elements: list[dict], page_index: int) -> SuryaPageResult:
     for el in elements:
         category = el.get("category")
         text = el.get("text") or ""
-        bbox = [float(v) for v in (el.get("bbox") or [])]
+        bbox = _normalize_bbox(el.get("bbox"))
         if category == _TABLE_CATEGORY:
             grid_map, spans = _parse_html_table_with_spans(text)
             table = _build_table_from_grid(grid_map, text, bbox)

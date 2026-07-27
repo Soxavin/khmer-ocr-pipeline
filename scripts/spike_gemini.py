@@ -26,6 +26,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
 from khmer_pipeline.engines.surya import _parse_html_table_with_spans, _build_table_from_grid  # noqa: E402
+from khmer_pipeline.engines.gemini_engine import _normalize_bbox  # noqa: E402
 from khmer_pipeline.evaluation.evaluate_structure import evaluate_table, gt_table_grid  # noqa: E402
 from khmer_pipeline.evaluation.gt_provenance import circularity_note  # noqa: E402
 
@@ -165,7 +166,7 @@ def main() -> int:
     for el in tables:
         grid_map, _ = _parse_html_table_with_spans(el.get("text") or "")
         pred_tables.append(_build_table_from_grid(grid_map, el.get("text") or "",
-                                                  [float(v) for v in (el.get("bbox") or [0, 0, 0, 0])]))
+                                                  _normalize_bbox(el.get("bbox"))))
     m = evaluate_table(pred_tables, gt_table_grid(gt))
     scope = gt.get("scoring_scope")
     cell = "—" if scope == "numeric_and_structure" else f"{m['cell_accuracy']:.3f}"
