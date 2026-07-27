@@ -237,6 +237,7 @@ export function TablesPanel(props: {
             <button
               className={`${btnSmCls} ${showView ? 'border-primary/50 bg-primary-soft text-primary-strong' : ''}`}
               onClick={() => setShowView((v) => !v)}
+              aria-haspopup="menu"
               aria-expanded={showView}
               title={t('view_options_tip')}
             >

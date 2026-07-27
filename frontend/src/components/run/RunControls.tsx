@@ -146,9 +146,7 @@ export function RunControls(props: {
           <button
             className="inline-flex items-center rounded-md rounded-l-none border-l border-primary-strong bg-primary px-1.5 text-white transition-colors duration-150 hover:bg-primary-strong focus-visible:outline-2 focus-visible:outline-primary"
             onClick={() => setExportMenu((m) => !m)}
-            // The other three menu triggers already carry aria-expanded; this one
-            // was the outlier. (None carries aria-haspopup — adding it here alone
-            // would just trade one inconsistency for another.)
+            aria-haspopup="menu"
             aria-expanded={exportMenu}
             aria-label={t('other_formats_aria')}
             title={t('other_formats')}

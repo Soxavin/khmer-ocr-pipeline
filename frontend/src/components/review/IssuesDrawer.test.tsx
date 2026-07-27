@@ -33,16 +33,30 @@ function renderDrawer(issues: Issue[]) {
 }
 
 describe('IssuesDrawer dismiss-all', () => {
-  const dismissAll = () => screen.getByRole('button', { name: /dismiss all/i })
+  const dismissAll = () => screen.getAllByRole('button', { name: /dismiss all/i })[0]
 
-  it('fires onDismissAll when the header button is clicked', () => {
+  // Bulk dismiss is guarded in-app now (ConfirmPopover): the trigger opens the
+  // confirmation and does NOT fire onDismissAll on its own; only the popover's
+  // action does. This is the "no native window.confirm" contract.
+  it('confirms via popover before firing onDismissAll', () => {
     const { onDismissAll } = renderDrawer([issue({ col: 0 }), issue({ col: 1 })])
     fireEvent.click(dismissAll())
+    expect(onDismissAll).not.toHaveBeenCalled()
+    // Trigger + popover action share the label; the popover's action is the last.
+    const buttons = screen.getAllByRole('button', { name: /dismiss all/i })
+    fireEvent.click(buttons[buttons.length - 1])
     expect(onDismissAll).toHaveBeenCalledTimes(1)
   })
 
-  // The confirm dialog lives in App, not here — but an always-present button on an
-  // empty list would offer to dismiss nothing, so the drawer hides it itself.
+  it('does not fire onDismissAll if the confirmation is cancelled', () => {
+    const { onDismissAll } = renderDrawer([issue({ col: 0 }), issue({ col: 1 })])
+    fireEvent.click(dismissAll())
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+    expect(onDismissAll).not.toHaveBeenCalled()
+  })
+
+  // An always-present button on an empty list would offer to dismiss nothing, so
+  // the drawer hides it itself.
   it('is absent when there are no issues to dismiss', () => {
     renderDrawer([])
     expect(screen.queryByRole('button', { name: /dismiss all/i })).toBeNull()

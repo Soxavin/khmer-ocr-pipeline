@@ -3,6 +3,7 @@ import { Check, ListX, ShieldCheck, TriangleAlert, X } from 'lucide-react'
 import type { Issue } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { btnSmCls, iconBtnCls } from '../../ui'
+import { ConfirmPopover } from '../ConfirmPopover'
 
 // Failure-mode taxonomy (validate.py) → plain localized phrase. An analyst reads
 // WHY a cell is flagged in her own language, not a cryptic Latin badge.
@@ -36,6 +37,9 @@ export function IssuesDrawer(props: {
 }) {
   const { issues, currentIdx, onJump, onDismiss, onDismissAll, onHoverIssue, warnings = [], pageCount = 0, onViewPage, onClose } = props
   const { t } = useT()
+  // Dismiss-all confirmation: the in-app guard (ConfirmPopover) replacing the old
+  // native window.confirm, anchored to the button it guards.
+  const [confirmAt, setConfirmAt] = useState<{ x: number; y: number } | null>(null)
   // Exit animation only lives here; the removal itself is App state (onDismiss).
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
   const dismiss = (k: string) => {
@@ -58,7 +62,14 @@ export function IssuesDrawer(props: {
         <span className="flex items-center gap-2">
           <span className="text-xs text-ink-3">{t('np_step')}</span>
           {visible.length > 0 && (
-            <button className={btnSmCls} onClick={onDismissAll} title={t('dismiss_all')}>
+            <button
+              className={btnSmCls}
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setConfirmAt({ x: r.right, y: r.bottom })
+              }}
+              title={t('dismiss_all')}
+            >
               <ListX size={13} aria-hidden />
               {t('dismiss_all')}
             </button>
@@ -165,6 +176,20 @@ export function IssuesDrawer(props: {
           </div>
         )}
       </div>
+      {confirmAt && (
+        <ConfirmPopover
+          title={t('dismiss_all_title')}
+          body={t('dismiss_all_confirm', { n: visible.length })}
+          actionLabel={t('dismiss_all')}
+          cancelLabel={t('cancel')}
+          anchor={confirmAt}
+          onConfirm={() => {
+            onDismissAll()
+            setConfirmAt(null)
+          }}
+          onClose={() => setConfirmAt(null)}
+        />
+      )}
     </div>
   )
 }

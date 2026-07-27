@@ -379,7 +379,10 @@ export function TableEditor(props: {
         }
       }}
     >
-      <div className="mb-1.5 flex min-h-7 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs">
+      {/* Wraps instead of scrolling: at narrow widths (~1024px) the edit Tracks flow
+          to a second line — still right-aligned via ml-auto — so the Row/CSV controls
+          are never clipped off the edge behind a hidden horizontal scroll. */}
+      <div className="mb-1.5 flex min-h-7 flex-wrap items-center gap-2 gap-y-1.5 whitespace-nowrap text-xs">
         <span
           className={`min-w-0 max-w-56 truncate font-semibold ${focused ? 'text-primary-strong' : 'text-ink-2'}`}
           title={table.table_id}

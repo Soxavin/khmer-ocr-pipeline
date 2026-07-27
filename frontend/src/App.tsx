@@ -183,8 +183,21 @@ export default function App() {
     enabled: active !== null && hasResults,
   })
   // Dismissals are global triage state: the header chip, drawer count, and n/p
-  // stepping all agree on the same filtered list. Per-session, reset per document.
+  // stepping all agree on the same filtered list. PERSISTED per document (keyed by
+  // doc id) so a mid-review refresh keeps the analyst's triage decisions — on
+  // financial data those decisions are the audit trail, not disposable session dust.
   const [dismissedIssues, setDismissedIssues] = useState<Set<string>>(new Set())
+  // Load this document's dismissals when it opens (and on a cold refresh, once
+  // `active` resolves). A re-run clears them (issues are re-derived); see run().
+  useEffect(() => {
+    const id = active?.id
+    if (!id) { setDismissedIssues(new Set()); return }
+    try {
+      const raw = localStorage.getItem(`dismissed:${id}`)
+      setDismissedIssues(new Set<string>(raw ? (JSON.parse(raw) as string[]) : []))
+    } catch { setDismissedIssues(new Set()) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id])
   const allIssues = lowconf.data?.issues ?? []
   // Memoized: a fresh array identity every render was rebinding the global
   // keyboard listener (whose deps chain through jumpToIssue) on every paint.
@@ -199,21 +212,28 @@ export default function App() {
     return it ? { tid: it.table_id, row: it.row, col: it.col } : null
   }, [hoverIssue, issues])
   const dismissIssue = useCallback((key: string) => {
-    setDismissedIssues((prev) => new Set(prev).add(key))
+    setDismissedIssues((prev) => {
+      const next = new Set(prev).add(key)
+      const id = active?.id
+      if (id) try { localStorage.setItem(`dismissed:${id}`, JSON.stringify([...next])) } catch { /* storage full/blocked: dismissal still holds for the session */ }
+      return next
+    })
     setIssueIdx(-1) // indexes renumber after a removal: drop the highlight, n restarts cleanly
-  }, [])
-  // Bulk dismiss: clears the whole current list at once. Confirmed first (the same
-  // guard Replace-all uses) because there is no per-item un-dismiss within a session.
+  }, [active?.id])
+  // Bulk dismiss: clears the whole current list at once. The confirmation lives in
+  // the drawer now (ConfirmPopover on the Dismiss-all button) — one in-app guard
+  // vocabulary, no native window.confirm. There is no per-item un-dismiss.
   const dismissAllIssues = useCallback(() => {
     if (!issues.length) return
-    if (!window.confirm(t('dismiss_all_confirm', { n: issues.length }))) return
     setDismissedIssues((prev) => {
       const next = new Set(prev)
       for (const it of issues) next.add(`${it.table_id}:${it.row}:${it.col}`)
+      const id = active?.id
+      if (id) try { localStorage.setItem(`dismissed:${id}`, JSON.stringify([...next])) } catch { /* see dismissIssue */ }
       return next
     })
     setIssueIdx(-1)
-  }, [issues, t])
+  }, [issues, active?.id])
 
   // Auto preprocessing suggestions: advisory values computed from the page
   // images. Applied at most once per document; the user's changes always win.
@@ -439,7 +459,10 @@ export default function App() {
       setFlashToken(null)
       setFocusCell(null)
       setIssueIdx(-1)
+      // A re-run re-derives the issue list, so old dismissals no longer map —
+      // clear both memory and the persisted copy for this doc.
       setDismissedIssues(new Set())
+      if (active?.id) try { localStorage.removeItem(`dismissed:${active.id}`) } catch { /* noop */ }
       qc.invalidateQueries({ queryKey: ['status'] })
       qc.invalidateQueries({ queryKey: ['documents'] })
     },
@@ -458,7 +481,8 @@ export default function App() {
     setFocusCell(null)
     clearBlockLink()
     setIssueIdx(-1)
-    setDismissedIssues(new Set())
+    // Dismissals are loaded from storage by the per-doc effect (keyed on active.id);
+    // no manual clear here or it would race that load and wipe the restored set.
     // Page scope belongs to the document you were on, not the one you're opening —
     // reset to "all" so a new/switched document never inherits a stale range.
     setRunSettings((s) => ({ ...s, ...PAGE_SCOPE_DEFAULTS }))
@@ -828,6 +852,7 @@ export default function App() {
             <button
               className={`${iconBtnCls} ${showMore ? 'bg-primary-soft text-primary' : ''}`}
               onClick={() => setShowMore((m) => !m)}
+              aria-haspopup="menu"
               aria-expanded={showMore}
               aria-label={t('more_menu')}
               title={t('more_menu')}
