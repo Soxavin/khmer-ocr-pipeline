@@ -3487,6 +3487,42 @@ restart clears it — the user's call. Not part of this commit.
 
 ---
 
+### 2.90 Empty extraction was stale model state, not the UI — plus a consolidation pass (2026-07-27)
+
+**The incident.** The user re-extracted `moc_gas` (the demo notification) on the built app and
+got **nothing** — no table, no text — across **every** engine, having worked earlier the same
+session. Diagnosed from the live payload before touching anything: `status: done`,
+`run_error: null`, yet `tables: 0 / text_blocks: 0 / corrected_text: ""`. The preprocessed image
+handed to Surya was a valid, content-rich page (pulled it and looked), so the *input* was fine —
+the detector/recognizer itself returned nothing. No `src/khmer_pipeline/**` change this session
+(recent commits are `scripts/`+`docs/`+deps only; core ML deps unchanged in the lock). Root
+cause: **degraded in-process model state on the long-lived `:8600` backend** (dev.sh keeps Surya
++ MLX loaded across rebuilds; on the 24GB Mac that shared device state can rot into empty output
+— all engines share the Surya foundation, so they all go blank at once). Fix: `./dev.sh restart`
+→ same PDF + same engine now yields a 13×4 table + 11 text blocks + 2395 chars. Signature saved
+to memory for next time. **The UI was never implicated** — it renders `tables[]`/`text_blocks[]`
+exactly as the backend sends them.
+
+**Consolidation pass (the user asked "what's next?" → ALL).**
+- **§2.89 smoke-tested in-browser** against the recovered doc, light **and** dark: soft tints
+  (no stripe/underline), Confidence Eye, passive bands (0 clickable), one worklist, no console
+  errors. Dark-mode audit passed — tints render as a legible dark-rose wash, contrast holds. No
+  defects; dark mode confirmed **shipped**, not backlog (memory index corrected).
+- **`docs/i18n_km_review_prompt.md` refreshed:** added the 37 never-reviewed keys (the §2.87–2.89
+  review-workspace strings + `block_*`/`view_*`/`find_*`/`copy_*`/`auto_resolved_*`) as a new
+  top-priority NEWEST SET, each `key | English | current Khmer` copied verbatim — no Khmer
+  authored; the user runs it through native review and I apply corrections as GT. (`remove_action`
+  Khmer reads "delete document" vs. English "Remove" — flagged there.)
+- **Dead-string cleanup:** removed `triage_tip` + `band_progress` (orphaned by §2.88's stepper
+  removal, zero references) from both `en`/`km`. `triage_aria_*` kept (still the passive band
+  tooltip).
+
+Gates green: `tsc -b`, 160 vitest, `npm run build`, detector (3 known `<img>` FPs). Numbered 2.90
+— parallel session holds 2.85. Pre-existing `index.css` 4px-radius hook findings left as-is
+(not touched this pass).
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
