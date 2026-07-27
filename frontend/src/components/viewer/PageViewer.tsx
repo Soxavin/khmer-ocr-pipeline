@@ -590,6 +590,10 @@ export function PageViewer(props: {
             word, with an aria-label spelling it out (the Honest-Trust Rule). */}
         {overlay === 'confidence' && (
           <span className="flex shrink-0 items-center gap-2.5 text-2xs">
+            {/* Scope label: these counts are the page-image text REGIONS, distinct
+                from the table-cell tint legend on the right — same words, different
+                objects, so each names what it measures. */}
+            <span className="font-medium text-ink-3">{t('conf_regions_scope')}</span>
             {BANDS.map((b) => (
               <span key={b} className="inline-flex items-center gap-1 text-ink-2" aria-label={t(`band_aria_${b}` as Parameters<typeof t>[0], { n: confCounts[b] })}>
                 <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: BAND_COLOR[b] }} aria-hidden />

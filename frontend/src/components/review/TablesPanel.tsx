@@ -17,8 +17,9 @@ const stepBtn =
   'hover:bg-rail hover:text-ink disabled:opacity-40 disabled:pointer-events-none ' +
   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary'
 
-// Triage bands, most-urgent first, with their semantic chip + dot styling.
-const BAND_ORDER: Band[] = ['check', 'skim', 'clean']
+// The tinted tiers, in the order the colour key lists them. Clean cells carry no
+// wash, so they're not part of the tint legend.
+const TINTED_BANDS: Band[] = ['check', 'skim']
 const BAND_STYLE: Record<Band, { dot: string; chip: string }> = {
   check: { dot: 'bg-danger', chip: 'bg-danger-soft text-danger-ink hover:bg-danger-soft/70' },
   skim: { dot: 'bg-warn', chip: 'bg-warn-soft text-warn-ink hover:bg-warn-soft/70' },
@@ -197,30 +198,25 @@ export function TablesPanel(props: {
           )}
         </span>
 
-        {/* ── Confidence gauge ── a passive per-page health readout AND the colour
-            legend for the cell tints (rose Check · amber Skim · green Clean). Not a
-            worklist and not clickable — stepping/actioning lives in the Issues
-            drawer + n/p. The Eye toggles the tints; its label is the legend itself. */}
-        <span className="flex shrink-0 items-center gap-2.5">
-          {BAND_ORDER.map((b) => {
-            const total = bands[b].length
-            if (total === 0) return null
-            const style = BAND_STYLE[b]
-            return (
-              <span
-                key={b}
-                className="inline-flex items-center gap-1.5 text-ink-2"
-                title={t(`triage_aria_${b}` as Parameters<typeof t>[0], { n: total })}
-              >
-                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden />
-                <span className="tabular-nums">{total}</span> {t(`band_${b}` as Parameters<typeof t>[0])}
-              </span>
-            )
-          })}
-          {/* Icon-only: the Eye is dedicated to Confidence show/hide. It de-noises
-              the grid without ever erasing the model's signal (dismissal never does
-              either) — a reversible view, not a state change. */}
-          {bands.check.length + bands.skim.length > 0 && (
+        {/* ── Tint legend ── the colour KEY for the cell washes (rose Check · amber
+            Skim), not a count. The per-page cell worklist is the Issues drawer + n/p
+            (its top-bar chip owns the number) — showing a count here too was the same
+            16 twice. Clean cells carry no wash, so the key lists only the tinted tiers.
+            Shown only when this page actually has tinted cells. */}
+        {bands.check.length + bands.skim.length > 0 && (
+          <span className="flex shrink-0 items-center gap-2.5" aria-label={t('conf_toggle')}>
+            {TINTED_BANDS.map((b) => {
+              const style = BAND_STYLE[b]
+              return (
+                <span key={b} className="inline-flex items-center gap-1.5 text-ink-2">
+                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden />
+                  {t(`band_${b}` as Parameters<typeof t>[0])}
+                </span>
+              )
+            })}
+            {/* Icon-only: the Eye is dedicated to Confidence show/hide. It de-noises
+                the grid without ever erasing the model's signal (dismissal never does
+                either) — a reversible view, not a state change. */}
             <button
               className={`${iconBtnCls} ${showConf ? '' : 'text-ink-3'}`}
               onClick={toggleConf}
@@ -230,8 +226,8 @@ export function TablesPanel(props: {
             >
               {showConf ? <Eye size={ICON_SM} aria-hidden /> : <EyeOff size={ICON_SM} aria-hidden />}
             </button>
-          )}
-        </span>
+          </span>
+        )}
 
         {/* ── Grid utilities ── Find + content size. */}
         <span className="flex shrink-0 items-center gap-1">
