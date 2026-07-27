@@ -142,11 +142,16 @@ def main() -> int:
     if elements is None:
         print("VERDICT: output was not parseable JSON — see", out)
         return 1
+    # Gemini varies key names: "category"/"bbox" or "label"/"box" (observed live).
+    def _cat(el):
+        return el.get("category") or el.get("label")
+    def _box(el):
+        return el.get("bbox") if el.get("bbox") is not None else el.get("box")
     cats: dict = {}
     tables = []
     for el in elements:
-        cats[el.get("category")] = cats.get(el.get("category"), 0) + 1
-        if el.get("category") == "Table":
+        cats[_cat(el)] = cats.get(_cat(el), 0) + 1
+        if _cat(el) == "Table":
             tables.append(el)
     spans = sum((el.get("text") or "").count("colspan") + (el.get("text") or "").count("rowspan")
                 for el in tables)
@@ -166,7 +171,7 @@ def main() -> int:
     for el in tables:
         grid_map, _ = _parse_html_table_with_spans(el.get("text") or "")
         pred_tables.append(_build_table_from_grid(grid_map, el.get("text") or "",
-                                                  _normalize_bbox(el.get("bbox"))))
+                                                  _normalize_bbox(_box(el))))
     m = evaluate_table(pred_tables, gt_table_grid(gt))
     scope = gt.get("scoring_scope")
     cell = "—" if scope == "numeric_and_structure" else f"{m['cell_accuracy']:.3f}"

@@ -106,6 +106,22 @@ def test_nested_polygon_bbox_does_not_crash(monkeypatch):
     assert page.tables and page.tables[0]["image_bbox"] == [0.0, 0.0, 100.0, 200.0]
 
 
+def test_alternate_keys_label_and_box(monkeypatch):
+    # gemini-3.6-flash returned {"label","box","score"} instead of {"category","bbox"}
+    # on a live call, yielding a perfect HTML table that scored 0.000 because the
+    # parser keyed on the wrong field. Accept both key spellings.
+    layout = _layout(
+        {"label": "Table", "score": 0.98, "box": [37, 114, 971, 959],
+         "text": "<table><tr><td>a</td><td>1</td></tr></table>"},
+        {"label": "Title", "box": [0, 0, 10, 10], "text": "T"},
+    )
+    _install_fake(monkeypatch, [layout])
+    page = ge.run_gemini(_pre(1)).pages[0]
+    assert len(page.tables) == 1  # 'label':'Table' recognised
+    assert page.tables[0]["image_bbox"] == [37.0, 114.0, 971.0, 959.0]  # 'box' read
+    assert any(b["text"] == "T" for b in page.text_blocks)
+
+
 def test_malformed_bbox_degrades_to_empty(monkeypatch):
     layout = _layout({"bbox": "garbage", "category": "Text", "text": "x"})
     _install_fake(monkeypatch, [layout])

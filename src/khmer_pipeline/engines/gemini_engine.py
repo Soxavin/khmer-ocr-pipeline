@@ -127,9 +127,11 @@ def _elements_to_page(elements: list[dict], page_index: int) -> SuryaPageResult:
     pooled: list[str] = []
     order = 0
     for el in elements:
-        category = el.get("category")
+        # Gemini varies its key names run-to-run: "category"/"bbox" on one call,
+        # "label"/"box" on the next (observed live on gemini-3.6-flash). Accept both.
+        category = el.get("category") or el.get("label")
         text = el.get("text") or ""
-        bbox = _normalize_bbox(el.get("bbox"))
+        bbox = _normalize_bbox(el.get("bbox") if el.get("bbox") is not None else el.get("box"))
         if category == _TABLE_CATEGORY:
             grid_map, spans = _parse_html_table_with_spans(text)
             table = _build_table_from_grid(grid_map, text, bbox)
