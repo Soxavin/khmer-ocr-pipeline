@@ -64,6 +64,8 @@
   --text-xs--line-height: 1.45;
   --text-sm: 0.84375rem; /* 13.5px */
   --text-sm--line-height: 1.5;
+  --text-title: 0.9375rem; /* 15px — panel & app titles (chrome ramp ceiling) */
+  --text-title--line-height: 1.4;
 
   /* Elevation — cards barely lift; overlays clearly float. */
   --shadow-raised: 0 1px 2px oklch(0.24 0.022 255 / 0.06);
@@ -117,7 +119,9 @@
 
   --color-ink: oklch(0.93 0.01 255);
   --color-ink-2: oklch(0.74 0.018 255);
-  --color-ink-3: oklch(0.62 0.02 255);
+  /* L 0.67: nudged up from 0.62 (measured 4.45:1 on dark surface) to clear the
+     4.5:1 AA floor for normal text, still muted and below ink-2. */
+  --color-ink-3: oklch(0.67 0.02 255);
 
   --color-line: oklch(0.35 0.021 255);
   --color-line-strong: oklch(0.42 0.024 255);
@@ -178,7 +182,7 @@ body {
 }
 *::-webkit-scrollbar-thumb {
   background: var(--color-line-strong);
-  border-radius: 4px;
+  border-radius: 9999px; /* full: an 8px thumb reads as a pill, on-scale */
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -236,6 +240,25 @@ body {
 .cell-conf-mid {
   background: color-mix(in oklab, var(--color-conf-mid) 12%, var(--color-surface));
 }
+/* A non-colour cue so a flagged cell survives colour-blindness and a washed-out
+   projector (WCAG 1.4.1): a small corner fold in the BOTTOM-LEFT, its own
+   pseudo-element channel. Its PRESENCE marks "flagged" regardless of hue; the
+   colour still carries the tier. Bottom-left keeps it clear of the edited corner
+   (top-right) so both can show on one cell. */
+.cell-conf-low,
+.cell-conf-mid { position: relative; }
+.cell-conf-low::before,
+.cell-conf-mid::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-bottom: 5px solid var(--color-conf-low);
+  border-right: 5px solid transparent;
+}
+.cell-conf-mid::before { border-bottom-color: var(--color-conf-mid); }
 
 /* Search hits: an inset RING, never a background. The confidence washes and the
    diff tint above are persistent trust signals the analyst is searching in order

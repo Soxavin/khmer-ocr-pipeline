@@ -66,7 +66,7 @@ function ResolvedBadge(props: { text: string; title: string }) {
 function SectionTitle(props: { icon: typeof Files; label: string }) {
   const Icon = props.icon
   return (
-    <h3 className="mb-2.5 flex items-center gap-1.5 text-[15px] font-semibold text-ink">
+    <h3 className="mb-2.5 flex items-center gap-1.5 text-title font-semibold text-ink">
       <Icon size={13} className="text-ink-3" aria-hidden />
       {props.label}
     </h3>

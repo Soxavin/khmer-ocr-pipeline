@@ -735,7 +735,7 @@ export default function App() {
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary" aria-hidden>
             <Grid3x3 size={14} className="text-white" strokeWidth={2.25} />
           </span>
-          <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">{t('app_title')}</h1>
+          <h1 className="truncate text-title font-semibold tracking-[-0.01em] text-ink">{t('app_title')}</h1>
           <span
             className={`inline-block h-1.5 w-1.5 self-center rounded-full ${meta.data?.backend_ready ? 'bg-ok' : 'bg-line-strong'}`}
             title={meta.data?.backend_ready ? t('backend_ready') : t('backend_off')}
