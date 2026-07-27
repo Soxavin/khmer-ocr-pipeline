@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, X } from 'lucide-react'
+import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { SegmentedToggle } from '../viewer/PageGrid'
@@ -14,6 +14,13 @@ const PREPROCESS_FLAGS: [string, Key, Key][] = [
   ['normalise', 'flag_contrast', 'hint_contrast'],
   ['normalise_table_backgrounds', 'flag_tablebg', 'hint_tablebg'],
 ]
+// Group-header labels for the engine picker, keyed by the API's `group` field. An
+// unknown group falls back to its raw name so a future group still renders a header.
+const ENGINE_GROUP_LABELS: Record<string, Key> = {
+  local: 'engine_group_local',
+  cloud: 'engine_group_cloud',
+}
+
 // NOTE: joining tables across pages is deliberately NOT here — it is an export
 // choice, not an extraction one. Extraction always keeps per-page tables so the
 // review panel can link every row to the page image it came from.
@@ -122,6 +129,14 @@ export function SettingsDrawer(props: {
       ? (engines.find((e2) => e2.key === effectiveEngine)?.label ?? effectiveEngine)
       : null
   const dpiIsAuto = String(settings.dpi ?? 'auto') === 'auto'
+  // Bucket engines by `group`, preserving first-encounter order (local before cloud,
+  // as the API returns them). Driven entirely by the data — no hardcoded engine keys.
+  const engineGroups: [string, EngineInfo[]][] = []
+  for (const e2 of engines) {
+    const bucket = engineGroups.find(([name]) => name === e2.group)
+    if (bucket) bucket[1].push(e2)
+    else engineGroups.push([e2.group, [e2]])
+  }
 
   return (
     <div className="flex h-full min-h-0 w-96 shrink-0 flex-col max-[1279px]:w-80">
@@ -141,46 +156,65 @@ export function SettingsDrawer(props: {
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Sparkles} label={t('engine_section')} />
           {/* Selection deck: each engine is a bounded option card; the chosen one
-              carries the ring + tint, unchosen cards stay quiet. */}
+              carries the ring + tint, unchosen cards stay quiet. Cards are grouped
+              under Local / Cloud headers driven by the API's `group` field — but a
+              SINGLE radiogroup wraps every card so arrow-key traversal spans groups. */}
           <div className="space-y-1.5" role="radiogroup" aria-label={t('engine_section')}>
-            {engines.map((e2) => {
-              const selected = e2.key === engine
-              return (
-                <button
-                  key={e2.key}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={disabled}
-                  onClick={() => onEngineChange(e2.key)}
-                  className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
-                    selected
-                      ? 'border-primary/60 bg-primary-soft shadow-raised'
-                      : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
-                  }`}
-                >
-                  <span
-                    aria-hidden
-                    className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
-                      selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
-                    }`}
-                  />
-                  <span className="min-w-0">
-                    <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
-                      {e2.label}
-                      {/* Only the Auto card, only once the router has ruled. */}
-                      {selected && e2.key === 'auto' && resolvedEngineLabel && (
-                        <ResolvedBadge
-                          text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
-                          title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
-                        />
-                      )}
-                    </span>
-                    {e2.guidance && <span className="mt-0.5 block text-xs leading-4 text-ink-2">{e2.guidance}</span>}
-                  </span>
-                </button>
-              )
-            })}
+            {engineGroups.map(([groupName, groupEngines]) => (
+              <div key={groupName} className="space-y-1.5">
+                <p className="px-0.5 pt-1 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                  {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
+                </p>
+                {groupEngines.map((e2) => {
+                  const selected = e2.key === engine
+                  const isCloud = e2.group === 'cloud'
+                  return (
+                    <button
+                      key={e2.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      disabled={disabled}
+                      onClick={() => onEngineChange(e2.key)}
+                      className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
+                        selected
+                          ? 'border-primary/60 bg-primary-soft shadow-raised'
+                          : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
+                          selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+                        }`}
+                      />
+                      <span className="min-w-0">
+                        <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
+                          {e2.label}
+                          {/* Only the Auto card, only once the router has ruled. */}
+                          {selected && e2.key === 'auto' && resolvedEngineLabel && (
+                            <ResolvedBadge
+                              text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
+                              title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
+                            />
+                          )}
+                        </span>
+                        {/* A cloud engine leaves the device: its guidance is a privacy
+                            caution, so it gets an alert-tinted note, not a quiet caption. */}
+                        {e2.guidance && (isCloud ? (
+                          <span className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn-soft px-2 py-1.5 text-xs leading-4 text-warn-ink">
+                            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden />
+                            <span className="min-w-0">{e2.guidance}</span>
+                          </span>
+                        ) : (
+                          <span className="mt-0.5 block text-xs leading-4 text-ink-2">{e2.guidance}</span>
+                        ))}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
           </div>
         </section>
 

@@ -3588,6 +3588,27 @@ visual change verified in Chromium light + dark against the live `moc_gas` doc. 
 the passes are provisional — flagged for the native review (`docs/i18n_km_review_prompt.md`).
 Numbered 2.92 — parallel session holds 2.91.
 
+### 2.93 Frontend Local/Cloud engine picker + prominent privacy caveat (2026-07-27)
+
+Frontend companion to §2.91 (backend Gemini engine). `/api/meta` engines now carry a
+`group` field (`"local" | "cloud"`); the engine picker in `SettingsDrawer.tsx` renders one
+header per group (**Local (on this device)** / **Cloud**) instead of a flat list. Grouping is
+data-driven — engines are bucketed by `e.group` preserving first-encounter order, so an unknown
+future group still renders under its own header; no engine keys are hardcoded. A single
+`role="radiogroup"` still wraps every card, so arrow-key traversal spans both groups.
+
+The Cloud engine's `guidance` ("Sends the page image to Google. Do not use for confidential
+documents.") is the privacy signal the feature depends on, so for `group === 'cloud'` it renders
+as an amber `warn`-tinted note with a `TriangleAlert` icon rather than the quiet `text-ink-2`
+caption local engines get. Default selection unchanged (nothing auto-selects cloud; `auto` never
+routes to it — enforced backend-side). Typed `group: 'local' | 'cloud'` onto `EngineInfo`
+(`api/types.ts`) so `tsc -b` enforces the contract. New km header strings (`engine_group_local`,
+`engine_group_cloud`) provisional — flagged for native review.
+
+Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified in Chromium
+light + dark against the restarted backend (the running :8600 process was stale — predated the
+committed `group`/gemini change; `./dev.sh restart` picked it up). Numbered 2.93.
+
 ---
 
 ## 3. Results Snapshot

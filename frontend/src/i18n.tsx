@@ -285,6 +285,10 @@ const en = {
   extraction_settings: 'Extraction settings',
   engine_section: 'Recognition engine',
   engine_hint: 'Which model reads the pages — applies to the next run.',
+  // Engine-picker group headers. Labels/guidance for the engines themselves come from
+  // the backend in English (not localized); only these headers are translated here.
+  engine_group_local: 'Local (on this device)',
+  engine_group_cloud: 'Cloud',
   more_menu: 'More',
   ks_verify: 'Verify / unverify the focused table',
   close_settings: 'Close settings',
@@ -671,6 +675,9 @@ const km: Record<Key, string> = {
   extraction_settings: 'ការកំណត់ការទាញយក',
   engine_section: 'ម៉ាស៊ីនស្គាល់អក្សរ',
   engine_hint: 'ម៉ូដែលណាដែលអានទំព័រ — អនុវត្តចាប់ពីការដំណើរការបន្ទាប់។',
+  // PROVISIONAL — flag for native review (docs/i18n_km_review_prompt.md).
+  engine_group_local: 'ក្នុងម៉ាស៊ីន (លើឧបករណ៍នេះ)',
+  engine_group_cloud: 'ពពក (Cloud)',
   more_menu: 'ច្រើនទៀត',
   ks_verify: 'ផ្ទៀងផ្ទាត់ / ដកការផ្ទៀងផ្ទាត់ តារាងដែលកំពុងជ្រើស',
   close_settings: 'បិទការកំណត់',

@@ -1,6 +1,9 @@
 // Shapes returned by webapp/api.py — keep in lockstep with the handlers.
 
-export type EngineInfo = { key: string; label: string; guidance: string }
+// `group` ("local" | "cloud") separates on-device engines from ones that send the
+// page image to a third party (api.py _ENGINES). The picker renders one header per
+// group; the field is authoritative — the frontend never hardcodes which key is cloud.
+export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud' }
 
 export type Meta = {
   engines: EngineInfo[]
