@@ -160,8 +160,23 @@ the guidance text says plainly *"do not use for confidential documents."*
 
 **Status:** shipped as the `gemini` engine (`engines/gemini_engine.py`, §2.91), selectable in the
 UI under **Cloud**. Model is `GEMINI_MODEL` (env), default `gemini-flash-latest`; set
-`GEMINI_MODEL=gemini-flash-lite-latest` for higher quota / lower latency. **Not yet benchmarked** —
-run the spike below before relying on its accuracy.
+`GEMINI_MODEL=gemini-flash-lite-latest` for higher quota / lower latency.
+
+**First scored result (provisional — n=1, one page, one run):** `gemini-3.6-flash` on budget p3
+(born-digital, hand-verified GT):
+
+| engine | cell | numeric | Khmer | spans | secs |
+|---|---|---|---|---|---|
+| surya | 0.971 | **1.000** | 0.673 | none | ~50 |
+| **gemini-3.6-flash** | 0.963 | 0.977 | **0.694** | **13 attrs** | 16 |
+| surya_kiri | 0.721 | 0.550 | 0.122 | — | 27 |
+
+Competitive with Surya on the born-digital best case, slightly ahead on Khmer, and it **restores
+colspan/rowspan** (Surya 2 dropped them). Caveats before trusting: **n=1** on a single page;
+Gemini's output schema is non-deterministic (two earlier calls varied bbox shape and key names —
+`category`/`bbox` vs `label`/`box`), so run-to-run spread is unknown; and the decisive tests are
+still open — **ARDB** (Khmer-dense, where surya_kiri hits 0.92) and **scanned** pages. moc_gas
+cannot score Gemini (its GT is Gemini-drafted — circularity guard).
 
 Is it free? **Free in money, not in data.** The free tier needs no credit card (~250–1500
 requests/day, ~10–15/min on Flash), but **Google uses free-tier inputs and outputs to improve its
