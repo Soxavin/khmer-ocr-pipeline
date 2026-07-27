@@ -52,4 +52,5 @@ frontend/dist/
 # Secrets — API keys live in the environment or a local .env, never committed
 .env
 .env.*
+!.env.example
 *.gemini.json

@@ -89,9 +89,12 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None, help="where to save raw output")
     args = ap.parse_args()
 
+    from khmer_pipeline.local_env import load_local_env
+    load_local_env()  # allow a gitignored .env at repo root; shell export still wins
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
-        print("SKIP: set GEMINI_API_KEY (see docs/ENGINE_EVALUATION.md §7)")
+        print("SKIP: set GEMINI_API_KEY in your shell or a repo-root .env "
+              "(see docs/ENGINE_EVALUATION.md §7)")
         return 2
     try:
         from google import genai

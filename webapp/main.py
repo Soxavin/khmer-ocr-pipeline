@@ -13,7 +13,12 @@ import fitz
 from PIL import Image
 from nicegui import ui
 
+from khmer_pipeline.local_env import load_local_env
 from khmer_pipeline.model_config import ANOMALY_THRESHOLD, CELL_CONF_LOW, CELL_CONF_MID
+
+# Pick up a local .env (e.g. GEMINI_API_KEY for the cloud engine) before any run.
+# A shell export still wins; this is only a convenience fallback for desktop use.
+load_local_env()
 from khmer_pipeline.utils.backend_status import llama_server_running
 from khmer_pipeline.export import grid_to_csv, tables_to_xlsx
 
