@@ -32,7 +32,9 @@ class Settings:
 
     # "auto" routes per document (surya_kiri, falling back to surya on low
     # confidence) and matched the best manual engine on all 7 GT pages (§2.57).
-    ocr_engine_key: str = "auto"     # "auto" | "surya" | "surya_kiri" | "surya_kiri_vlm"
+    # local: "auto" | "surya" | "surya_kiri" | "surya_kiri_vlm"; cloud: "gemini".
+    # Validated against webapp.api._ENGINES; unknown keys are rejected there.
+    ocr_engine_key: str = "auto"
     tables_only: bool = False
 
     enable_qwen: bool = False

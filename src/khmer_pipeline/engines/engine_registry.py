@@ -7,6 +7,7 @@ from .hybrid_engine import run_hybrid
 from .surya_kiri_engine import run_surya_kiri
 from .surya_kiri_vlm_engine import run_surya_kiri_vlm
 from .auto_engine import run_auto
+from .gemini_engine import run_gemini
 from ..postprocess import postprocess
 
 _OCR_ENGINES: dict[str, OCREngine] = {
@@ -16,6 +17,7 @@ _OCR_ENGINES: dict[str, OCREngine] = {
     "surya_kiri": run_surya_kiri,
     "surya_kiri_vlm": run_surya_kiri_vlm,
     "auto": run_auto,
+    "gemini": run_gemini,  # cloud (opt-in); never selected by `auto`
 }
 
 
