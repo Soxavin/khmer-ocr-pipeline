@@ -3559,6 +3559,37 @@ is lazy so the registry loads without the SDK.
 
 ---
 
+### 2.92 Frontend quality campaign — critique-driven, diagnose-then-fix (2026-07-27)
+
+A `/impeccable` pass on the review workspace: dual-agent **critique** first (design review + detector/
+contrast evidence, isolated), then fixes scoped from the ranked backlog. Score trend **29 → 32 → 33
+→ 34/40**; the two prior P1s (cryptic Latin issue taxonomy; top-bar accretion) were already resolved.
+`bolder`/`delight` deliberately skipped — they fight the "precision, not playful" identity.
+
+Shipped (4 commits):
+- **`3d9e6f8` clarify — confidence signalling.** "16 Check" (table-cell gauge) duplicated the
+  "Issues (16)" worklist chip while the viewer's "3 Check · 3 Skim · 6 Clean" counted a *different*
+  object (page text regions) with the same words. Right header is now a tint **legend** (no count);
+  the viewer legend gained a "Regions" scope label. One worklist number, two clearly-scoped gauges.
+- **`744c4d2` distill — two toolbars.** Top bar 8→ fewer: the Notes chip folded into a "Processing
+  notes" section inside the Issues drawer (one review surface). Table sub-header: font-size + tint
+  toggle moved into a "View" popover; header keeps Find + the tint legend. (Heuristic #8 was 2/4.)
+- **`816a3e0` a11y + token harden.** Non-colour cue on low/mid cells — a bottom-left corner fold
+  (own `::before`), so a flagged cell survives colour-blindness / a projector (WCAG 1.4.1) after
+  §2.89 dropped the underline; hue still carries the tier. Dark `ink-3` 4.45→ raised to clear 4.5:1.
+  `text-[15px]` → new `--text-title` scale token. Scrollbar radius 4px → full (on-scale).
+- **`3cf7a3b` persistence + confirm + harden.** Dismissals now persist per document across a refresh
+  (localStorage, cleared on re-run) — the triage audit trail survives a reload (verified 16→15→
+  reload→15). Dismiss-all uses the in-app ConfirmPopover, not `window.confirm`. `aria-haspopup` on
+  the menu triggers. TableEditor toolbar wraps instead of clipping at ~1024px.
+
+Gates each pass: `tsc -b`, vitest (161, +1), `npm run build`, detector (3 known `<img>` FPs). Every
+visual change verified in Chromium light + dark against the live `moc_gas` doc. New km strings across
+the passes are provisional — flagged for the native review (`docs/i18n_km_review_prompt.md`).
+Numbered 2.92 — parallel session holds 2.91.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
