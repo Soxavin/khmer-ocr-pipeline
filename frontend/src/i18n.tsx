@@ -289,6 +289,7 @@ const en = {
   // the backend in English (not localized); only these headers are translated here.
   engine_group_local: 'Local (on this device)',
   engine_group_cloud: 'Cloud',
+  engine_recommended: 'Recommended',
   more_menu: 'More',
   ks_verify: 'Verify / unverify the focused table',
   close_settings: 'Close settings',
@@ -678,6 +679,7 @@ const km: Record<Key, string> = {
   // PROVISIONAL — flag for native review (docs/i18n_km_review_prompt.md).
   engine_group_local: 'ក្នុងម៉ាស៊ីន (លើឧបករណ៍នេះ)',
   engine_group_cloud: 'ពពក (Cloud)',
+  engine_recommended: 'ណែនាំ',
   more_menu: 'ច្រើនទៀត',
   ks_verify: 'ផ្ទៀងផ្ទាត់ / ដកការផ្ទៀងផ្ទាត់ តារាងដែលកំពុងជ្រើស',
   close_settings: 'បិទការកំណត់',

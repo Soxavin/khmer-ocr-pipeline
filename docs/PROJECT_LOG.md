@@ -3609,6 +3609,29 @@ Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Ve
 light + dark against the restarted backend (the running :8600 process was stale — predated the
 committed `group`/gemini change; `./dev.sh restart` picked it up). Numbered 2.93.
 
+### 2.94 Polish pass on the grouped engine picker (2026-07-27)
+
+Layout/polish refinement of §2.93, all in `SettingsDrawer.tsx`. Group headers gained micro-icons
+(`Laptop` / `Cloud`, driven by an `ENGINE_GROUP_ICONS` map parallel to the labels map) and a
+hairline `border-t border-line` divider now sits above every non-first group (index-driven, so a
+future third group divides too — no hardcoded "cloud"), making the on-device / off-device trust
+boundary read at a glance. "Recommended." is lifted out of the Automatic card's backend guidance
+into a compact `primary-soft` badge top-right (title row is now `flex justify-between`), and
+dropped from the caption so it's never said twice — the extraction is regex-guarded so it no-ops
+if the backend copy changes. Selected card softened from the heavy `bg-primary-soft shadow-raised`
+fill to a cleaner `border-primary bg-primary-soft/60 ring-1 ring-primary/20` outline (DESIGN.md
+"faint honest tints"). Deck spacing tightened `space-y-1.5` → `space-y-1`; Cloud callout icon
+bumped to 14px.
+
+The user's spec came in raw shadcn/Tailwind classes (`amber-50`/`amber-950`, `muted-foreground`,
+`border-border`); translated to this project's semantic tokens (`warn-soft`/`warn-ink`, `ink-3`,
+`line`, `primary-soft`) so dark mode stays token-driven and on the Command Deck system — the raw
+`amber-*` + `dark:` variants would have re-implemented what `warn-*` already does. New i18n key
+`engine_recommended` (km provisional, flagged for native review).
+
+Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified in Chromium
+light + dark against `:8600/app` after `./dev.sh build`. Numbered 2.94.
+
 ---
 
 ## 3. Results Snapshot

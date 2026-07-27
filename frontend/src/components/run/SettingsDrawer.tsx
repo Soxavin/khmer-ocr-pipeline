@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Eraser, FileOutput, Files, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { Check, Cloud, Eraser, FileOutput, Files, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { SegmentedToggle } from '../viewer/PageGrid'
@@ -19,6 +19,11 @@ const PREPROCESS_FLAGS: [string, Key, Key][] = [
 const ENGINE_GROUP_LABELS: Record<string, Key> = {
   local: 'engine_group_local',
   cloud: 'engine_group_cloud',
+}
+// Group-header micro-icons, keyed by `group`. Falls back to no icon for an unknown group.
+const ENGINE_GROUP_ICONS: Record<string, typeof Laptop> = {
+  local: Laptop,
+  cloud: Cloud,
 }
 
 // NOTE: joining tables across pages is deliberately NOT here — it is an export
@@ -159,62 +164,80 @@ export function SettingsDrawer(props: {
               carries the ring + tint, unchosen cards stay quiet. Cards are grouped
               under Local / Cloud headers driven by the API's `group` field — but a
               SINGLE radiogroup wraps every card so arrow-key traversal spans groups. */}
-          <div className="space-y-1.5" role="radiogroup" aria-label={t('engine_section')}>
-            {engineGroups.map(([groupName, groupEngines]) => (
-              <div key={groupName} className="space-y-1.5">
-                <p className="px-0.5 pt-1 text-2xs font-semibold uppercase tracking-wide text-ink-3">
-                  {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
-                </p>
-                {groupEngines.map((e2) => {
-                  const selected = e2.key === engine
-                  const isCloud = e2.group === 'cloud'
-                  return (
-                    <button
-                      key={e2.key}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      disabled={disabled}
-                      onClick={() => onEngineChange(e2.key)}
-                      className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
-                        selected
-                          ? 'border-primary/60 bg-primary-soft shadow-raised'
-                          : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
-                      }`}
-                    >
-                      <span
-                        aria-hidden
-                        className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
-                          selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+          <div className="space-y-1" role="radiogroup" aria-label={t('engine_section')}>
+            {engineGroups.map(([groupName, groupEngines], gi) => {
+              const GroupIcon = ENGINE_GROUP_ICONS[groupName]
+              return (
+                // Non-first groups (Cloud) get a hairline divider so the trust boundary
+                // between on-device and off-device engines reads at a glance. Index-driven,
+                // so a future third group divides too — no hardcoded "cloud".
+                <div key={groupName} className={`space-y-1 ${gi > 0 ? 'mt-3 border-t border-line pt-3' : ''}`}>
+                  <p className="flex items-center gap-1.5 px-0.5 pt-1 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                    {GroupIcon && <GroupIcon size={12} aria-hidden />}
+                    {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
+                  </p>
+                  {groupEngines.map((e2) => {
+                    const selected = e2.key === engine
+                    const isCloud = e2.group === 'cloud'
+                    // 'Recommended.' rides in the backend guidance for the auto engine; lift
+                    // it into a crisp badge and drop it from the caption so it isn't said twice.
+                    const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
+                    const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
+                    return (
+                      <button
+                        key={e2.key}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        disabled={disabled}
+                        onClick={() => onEngineChange(e2.key)}
+                        className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
+                          selected
+                            ? 'border-primary bg-primary-soft/60 ring-1 ring-primary/20'
+                            : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
                         }`}
-                      />
-                      <span className="min-w-0">
-                        <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
-                          {e2.label}
-                          {/* Only the Auto card, only once the router has ruled. */}
-                          {selected && e2.key === 'auto' && resolvedEngineLabel && (
-                            <ResolvedBadge
-                              text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
-                              title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
-                            />
-                          )}
-                        </span>
-                        {/* A cloud engine leaves the device: its guidance is a privacy
-                            caution, so it gets an alert-tinted note, not a quiet caption. */}
-                        {e2.guidance && (isCloud ? (
-                          <span className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn-soft px-2 py-1.5 text-xs leading-4 text-warn-ink">
-                            <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden />
-                            <span className="min-w-0">{e2.guidance}</span>
+                      >
+                        <span
+                          aria-hidden
+                          className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
+                            selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+                          }`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-start justify-between gap-2">
+                            <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
+                              {e2.label}
+                              {/* Only the Auto card, only once the router has ruled. */}
+                              {selected && e2.key === 'auto' && resolvedEngineLabel && (
+                                <ResolvedBadge
+                                  text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
+                                  title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
+                                />
+                              )}
+                            </span>
+                            {isRecommended && (
+                              <span className="mt-0.5 shrink-0 rounded bg-primary-soft px-1.5 py-0.5 text-2xs font-semibold text-primary-strong">
+                                {t('engine_recommended')}
+                              </span>
+                            )}
                           </span>
-                        ) : (
-                          <span className="mt-0.5 block text-xs leading-4 text-ink-2">{e2.guidance}</span>
-                        ))}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
+                          {/* A cloud engine leaves the device: its guidance is a privacy
+                              caution, so it gets an alert-tinted note, not a quiet caption. */}
+                          {caption && (isCloud ? (
+                            <span className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn-soft px-2 py-1.5 text-xs leading-4 text-warn-ink">
+                              <TriangleAlert size={14} className="mt-px shrink-0" aria-hidden />
+                              <span className="min-w-0">{caption}</span>
+                            </span>
+                          ) : (
+                            <span className="mt-0.5 block text-xs leading-4 text-ink-2">{caption}</span>
+                          ))}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
           </div>
         </section>
 
