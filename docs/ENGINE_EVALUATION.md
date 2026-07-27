@@ -156,7 +156,12 @@ Cloud engines are **opt-in and clearly labelled**: they send the page image to a
 picker groups engines under **Local** / **Cloud** so an analyst never selects one by accident, and
 the guidance text says plainly *"do not use for confidential documents."*
 
-### Gemini (Google) — setup
+### Gemini (Google) — shipped engine + setup
+
+**Status:** shipped as the `gemini` engine (`engines/gemini_engine.py`, §2.91), selectable in the
+UI under **Cloud**. Model is `GEMINI_MODEL` (env), default `gemini-flash-latest`; set
+`GEMINI_MODEL=gemini-flash-lite-latest` for higher quota / lower latency. **Not yet benchmarked** —
+run the spike below before relying on its accuracy.
 
 Is it free? **Free in money, not in data.** The free tier needs no credit card (~250–1500
 requests/day, ~10–15/min on Flash), but **Google uses free-tier inputs and outputs to improve its

@@ -3523,6 +3523,42 @@ Gates green: `tsc -b`, 160 vitest, `npm run build`, detector (3 known `<img>` FP
 
 ---
 
+### 2.91 Gemini added as an opt-in cloud engine (backend) (2026-07-27)
+
+The product now offers a **cloud** OCR engine alongside the local ones. Backend only this
+session; the frontend Local/Cloud picker rendering is a separate handover. (Number 2.91 — 2.85 and
+2.90 are held by parallel sessions.)
+
+**What shipped.** `engines/gemini_engine.py` (`run_gemini`), registered as `gemini` in
+`engine_registry`, exposed via `/api/meta` with a new engine `group` field (`"local"` | `"cloud"`).
+It sends each page image to Gemini (`GEMINI_MODEL` env, default `gemini-flash-latest`) asking for
+the dots.ocr layout+HTML contract, then reuses the production
+`_parse_html_table_with_spans` → `_build_table_from_grid` chain. Colspans are carried onto
+`Cell.col_span`, so **merged headers survive to export** — the §2.40 capability Surya 2's own
+table-rec can no longer emit, now available through a cloud engine.
+
+**Contract (agreed with the user):**
+- **Fail fast on setup** — no `GEMINI_API_KEY`/SDK → `RuntimeError` before any call (clean
+  `run_error`).
+- **Fail soft per page** — an API error (one 429 retry + backoff) or unparseable output leaves that
+  page empty with a warning; a bad page never discards a multi-page run.
+- **Audit warning always** — `"[Cloud] N page(s) sent to Google Gemini (<model>) — not for
+  confidential documents"`, so the privacy cost is on the record. `auto` never routes here.
+
+**Two honest caveats.**
+1. **Not yet benchmarked.** No scored Gemini run exists — the engine ships *selectable*, and its
+   first live call is its validation. Format-defensive by design, so a weak or malformed response
+   degrades to warnings, not crashes. Run `scripts/spike_gemini.py` on a public page before relying
+   on it.
+2. **Free-tier data usage.** Google trains on free-tier I/O and reviewers may see it; the engine is
+   labelled cloud and warns per run. The eval docs are public bulletins, so this is disclosed, not
+   leaked — but a real analyst must heed the label for confidential documents.
+
+12 offline tests (canned response, no network); 892 backend tests pass; the `google-genai` import
+is lazy so the registry loads without the SDK.
+
+---
+
 ## 3. Results Snapshot
 
 First trustworthy benchmark — engine `run_surya`, 30 images (5 fonts × 3 templates
