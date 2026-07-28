@@ -62,7 +62,7 @@ describe('countOverrides (Settings badge — deliberate overrides only)', () => 
   const defaults = {
     dpi: 'auto', page_scope: 'all', remove_stamps: true, sharpen: true,
     normalise: true, deskew: true, normalise_table_backgrounds: true,
-    enable_qwen: false, anomaly_threshold: 0.15, repair_tables: false,
+    repair_tables: false,
     convert_numerals: false,
     // Non-UI fields that must never inflate the badge:
     show_layout: true, overlay_mode: 'Region type', tables_only: false, stitch_pages: true,

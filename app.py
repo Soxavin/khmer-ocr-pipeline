@@ -16,11 +16,10 @@ from PIL import Image, ImageDraw
 from khmer_pipeline.ingest import ingest
 from khmer_pipeline.preprocess import preprocess, PreprocessConfig
 from khmer_pipeline.engines.surya import preload_models
-from khmer_pipeline.postprocess import qwen_loaded
 from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
 from khmer_pipeline.export import export, grid_to_csv, tables_to_xlsx
 from khmer_pipeline.model_config import (
-    CONFIDENCE_LOW, CONFIDENCE_MID, ANOMALY_THRESHOLD, CELL_CONF_LOW, CELL_CONF_MID,
+    CONFIDENCE_LOW, CONFIDENCE_MID, CELL_CONF_LOW, CELL_CONF_MID,
 )
 from khmer_pipeline.utils.memory import clear_device_cache  # NEW: Memory management import
 from khmer_pipeline.utils.backend_status import llama_server_running
@@ -212,25 +211,6 @@ with st.sidebar:
         )
         tables_only = extraction_mode == "Tables only"
 
-        st.header("Post-processing")
-        enable_qwen = st.checkbox(
-            "Enable Qwen correction (experimental, slow)",
-            value=False,
-            help="One-time ~4GB model download, then a slow per-run load on a 24GB "
-                 "Mac. Off by default — the deterministic Khmer normalizer always "
-                 "runs and is usually sufficient.",
-        )
-        anomaly_threshold = st.slider(
-            "Anomaly threshold for Qwen correction",
-            min_value=0.0,
-            max_value=1.0,
-            value=ANOMALY_THRESHOLD,
-            step=0.01,
-            help="Proportion of non-Khmer/non-Latin script characters in a text "
-                 "block that triggers Qwen correction. Lower = more aggressive "
-                 "(more blocks sent to Qwen). Only applies when Qwen correction is enabled.",
-        )
-
         st.header("Export")
         repair_tables = st.checkbox(
             "Auto-repair inconsistent table grids",
@@ -284,7 +264,7 @@ else:
             st.session_state["_upload_hash_key"] = _hash_key
         _file_id = st.session_state["_upload_hash"]
 
-    settings_key = f"{uploaded.name}_{_file_id}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{enable_qwen}_{convert_numerals}_{repair_tables}_{stitch_pages}_{anomaly_threshold}_{deskew}_{normalise_table_backgrounds}_{ocr_engine_key}"
+    settings_key = f"{uploaded.name}_{_file_id}_{dpi}_{page_sel_part}_{remove_stamps}_{sharpen}_{normalise}_{convert_numerals}_{repair_tables}_{stitch_pages}_{deskew}_{normalise_table_backgrounds}_{ocr_engine_key}"
 
     # Reset run state when a different upload arrives (new file OR same name with
     # new bytes → new _file_id).
@@ -349,8 +329,6 @@ else:
             f"- **Pages:** {page_info}\n"
             f"- **Preprocessing:** {preprocessing_info}\n"
             f"- **Extraction mode:** {extraction_mode}\n"
-            f"- **Qwen correction:** {'On' if enable_qwen else 'Off'}\n"
-            f"- **Anomaly threshold:** {anomaly_threshold:.2f}\n"
             f"- **Numeral conversion:** {'On' if convert_numerals else 'Off'}\n"
             f"- **Table auto-repair:** {'On' if repair_tables else 'Off'}\n"
             f"- **Stitch tables across pages:** {'On' if stitch_pages else 'Off'}"
@@ -471,17 +449,11 @@ else:
             stage_times["Stage 3 — OCR"] = time.perf_counter() - _t0
 
             st.write("Tidying the text…")
-            if enable_qwen and not qwen_loaded():
-                st.write("Loading Qwen model — first run downloads ~4GB, may take several minutes...")
             _t0 = time.perf_counter()
             try:
-                postprocess_result = ACTIVE_CORRECTION_ENGINE(
-                    surya_result,
-                    skip_qwen=not enable_qwen,
-                    anomaly_threshold=anomaly_threshold,
-                )
+                postprocess_result = ACTIVE_CORRECTION_ENGINE(surya_result)
                 st.session_state["postprocess_result"] = postprocess_result
-                clear_device_cache()  # NEW: Free MLX memory after Qwen fallback
+                clear_device_cache()
             except Exception as e:
                 status.update(label="Stage 4 failed", state="error")
                 st.error(f"Stage 4 failed: {str(e)}")
@@ -889,7 +861,6 @@ else:
         f"DPI           : {dpi}\n"
         f"Preprocessing : {preprocessing_info}\n"
         f"Mode          : {extraction_mode}\n"
-        f"Qwen          : {'Enabled' if enable_qwen else 'Disabled'} (threshold: {anomaly_threshold:.2f})\n"
         + (f"{'-' * 72}\n{_timing_lines}\n" if _timing_lines else "")
         + _divider
     )

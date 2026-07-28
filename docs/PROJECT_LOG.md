@@ -3796,6 +3796,31 @@ contract. Full suite green (`uv run pytest`: 912→ all pass; `py_compile` clean
 against a restarted backend with a clean budget PDF: Remove stamps + Sharpen both show "Auto: Off",
 and the doc's green MEF emblem is correctly left untouched. Numbered 2.101.
 
+### 2.102 Retire the Qwen "AI text correction" toggle (scoped-disable) (2026-07-28)
+
+After a research + feasibility pass (persisted to `docs/ai_correction_feasibility.md`), retired the
+general `Qwen2.5-7B` "AI text correction" toggle. Rationale: it rewrote **page prose only** (never
+table cells), fired rarely and redundantly (its foreign-script trigger is already handled by the
+deterministic scrub), was a **trust liability** (a general LLM silently rewriting text on a
+numbers-must-be-trustworthy product), and cost ~4GB + per-page inference. The always-on
+deterministic layer (Khmer normalization, GDDE domain repairs, malformed-number flagging) is
+untouched and does the useful work.
+
+Scoped-disable (chosen to avoid churning shared orchestration): removed the model path + `mlx-lm`
+dep, and the user-facing toggle everywhere — `postprocess.py` (deleted `_qwen_correct_batch`,
+`_get_qwen`, `qwen_loaded`, singletons, `mlx_lm` import, the anomaly-routing block; `qwen_used` now
+always False, field kept for API stability), frontend (drawer "AI text correction" section,
+`lib/settings`, i18n `ai_correction`/`ai_enable`/`anomaly`), `webapp/settings.py` (dropped
+`enable_qwen`/`anomaly_threshold` fields + settings_key), `runner.py`, `downloads.py`, NiceGUI
+`main.py`, and legacy `app.py`. **Kept inert** (to leave the pipeline CLI / correction-engine
+`Protocol` / `run_benchmark` untouched): the `skip_qwen`/`anomaly_threshold` params +
+`--qwen` CLI flag + `_anomaly_score`/`_detect_errors`. `mlx` stays (`utils/memory.py`).
+
+A Khmer-specific prose corrector (ByT5/PrahokBART on synthetic + corrections-corpus pairs, prose-only,
+numbers stay flag-don't-rewrite) is documented as future work in the memo. Gates: `uv run pytest`
+909 passed (removed the Qwen-behaviour tests; `test_postprocess` 36), `py_compile` clean, frontend
+`tsc -b`/161 vitest/`build`/detector (3 known FPs). Numbered 2.102.
+
 ---
 
 ## 3. Results Snapshot

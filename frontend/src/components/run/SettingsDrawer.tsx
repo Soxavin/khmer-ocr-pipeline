@@ -530,27 +530,6 @@ export function SettingsDrawer(props: {
           </SettingList>
         </section>
 
-        <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
-          <SectionTitle icon={ScanSearch} label={t('ai_correction')} />
-          <SettingList>
-            <SettingRow
-              id="enable_qwen"
-              label={t('ai_enable')}
-              checked={bool('enable_qwen')}
-              disabled={disabled}
-              onChange={(v) => set('enable_qwen', v)}
-            />
-          </SettingList>
-          {bool('enable_qwen') && (
-            <label className="mt-2 flex items-center justify-between">
-              <span className="text-ink-2">{t('anomaly')}</span>
-              <input type="number" disabled={disabled} step={0.05} min={0} max={1} className={`${inputCls} w-20 px-1`}
-                     value={Number(settings.anomaly_threshold ?? 0.15)}
-                     onChange={(e) => set('anomaly_threshold', Number(e.target.value))} />
-            </label>
-          )}
-        </section>
-
         {/* Export settings close the drawer: the last decisions before files leave. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={FileOutput} label={t('output')} />

@@ -79,7 +79,6 @@ def text_report(doc: Document, s: Settings, patched_pages: list[dict]) -> str:
         f"DPI           : {s.dpi}\n"
         f"Preprocessing : {preprocessing_info(s)}\n"
         f"Mode          : {'Tables only' if s.tables_only else 'Full extraction (text + tables)'}\n"
-        f"Qwen          : {'Enabled' if s.enable_qwen else 'Disabled'} (threshold: {s.anomaly_threshold:.2f})\n"
         + (f"{'-' * 72}\n{timing}\n" if timing else "")
         + div
     )

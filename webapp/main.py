@@ -14,7 +14,7 @@ from PIL import Image
 from nicegui import ui
 
 from khmer_pipeline.local_env import load_local_env
-from khmer_pipeline.model_config import ANOMALY_THRESHOLD, CELL_CONF_LOW, CELL_CONF_MID
+from khmer_pipeline.model_config import CELL_CONF_LOW, CELL_CONF_MID
 
 # Pick up a local .env (e.g. GEMINI_API_KEY for the cloud engine) before any run.
 # A shell export still wins; this is only a convenience fallback for desktop use.
@@ -106,11 +106,6 @@ def index() -> None:
             ui.select(_ENGINE_OPTIONS, value=s.ocr_engine_key, label="OCR engine").bind_value(s, "ocr_engine_key").classes("w-full")
             ui.select({False: "Full extraction (text + tables)", True: "Tables only"},
                       value=s.tables_only, label="Extraction mode").bind_value(s, "tables_only").classes("w-full")
-
-            ui.label("Post-processing").classes("font-medium mt-2")
-            ui.checkbox("Qwen correction (experimental, slow)").bind_value(s, "enable_qwen")
-            ui.number("Anomaly threshold", value=ANOMALY_THRESHOLD, min=0.0, max=1.0, step=0.01,
-                      format="%.2f").bind_value(s, "anomaly_threshold").classes("w-full")
 
             ui.label("Export & overlay").classes("font-medium mt-2")
             ui.checkbox("Auto-repair inconsistent table grids").bind_value(s, "repair_tables")

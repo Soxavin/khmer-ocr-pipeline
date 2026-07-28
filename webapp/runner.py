@@ -119,7 +119,6 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
         state.postprocess_result = await _stage(
             "Tidying the text…", "Stage 4 — Post-process",
             ACTIVE_CORRECTION_ENGINE, state.surya_result,
-            skip_qwen=not s.enable_qwen, anomaly_threshold=s.anomaly_threshold,
         )
 
         try:

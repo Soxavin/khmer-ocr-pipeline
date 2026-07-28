@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from khmer_pipeline.model_config import ANOMALY_THRESHOLD
 
 
 @dataclass
@@ -36,9 +35,6 @@ class Settings:
     # Validated against webapp.api._ENGINES; unknown keys are rejected there.
     ocr_engine_key: str = "auto"
     tables_only: bool = False
-
-    enable_qwen: bool = False
-    anomaly_threshold: float = ANOMALY_THRESHOLD
 
     repair_tables: bool = False
     stitch_pages: bool = True
@@ -87,7 +83,7 @@ class Settings:
             page_part = "all"
         return "_".join(str(x) for x in (
             upload_id, self.dpi, page_part, self.remove_stamps, self.sharpen,
-            self.normalise, self.enable_qwen, self.convert_numerals, self.repair_tables,
-            self.stitch_pages, self.anomaly_threshold, self.deskew,
+            self.normalise, self.convert_numerals, self.repair_tables,
+            self.stitch_pages, self.deskew,
             self.normalise_table_backgrounds, self.ocr_engine_key,
         ))

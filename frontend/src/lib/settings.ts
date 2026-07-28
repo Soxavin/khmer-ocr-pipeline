@@ -37,7 +37,6 @@ export function mergeSuggestion(
 const OVERRIDE_KEYS = [
   'dpi', 'page_scope',
   'remove_stamps', 'sharpen', 'normalise', 'deskew', 'normalise_table_backgrounds',
-  'enable_qwen', 'anomaly_threshold',
   'repair_tables', 'convert_numerals',
 ] as const
 

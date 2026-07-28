@@ -1,6 +1,6 @@
 from __future__ import annotations
-import warnings
-from unittest.mock import MagicMock, patch
+from contextlib import nullcontext
+from unittest.mock import patch
 import khmer_pipeline.postprocess as pp
 from khmer_pipeline.models import SuryaResult, SuryaPageResult, PostprocessResult
 
@@ -23,10 +23,10 @@ def _make_surya_result(ocr_text: str = "ខ្មែរ", text_blocks: list | No
 
 
 def _mock_qwen():
-    """Returns a patch context that makes _get_qwen return dummy model/tokenizer."""
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
-    return patch("khmer_pipeline.postprocess._get_qwen", return_value=(mock_model, mock_tokenizer))
+    """No-op context: the Qwen LLM corrector was retired (§2.102); the deterministic
+    Stage-4 layer these tests exercise runs regardless. Kept so existing call sites
+    (`with _mock_qwen():`) stay unchanged."""
+    return nullcontext()
 
 
 # --- Contract tests ---
@@ -112,46 +112,18 @@ def test_latin_does_not_trigger():
     assert pp._detect_errors("CP ARDB 03-06-26 0.00%") is False
 
 
-# --- qwen_used flag / region-level routing ---
+# --- qwen_used always False (LLM corrector retired §2.102) ---
 
-def test_qwen_used_false_when_no_errors():
-    # Khmer text with Khmer numerals — no foreign scripts, no text_blocks (fallback path)
-    clean = "ចំណូល " + _KHMER_NUM_3 + " " + _KHMER_NUM_4 + " " + _KHMER_NUM_5
-    with _mock_qwen():
-        r = pp.postprocess(_make_surya_result(ocr_text=clean), skip_qwen=False)
+def test_qwen_used_always_false():
+    # The Qwen corrector was retired; the field is kept (always False) for API stability.
+    # Even a foreign-script-heavy block only gets the deterministic scrub, never an LLM.
+    sinhala_text = "text " + _SINHALA_KA * 3 + " more"
+    r = pp.postprocess(_make_surya_result(
+        ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
+    ), skip_qwen=False)  # skip_qwen is inert now
     assert r.pages[0].qwen_used is False
-
-
-def test_qwen_used_true_when_errors():
-    # A text block with Sinhala density >= ANOMALY_THRESHOLD forces the Qwen path
-    sinhala_text = "text " + _SINHALA_KA * 3 + " more"
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value='["corrected"]') as _:
-        mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(_make_surya_result(
-            ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
-        ), skip_qwen=False)
-    assert r.pages[0].qwen_used is True
-
-
-def test_qwen_failure_falls_back_gracefully():
-    # When generate raises, corrected_text should equal rule-based output, no crash
-    sinhala_text = "text " + _SINHALA_KA * 3 + " more"
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", side_effect=RuntimeError("GPU OOM")):
-        mock_get.return_value = (MagicMock(), MagicMock())
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            r = pp.postprocess(_make_surya_result(
-                ocr_text=sinhala_text, text_blocks=[{"text": sinhala_text}]
-            ), skip_qwen=False)
-        assert len(w) == 1
-        assert "Qwen batch correction failed" in str(w[0].message)
-    # corrected_text equals rule-applied block text (Qwen failed, returned input
-    # unchanged) — after the §2.35 foreign-script scrub, which runs regardless.
+    # The deterministic foreign-script scrub still cleans the block.
     assert r.pages[0].corrected_text == pp._strip_foreign_scripts(pp._apply_rules(sinhala_text))[0]
-    # Qwen was attempted but failed and changed nothing, so it was not "applied"
-    assert r.pages[0].qwen_used is False
 
 
 # --- A6: Stage 4 normalizes table cell text, copy-on-write ---
@@ -342,16 +314,6 @@ def test_correction_diff_populated():
     assert isinstance(r.pages[0].correction_diff, str)
 
 
-def test_qwen_not_called_when_no_errors():
-    # generate should never be called when no text block is anomalous
-    clean = "ចំណូល " + _KHMER_NUM_3 + " " + _KHMER_NUM_4 + " " + _KHMER_NUM_5
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate") as mock_gen:
-        mock_get.return_value = (MagicMock(), MagicMock())
-        pp.postprocess(_make_surya_result(ocr_text=clean), skip_qwen=False)
-    mock_gen.assert_not_called()
-
-
 def test_page_with_no_text_blocks_falls_back_to_ocr_text():
     page = SuryaPageResult(page_index=0, text_blocks=[], tables=[], ocr_text="raw text")
     surya_result = SuryaResult(source_name="test.pdf", pages=[page])
@@ -362,7 +324,7 @@ def test_page_with_no_text_blocks_falls_back_to_ocr_text():
 
 
 def test_multi_page_each_page_corrected_independently():
-    # page 0: clean Khmer block; page 1: Sinhala-dense block triggers Qwen
+    # page 0: clean Khmer block; page 1: Sinhala-dense block (deterministic scrub only).
     clean_text = "ចំណូល " + _KHMER_NUM_3
     dirty_text = "text " + _SINHALA_KA * 3 + " here"
 
@@ -375,43 +337,10 @@ def test_multi_page_each_page_corrected_independently():
         source_name="multi.pdf",
         pages=[_make_page(0, clean_text), _make_page(1, dirty_text)],
     )
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value='["fixed"]') as mock_gen:
-        mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(multi, skip_qwen=False)
+    r = pp.postprocess(multi)
 
     assert len(r.pages) == 2
-    assert r.pages[0].qwen_used is False
-    assert r.pages[1].qwen_used is True
-    mock_gen.assert_called_once()
-
-
-def test_anomaly_threshold_can_be_lowered_to_trigger_qwen():
-    # Text with a small amount of foreign script — anomaly score > 0 but < default 0.15
-    text = "ធនាគារABCDEFGHIJKLMNOPQRSTUVWXYZ" + _SINHALA_KA  # mostly Latin/Khmer, 1 Sinhala char
-    score = pp._anomaly_score(text)
-    assert 0.0 < score < pp.ANOMALY_THRESHOLD
-
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value='["corrected"]') as mock_gen:
-        mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(
-            _make_surya_result(text_blocks=[{"text": text, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
-            skip_qwen=False,
-            anomaly_threshold=score - 0.001,  # lower than this text's score
-        )
-    assert r.pages[0].qwen_used is True
-    mock_gen.assert_called()
-
-
-def test_anomaly_threshold_can_be_raised_to_suppress_qwen():
-    with patch("khmer_pipeline.postprocess._get_qwen") as mock_get, \
-         patch("khmer_pipeline.postprocess.generate", return_value="corrected") as mock_gen:
-        mock_get.return_value = (MagicMock(), MagicMock())
-        r = pp.postprocess(
-            _make_surya_result(text_blocks=[{"text": _SINHALA_KA * 10, "bbox": [0, 0, 10, 10], "confidence": 0.9}]),
-            skip_qwen=False,
-            anomaly_threshold=1.1,  # above the maximum possible score of 1.0
-        )
-    assert r.pages[0].qwen_used is False
-    mock_gen.assert_not_called()
+    assert all(p.qwen_used is False for p in r.pages)
+    # Page 0 unchanged; page 1's Sinhala is scrubbed by the deterministic layer.
+    assert r.pages[0].corrected_text == pp._strip_foreign_scripts(pp._apply_rules(clean_text))[0]
+    assert _SINHALA_KA not in r.pages[1].corrected_text

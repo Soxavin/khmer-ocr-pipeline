@@ -348,9 +348,6 @@ const en = {
   flag_numerals: 'Convert Khmer numerals to Arabic',
   hint_numerals: 'Writes ១២៣ as 123 in exports.',
   join_note: 'Joining tables that continue across pages is chosen when you export, not here — so review always stays linked to the page each row came from.',
-  ai_correction: 'AI text correction',
-  ai_enable: 'Enable (slower; uses the local correction model)',
-  anomaly: 'Anomaly threshold',
   settings_footer: 'Changes apply to the next run. If results were made with different settings, a “settings changed” notice appears until you re-run.',
 
   palette_tip: 'Command palette (⌘K)',
@@ -746,9 +743,6 @@ const km: Record<Key, string> = {
   flag_numerals: 'បំប្លែងលេខខ្មែរទៅលេខអារ៉ាប់',
   hint_numerals: 'សរសេរ ១២៣ ជា 123 ក្នុងការនាំចេញ។',
   join_note: 'ការបញ្ចូលតារាងបន្តទំព័រ ត្រូវជ្រើសពេលនាំចេញ មិនមែននៅទីនេះទេ — ដើម្បីឲ្យការពិនិត្យនៅភ្ជាប់នឹងទំព័រដើមជានិច្ច។',
-  ai_correction: 'ការកែអត្ថបទដោយ AI',
-  ai_enable: 'បើក (យឺតជាង ប្រើម៉ូដែលកែប្រែក្នុងម៉ាស៊ីន)',
-  anomaly: 'កម្រិតភាពមិនប្រក្រតី',
   settings_footer: 'ការផ្លាស់ប្តូរនឹងអនុវត្តចាប់ពីការដំណើរការបន្ទាប់។ ប្រសិនបើតារាងត្រូវបានបង្កើតដោយការកំណត់ផ្សេង ការជូនដំណឹងនឹងបង្ហាញរហូតដល់អ្នកដំណើរការឡើងវិញ។',
 
   palette_tip: 'ផ្ទាំងបញ្ជា (⌘K)',

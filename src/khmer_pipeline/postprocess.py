@@ -1,17 +1,9 @@
 from __future__ import annotations
 import difflib
-import json
 import re
-import warnings
-
-try:
-    from mlx_lm import generate
-except ImportError:
-    generate = None  # type: ignore[assignment]
 
 from .models import SuryaResult, SuryaPageResult, PostprocessResult, CorrectedPageResult
-from .model_config import ANOMALY_THRESHOLD, CONFIDENCE_LOW, STAGE4_MODEL_PATH
-from .utils.memory import clear_device_cache
+from .model_config import ANOMALY_THRESHOLD, CONFIDENCE_LOW
 from .utils.khmer_normalize import normalize_khmer
 
 # ---------------------------------------------------------------------------
@@ -100,32 +92,6 @@ def _is_malformed_number(text: str) -> bool:
     """True if the cell text matches a known digit-duplication artifact pattern."""
     return bool(_MALFORMED_COMMA_RE.search(text) or _MALFORMED_PERCENT_RE.match(text))
 
-_BATCH_MIN_TOKENS = 512
-_BATCH_TOKENS_PER_STRING = 100
-
-# ---------------------------------------------------------------------------
-# Qwen2.5-VL module-level singletons (lazy-loaded on first use)
-# ---------------------------------------------------------------------------
-_qwen_model = None
-_qwen_tokenizer = None
-
-def _get_qwen():
-    global _qwen_model, _qwen_tokenizer
-    if _qwen_model is None:
-        try:
-            from mlx_lm import load
-            _qwen_model, _qwen_tokenizer = load(STAGE4_MODEL_PATH)
-        except Exception as e:
-            # Crash-proofing: If it fails to load, warn and return None 
-            # so we don't keep trying and crashing the pipeline.
-            warnings.warn(f"Failed to load Qwen model: {e}. Disabling Qwen fallback for this run.")
-            return None, None
-    return _qwen_model, _qwen_tokenizer
-
-def qwen_loaded() -> bool:
-    """Return True if the Qwen correction model is already loaded into memory."""
-    return _qwen_model is not None
-
 # ---------------------------------------------------------------------------
 # Correction layers
 # ---------------------------------------------------------------------------
@@ -165,61 +131,6 @@ def _anomaly_score(text: str) -> float:
 def _detect_errors(text: str) -> bool:
     """Thin wrapper kept for backward compatibility with existing tests."""
     return _anomaly_score(text) >= ANOMALY_THRESHOLD
-
-# ---------------------------------------------------------------------------
-# BATCHED VLM CORRECTION (Speed Optimization)
-# ---------------------------------------------------------------------------
-def _qwen_correct_batch(texts: list[str]) -> list[str]:
-    # Single prompt for all anomalous blocks on a page; falls back to originals on parse failure.
-    if not texts:
-        return []
-        
-    prompt = (
-        "You are correcting Khmer OCR errors in a list of strings from a Cambodian financial document.\n"
-        "Fix misread characters, wrong scripts, and missing diacritics.\n"
-        "Return ONLY a valid JSON array of strings containing the corrected text. "
-        "Do not include any explanations, markdown formatting, or code blocks.\n\n"
-        f"Input list: {json.dumps(texts, ensure_ascii=False)}\n\n"
-        "Output JSON array:"
-    )
-    
-    if generate is None:
-        warnings.warn("mlx_lm not installed; Qwen correction unavailable")
-        return texts
-        
-    model, tokenizer = _get_qwen()
-    if model is None:
-        return texts  # Model failed to load previously, skip gracefully
-        
-    try:
-        max_tokens = max(_BATCH_MIN_TOKENS, len(texts) * _BATCH_TOKENS_PER_STRING)
-        raw_output = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
-        
-        # Clean up common LLM markdown quirks
-        cleaned_output = raw_output.strip()
-        if cleaned_output.startswith("```json"):
-            cleaned_output = cleaned_output[7:]
-        if cleaned_output.startswith("```"):
-            cleaned_output = cleaned_output[3:]
-        if cleaned_output.endswith("```"):
-            cleaned_output = cleaned_output[:-3]
-        cleaned_output = cleaned_output.strip()
-        
-        parsed = json.loads(cleaned_output)
-        
-        # Validate structure: must be a list of strings of the exact same length
-        if isinstance(parsed, list) and len(parsed) == len(texts) and all(isinstance(x, str) for x in parsed):
-            return parsed
-        else:
-            warnings.warn(f"Qwen batch correction returned invalid structure. Falling back to original texts.")
-            return texts
-            
-    except json.JSONDecodeError:
-        warnings.warn("Qwen batch correction failed to parse JSON. Falling back to original texts.")
-        return texts
-    except Exception as e:
-        warnings.warn(f"Qwen batch correction failed: {e}")
-        return texts
 
 def _normalize_table(table: dict, page_index: int, table_index: int,
                      warning_sink: list[str]) -> dict:
@@ -284,39 +195,21 @@ def _build_diff(raw: str, corrected: str) -> str:
 # ---------------------------------------------------------------------------
 def _correct_page(
     page: SuryaPageResult,
-    skip_qwen: bool = True,  # Qwen is opt-in; deterministic normalizer always runs
+    # skip_qwen / anomaly_threshold are retained inert (the Qwen LLM corrector was
+    # retired in §2.102) so the untouched pipeline CLI + correction-engine Protocol
+    # keep the same call signature. They no longer affect anything.
+    skip_qwen: bool = True,
     anomaly_threshold: float = ANOMALY_THRESHOLD,
     warning_sink: list[str] | None = None,
 ) -> CorrectedPageResult:
     if warning_sink is None:
         warning_sink = []
     raw = page.ocr_text  # always copied unchanged into raw_ocr_text
-    
-    corrected_block_texts = []
-    qwen_used = False
-    indices_needing_qwen = []
-    
-    # 1. FAST PASS: Apply rules and identify anomalies
-    for block in page.text_blocks:
-        block_text = _apply_rules(block.get("text", ""))
-        corrected_block_texts.append(block_text)
-        
-        if not skip_qwen and _anomaly_score(block_text) >= anomaly_threshold:
-            indices_needing_qwen.append(len(corrected_block_texts) - 1)
-            
-    # 2. BATCHED VLM PASS: Call the heavy model exactly ONCE per page (if needed)
-    if indices_needing_qwen:
-        batch_texts = [corrected_block_texts[i] for i in indices_needing_qwen]
-        batch_corrected = _qwen_correct_batch(batch_texts)
-        
-        # Map the corrected texts back to their original indices
-        for idx, corrected_text in zip(indices_needing_qwen, batch_corrected):
-            if corrected_text != corrected_block_texts[idx]:
-                corrected_block_texts[idx] = corrected_text
-                qwen_used = True
 
-    # 2b. Foreign-script scrub — LAST text step, after anomaly detection/Qwen so
-    # their routing semantics are unchanged (product constraint: Khmer/English only).
+    # Deterministic pass: Khmer normalization + domain rules on every text block.
+    corrected_block_texts = [_apply_rules(block.get("text", "")) for block in page.text_blocks]
+
+    # Foreign-script scrub — LAST text step (product constraint: Khmer/English only).
     page_foreign_removed = 0
     for i, t in enumerate(corrected_block_texts):
         cleaned, n = _strip_foreign_scripts(t)
@@ -347,17 +240,19 @@ def _correct_page(
         raw_ocr_text=raw,
         corrected_text=corrected_text,
         correction_diff=diff,
-        qwen_used=qwen_used,
+        qwen_used=False,  # retired in §2.102; field kept (always False) for API stability
     )
 
 def postprocess(
     result: SuryaResult,
-    skip_qwen: bool = True,  # Qwen is opt-in; deterministic normalizer always runs
+    # skip_qwen / anomaly_threshold retained inert since the Qwen corrector was retired
+    # (§2.102) — kept so the pipeline CLI / correction-engine Protocol signatures are unchanged.
+    skip_qwen: bool = True,
     anomaly_threshold: float = ANOMALY_THRESHOLD,
 ) -> PostprocessResult:
-    """Apply deterministic Khmer normalization to every page's text blocks, optionally
-    escalating anomalous blocks to the Qwen VLM for correction (`skip_qwen=False`).
-    Returns a `PostprocessResult` with per-page raw/corrected text, diffs, and any
+    """Apply deterministic Khmer normalization + GDDE domain rules to every page's text
+    blocks and table cells (NFC, foreign-script scrub, riel/percent repairs, malformed-number
+    flagging). Returns a `PostprocessResult` with per-page raw/corrected text, diffs, and any
     Stage-4 warnings (e.g. malformed-number flags) in `.warnings`."""
     pages = []
     stage_warnings: list[str] = []
@@ -369,10 +264,6 @@ def postprocess(
             warning_sink=stage_warnings,
         )
         pages.append(corrected_page)
-
-        # CRITICAL FOR 24GB RAM: Clear memory after every page that uses the heavy VLM
-        if corrected_page.qwen_used:
-            clear_device_cache()
 
     return PostprocessResult(
         source_name=result.source_name,
