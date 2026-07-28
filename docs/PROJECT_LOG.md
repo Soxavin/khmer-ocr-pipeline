@@ -3632,6 +3632,32 @@ The user's spec came in raw shadcn/Tailwind classes (`amber-50`/`amber-950`, `mu
 Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified in Chromium
 light + dark against `:8600/app` after `./dev.sh build`. Numbered 2.94.
 
+### 2.95 Engine picker pivoted to a segmented-tab layout (2026-07-28)
+
+The §2.94 iconed group headers became interactive **tabs**: pick a group, see only that group's
+engine cards. `SettingsDrawer.tsx` gains a bespoke segmented control (padded `bg-rail` track,
+active = raised `bg-surface shadow-raised` pill, `Laptop`/`Cloud` icons) driven by `engineGroups`
+— no hardcoded keys. `activeGroup` state opens on the selected engine's tab and is a **pure view
+filter**: switching tabs never changes the selection. A `prevEngineRef` guards the follow-effect
+so only an actual `engine` change re-syncs the tab; an unrelated re-render never yanks it back.
+
+Full tab a11y: `role="tablist"`/`role="tab"`/`aria-selected`, roving `tabIndex` (only the active
+tab in page order) + an `onKeyDown` handling ArrowLeft/Right/Up/Down/Home/End, and a
+`role="tabpanel"` (exact `engine-tab-${name}` / `engine-panel-${name}` id pairing) wrapping the
+single `role="radiogroup"`. Because a tab can hide the selected engine, the inactive tab that
+holds the selection shows a `bg-primary` marker dot **plus** an SR-only note
+(`aria-label` → `contains_selected_engine`) so screen-reader users get the same cue. The Cloud
+card's privacy guidance is now an *integrated* warn-line (13px `TriangleAlert` + `text-warn-ink`,
+no nested `bg-warn-soft` box) — same visibility, less layout weight. Spec's generic classes
+(`bg-surface-hover`, `shadow-sm`) translated to project tokens. New km string
+`contains_selected_engine` provisional — flagged for native review.
+
+Trade-off noted: tabs hide the non-active group, so Cloud is less immediately visible than the
+always-on §2.93 divider made it — the marker dot + open-on-selection mitigate it; the drawer is
+now much shorter (Pages/Preprocessing visible without scrolling). Gates: `tsc -b`, 161 vitest,
+`npm run build`, detector (3 known `<img>` FPs). Verified Chromium light + dark (both tabs, marker
+dot, keyboard) against `:8600/app` after `./dev.sh build`. Numbered 2.95.
+
 ---
 
 ## 3. Results Snapshot

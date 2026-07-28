@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Check, Cloud, Eraser, FileOutput, Files, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
@@ -142,6 +142,36 @@ export function SettingsDrawer(props: {
     if (bucket) bucket[1].push(e2)
     else engineGroups.push([e2.group, [e2]])
   }
+  // The picker is tabbed by group: open on the selected engine's tab, but treat the
+  // active tab as a pure VIEW filter — switching tabs never changes the selection.
+  const selectedGroup = engines.find((e2) => e2.key === engine)?.group
+  const [activeGroup, setActiveGroup] = useState<string>(selectedGroup ?? engineGroups[0]?.[0] ?? 'local')
+  // Follow the selected engine ONLY when it actually changes (e.g. selected from
+  // outside, or a persisted cloud engine on load) — an unrelated re-render must never
+  // yank the tab back while the user is exploring the other group.
+  const prevEngineRef = useRef(engine)
+  useEffect(() => {
+    if (engine !== prevEngineRef.current) {
+      prevEngineRef.current = engine
+      const g = engines.find((e2) => e2.key === engine)?.group
+      if (g) setActiveGroup(g)
+    }
+  }, [engine, engines])
+  // Roving-focus refs for the tablist: ArrowLeft/Right/Home/End move the active tab.
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>())
+  const onTabKeyDown = (e: ReactKeyboardEvent) => {
+    const names = engineGroups.map(([n]) => n)
+    const cur = names.indexOf(activeGroup)
+    let next = -1
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % names.length
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (cur - 1 + names.length) % names.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = names.length - 1
+    if (next < 0) return
+    e.preventDefault()
+    setActiveGroup(names[next])
+    tabRefs.current.get(names[next])?.focus()
+  }
 
   return (
     <div className="flex h-full min-h-0 w-96 shrink-0 flex-col max-[1279px]:w-80">
@@ -160,84 +190,115 @@ export function SettingsDrawer(props: {
         {/* The engine is a run-setup decision, not an every-minute control. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Sparkles} label={t('engine_section')} />
-          {/* Selection deck: each engine is a bounded option card; the chosen one
-              carries the ring + tint, unchosen cards stay quiet. Cards are grouped
-              under Local / Cloud headers driven by the API's `group` field — but a
-              SINGLE radiogroup wraps every card so arrow-key traversal spans groups. */}
-          <div className="space-y-1" role="radiogroup" aria-label={t('engine_section')}>
-            {engineGroups.map(([groupName, groupEngines], gi) => {
+          {/* Group TABS (segmented control): each group's iconed header is now an
+              interactive tab. Data-driven from `engineGroups` — no hardcoded keys.
+              Roving tabindex + arrow keys; the active tab is a raised pill. */}
+          <div
+            role="tablist"
+            aria-label={t('engine_section')}
+            onKeyDown={onTabKeyDown}
+            className="mb-2 flex items-center gap-1 rounded-lg bg-rail p-1"
+          >
+            {engineGroups.map(([groupName]) => {
               const GroupIcon = ENGINE_GROUP_ICONS[groupName]
+              const active = groupName === activeGroup
+              // The selected engine lives on this tab but it isn't showing: a marker dot
+              // (plus an SR-only note) keeps "which engine is active" from hiding.
+              const holdsHiddenSelection = !active && selectedGroup === groupName
               return (
-                // Non-first groups (Cloud) get a hairline divider so the trust boundary
-                // between on-device and off-device engines reads at a glance. Index-driven,
-                // so a future third group divides too — no hardcoded "cloud".
-                <div key={groupName} className={`space-y-1 ${gi > 0 ? 'mt-3 border-t border-line pt-3' : ''}`}>
-                  <p className="flex items-center gap-1.5 px-0.5 pt-1 text-2xs font-semibold uppercase tracking-wide text-ink-3">
-                    {GroupIcon && <GroupIcon size={12} aria-hidden />}
-                    {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
-                  </p>
-                  {groupEngines.map((e2) => {
-                    const selected = e2.key === engine
-                    const isCloud = e2.group === 'cloud'
-                    // 'Recommended.' rides in the backend guidance for the auto engine; lift
-                    // it into a crisp badge and drop it from the caption so it isn't said twice.
-                    const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
-                    const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
-                    return (
-                      <button
-                        key={e2.key}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        disabled={disabled}
-                        onClick={() => onEngineChange(e2.key)}
-                        className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
-                          selected
-                            ? 'border-primary bg-primary-soft/60 ring-1 ring-primary/20'
-                            : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
-                        }`}
-                      >
-                        <span
-                          aria-hidden
-                          className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
-                            selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
-                          }`}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-start justify-between gap-2">
-                            <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
-                              {e2.label}
-                              {/* Only the Auto card, only once the router has ruled. */}
-                              {selected && e2.key === 'auto' && resolvedEngineLabel && (
-                                <ResolvedBadge
-                                  text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
-                                  title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
-                                />
-                              )}
-                            </span>
-                            {isRecommended && (
-                              <span className="mt-0.5 shrink-0 rounded bg-primary-soft px-1.5 py-0.5 text-2xs font-semibold text-primary-strong">
-                                {t('engine_recommended')}
-                              </span>
-                            )}
-                          </span>
-                          {/* A cloud engine leaves the device: its guidance is a privacy
-                              caution, so it gets an alert-tinted note, not a quiet caption. */}
-                          {caption && (isCloud ? (
-                            <span className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn-soft px-2 py-1.5 text-xs leading-4 text-warn-ink">
-                              <TriangleAlert size={14} className="mt-px shrink-0" aria-hidden />
-                              <span className="min-w-0">{caption}</span>
-                            </span>
-                          ) : (
-                            <span className="mt-0.5 block text-xs leading-4 text-ink-2">{caption}</span>
-                          ))}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+                <button
+                  key={groupName}
+                  ref={(el) => { if (el) tabRefs.current.set(groupName, el); else tabRefs.current.delete(groupName) }}
+                  type="button"
+                  role="tab"
+                  id={`engine-tab-${groupName}`}
+                  aria-controls={`engine-panel-${groupName}`}
+                  aria-selected={active}
+                  tabIndex={active ? 0 : -1}
+                  aria-label={holdsHiddenSelection && ENGINE_GROUP_LABELS[groupName]
+                    ? `${t(ENGINE_GROUP_LABELS[groupName])} (${t('contains_selected_engine')})`
+                    : undefined}
+                  onClick={() => setActiveGroup(groupName)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+                    active ? 'bg-surface text-ink shadow-raised' : 'text-ink-3 hover:text-ink-2'
+                  }`}
+                >
+                  {GroupIcon && <GroupIcon size={12} aria-hidden />}
+                  {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
+                  {holdsHiddenSelection && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+                </button>
               )
             })}
+          </div>
+          {/* Only the active group's cards render. A SINGLE radiogroup wraps them,
+              inside the tabpanel the active tab controls. */}
+          <div
+            role="tabpanel"
+            id={`engine-panel-${activeGroup}`}
+            aria-labelledby={`engine-tab-${activeGroup}`}
+            className="space-y-1"
+          >
+            <div className="space-y-1" role="radiogroup" aria-label={t('engine_section')}>
+              {(engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []).map((e2) => {
+                const selected = e2.key === engine
+                const isCloud = e2.group === 'cloud'
+                // 'Recommended.' rides in the backend guidance for the auto engine; lift
+                // it into a crisp badge and drop it from the caption so it isn't said twice.
+                const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
+                const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
+                return (
+                  <button
+                    key={e2.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={disabled}
+                    onClick={() => onEngineChange(e2.key)}
+                    className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
+                      selected
+                        ? 'border-primary bg-primary-soft/60 ring-1 ring-primary/20'
+                        : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
+                    }`}
+                  >
+                    <span
+                      aria-hidden
+                      className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
+                        selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+                      }`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
+                          {e2.label}
+                          {/* Only the Auto card, only once the router has ruled. */}
+                          {selected && e2.key === 'auto' && resolvedEngineLabel && (
+                            <ResolvedBadge
+                              text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
+                              title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
+                            />
+                          )}
+                        </span>
+                        {isRecommended && (
+                          <span className="mt-0.5 shrink-0 rounded bg-primary-soft px-1.5 py-0.5 text-2xs font-semibold text-primary-strong">
+                            {t('engine_recommended')}
+                          </span>
+                        )}
+                      </span>
+                      {/* A cloud engine leaves the device: its guidance is a privacy
+                          caution. Integrated warn-line (color + icon), not a nested box. */}
+                      {caption && (isCloud ? (
+                        <span className="mt-1 flex items-start gap-1.5 text-xs leading-4 text-warn-ink">
+                          <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden />
+                          <span className="min-w-0">{caption}</span>
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 block text-xs leading-4 text-ink-2">{caption}</span>
+                      ))}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </section>
 
