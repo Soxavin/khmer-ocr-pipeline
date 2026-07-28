@@ -3683,6 +3683,31 @@ lead. The redesign kept this project's tokens throughout (the review already use
 `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified Chromium light +
 dark (both tabs, marker dot) against `:8600/app` after `./dev.sh build`. Numbered 2.96.
 
+### 2.97 Engine switcher aligned to the house segmented control (impeccable) (2026-07-28)
+
+Ran an impeccable critique of the picker against `DESIGN.md`. Main finding: the group switcher had
+cycled through two patterns the design system doesn't use (pill-in-track §2.95, underline tabs
+§2.96), while the Command Deck defines exactly ONE small-either/or switcher — the segmented control
+(bordered joined row, active = `primary-soft` fill + `primary-strong` text) — used by the DPI toggle
+sitting directly below the engine picker. The two switchers in one drawer spoke different languages.
+
+Fix (in `SettingsDrawer.tsx`): restyled the group tabs to the house segmented control —
+`flex w-full overflow-hidden rounded-md border border-line-strong`, each tab `h-7 text-xs
+font-medium`, active `bg-primary-soft text-primary-strong`, inactive `bg-surface text-ink-2
+hover:bg-rail`, `border-l` seam between them. Dropped the underline bar, the `shadow-raised` pill,
+the `bg-rail` track, and the uppercase micro-styling (the house control is medium, not an uppercase
+label). Kept ALL tab a11y (role=tablist/tab/tabpanel, roving tabindex, id pairing, marker dot + SR
+note) and the Laptop/Cloud icons — so it reads as the house segmented control but keeps content-tab
+semantics. Labels shortened to **Local / Cloud** (new `engine_group_*_short` keys; full "Local (on
+this device)" preserved as `title` + the SR/aria name), fixing the two-line wrap.
+
+Token cleanups the critique flagged: selected card `bg-primary-soft/40` → full `bg-primary-soft`
+(the defined Selection Wash token, undiluted); list hairline `border-line-strong/20` → `/60` and
+dividers `/10` → `/40` (the system's card-hairline weight). Now the engine switcher and the DPI
+control visually rhyme. New km short strings provisional — flagged for native review. Gates:
+`tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified Chromium light +
+dark (both tabs, marker dot) after `./dev.sh build`. Numbered 2.97.
+
 ---
 
 ## 3. Results Snapshot

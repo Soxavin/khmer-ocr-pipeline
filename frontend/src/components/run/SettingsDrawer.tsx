@@ -25,6 +25,11 @@ const ENGINE_GROUP_ICONS: Record<string, typeof Laptop> = {
   local: Laptop,
   cloud: Cloud,
 }
+// Short tab labels (the switcher is compact); the full label rides as the tooltip + SR name.
+const ENGINE_GROUP_LABELS_SHORT: Record<string, Key> = {
+  local: 'engine_group_local_short',
+  cloud: 'engine_group_cloud_short',
+}
 
 // NOTE: joining tables across pages is deliberately NOT here — it is an export
 // choice, not an extraction one. Extraction always keeps per-page tables so the
@@ -190,19 +195,21 @@ export function SettingsDrawer(props: {
         {/* The engine is a run-setup decision, not an every-minute control. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Sparkles} label={t('engine_section')} />
-          {/* Group TABS — underline style: no pill container, no background shift.
-              The active tab reads by text color + a 2px bottom accent, so the tabs
-              behave as an indicator, not a physical switch competing with the drawer.
-              Data-driven from `engineGroups`; roving tabindex + arrow keys. */}
+          {/* Group SWITCHER — the house segmented control (§DESIGN Inputs): a bordered
+              joined row, active option takes primary-soft fill + primary-strong text,
+              matching the DPI toggle right below. Tab semantics + roving keys are kept
+              on top of that look; data-driven from `engineGroups`. */}
           <div
             role="tablist"
             aria-label={t('engine_section')}
             onKeyDown={onTabKeyDown}
-            className="mb-3 flex items-center gap-1 border-b border-line-strong/20"
+            className="mb-3 flex w-full overflow-hidden rounded-md border border-line-strong"
           >
-            {engineGroups.map(([groupName]) => {
+            {engineGroups.map(([groupName], gi) => {
               const GroupIcon = ENGINE_GROUP_ICONS[groupName]
               const active = groupName === activeGroup
+              const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
+              const shortLabel = ENGINE_GROUP_LABELS_SHORT[groupName] ? t(ENGINE_GROUP_LABELS_SHORT[groupName]) : fullLabel
               // The selected engine lives on this tab but it isn't showing: a marker dot
               // (plus an SR-only note) keeps "which engine is active" from hiding.
               const holdsHiddenSelection = !active && selectedGroup === groupName
@@ -216,18 +223,18 @@ export function SettingsDrawer(props: {
                   aria-controls={`engine-panel-${groupName}`}
                   aria-selected={active}
                   tabIndex={active ? 0 : -1}
-                  aria-label={holdsHiddenSelection && ENGINE_GROUP_LABELS[groupName]
-                    ? `${t(ENGINE_GROUP_LABELS[groupName])} (${t('contains_selected_engine')})`
-                    : undefined}
+                  title={fullLabel}
+                  aria-label={holdsHiddenSelection
+                    ? `${fullLabel} (${t('contains_selected_engine')})`
+                    : fullLabel}
                   onClick={() => setActiveGroup(groupName)}
-                  className={`relative flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
-                    active ? 'text-primary-strong' : 'text-ink-3 hover:text-ink-2'
-                  }`}
+                  className={`flex flex-1 items-center justify-center gap-1.5 h-7 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                    gi > 0 ? 'border-l border-line-strong' : ''
+                  } ${active ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'}`}
                 >
                   {GroupIcon && <GroupIcon size={12} aria-hidden />}
-                  {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
+                  {shortLabel}
                   {holdsHiddenSelection && <span aria-hidden className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
-                  {active && <span aria-hidden className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-primary" />}
                 </button>
               )
             })}
@@ -241,7 +248,7 @@ export function SettingsDrawer(props: {
             aria-labelledby={`engine-tab-${activeGroup}`}
           >
             <div
-              className="divide-y divide-line-strong/10 overflow-hidden rounded-lg border border-line-strong/20"
+              className="divide-y divide-line-strong/40 overflow-hidden rounded-lg border border-line-strong/60"
               role="radiogroup"
               aria-label={t('engine_section')}
             >
@@ -261,7 +268,7 @@ export function SettingsDrawer(props: {
                     disabled={disabled}
                     onClick={() => onEngineChange(e2.key)}
                     className={`group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                      selected ? 'bg-primary-soft/40' : 'hover:bg-rail/20'
+                      selected ? 'bg-primary-soft' : 'hover:bg-rail/20'
                     }`}
                   >
                     <span
