@@ -3658,6 +3658,31 @@ now much shorter (Pages/Preprocessing visible without scrolling). Gates: `tsc -b
 `npm run build`, detector (3 known `<img>` FPs). Verified Chromium light + dark (both tabs, marker
 dot, keyboard) against `:8600/app` after `./dev.sh build`. Numbered 2.95.
 
+### 2.96 Engine picker de-cluttered — underline tabs + single-perimeter list (2026-07-28)
+
+The user found the §2.95 pill-in-a-track tabs clunky (an external review — Kimi — diagnosed it
+precisely: the `bg-rail p-1` track is a heavy block competing with the drawer, and each card
+carried its own border *plus* the selected state added a second border color *plus* a `ring-1` —
+three nested rectangles before the label). Applied the fix, all in `SettingsDrawer.tsx`:
+
+- **Tabs → underline style.** Dropped the pill container; the tablist is now
+  `border-b border-line-strong/20` and the active tab reads by `text-primary-strong` + a 2px
+  `bg-primary` bottom accent (absolute, inset `left-3 right-3`). The indicator no longer competes
+  with the drawer edge. All a11y wiring unchanged (roving tabindex, id pairing, marker dot + SR note).
+- **Cards → one perimeter + hairline dividers.** Replaced N per-card borders with a single outer
+  `rounded-lg border-line-strong/20` wrapper + `divide-y divide-line-strong/10`. Selection now
+  reads by a surface tint (`bg-primary-soft/40`) — no border-color change, no ring. The eye tracks
+  tint, not boxes.
+- **Density.** Card padding `p-2.5` → `px-3 py-2`; radio dot `h-3 w-3 border-4` → `h-2.5 w-2.5
+  border-[3px]` (crisp, not a blob); caption/badge margins tightened; label row `items-start` →
+  `items-baseline` so the Recommended badge sits on the label's baseline. Cloud/local captions
+  unified into one markup branch (warn color + 11px icon is the only cloud difference).
+
+Net: ~20-25% less height per card and a calmer surface — chrome recedes, engine names + guidance
+lead. The redesign kept this project's tokens throughout (the review already used them). Gates:
+`tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified Chromium light +
+dark (both tabs, marker dot) against `:8600/app` after `./dev.sh build`. Numbered 2.96.
+
 ---
 
 ## 3. Results Snapshot

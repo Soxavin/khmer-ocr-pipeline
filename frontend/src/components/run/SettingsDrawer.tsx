@@ -190,14 +190,15 @@ export function SettingsDrawer(props: {
         {/* The engine is a run-setup decision, not an every-minute control. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Sparkles} label={t('engine_section')} />
-          {/* Group TABS (segmented control): each group's iconed header is now an
-              interactive tab. Data-driven from `engineGroups` — no hardcoded keys.
-              Roving tabindex + arrow keys; the active tab is a raised pill. */}
+          {/* Group TABS — underline style: no pill container, no background shift.
+              The active tab reads by text color + a 2px bottom accent, so the tabs
+              behave as an indicator, not a physical switch competing with the drawer.
+              Data-driven from `engineGroups`; roving tabindex + arrow keys. */}
           <div
             role="tablist"
             aria-label={t('engine_section')}
             onKeyDown={onTabKeyDown}
-            className="mb-2 flex items-center gap-1 rounded-lg bg-rail p-1"
+            className="mb-3 flex items-center gap-1 border-b border-line-strong/20"
           >
             {engineGroups.map(([groupName]) => {
               const GroupIcon = ENGINE_GROUP_ICONS[groupName]
@@ -219,26 +220,31 @@ export function SettingsDrawer(props: {
                     ? `${t(ENGINE_GROUP_LABELS[groupName])} (${t('contains_selected_engine')})`
                     : undefined}
                   onClick={() => setActiveGroup(groupName)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
-                    active ? 'bg-surface text-ink shadow-raised' : 'text-ink-3 hover:text-ink-2'
+                  className={`relative flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+                    active ? 'text-primary-strong' : 'text-ink-3 hover:text-ink-2'
                   }`}
                 >
                   {GroupIcon && <GroupIcon size={12} aria-hidden />}
                   {ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName}
-                  {holdsHiddenSelection && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+                  {holdsHiddenSelection && <span aria-hidden className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+                  {active && <span aria-hidden className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-primary" />}
                 </button>
               )
             })}
           </div>
-          {/* Only the active group's cards render. A SINGLE radiogroup wraps them,
-              inside the tabpanel the active tab controls. */}
+          {/* Only the active group's cards render. ONE outer perimeter + hairline
+              dividers instead of a border on every card; selection reads by a surface
+              tint, not a second border + ring. A SINGLE radiogroup wraps the cards. */}
           <div
             role="tabpanel"
             id={`engine-panel-${activeGroup}`}
             aria-labelledby={`engine-tab-${activeGroup}`}
-            className="space-y-1"
           >
-            <div className="space-y-1" role="radiogroup" aria-label={t('engine_section')}>
+            <div
+              className="divide-y divide-line-strong/10 overflow-hidden rounded-lg border border-line-strong/20"
+              role="radiogroup"
+              aria-label={t('engine_section')}
+            >
               {(engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []).map((e2) => {
                 const selected = e2.key === engine
                 const isCloud = e2.group === 'cloud'
@@ -254,20 +260,18 @@ export function SettingsDrawer(props: {
                     aria-checked={selected}
                     disabled={disabled}
                     onClick={() => onEngineChange(e2.key)}
-                    className={`group flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary ${
-                      selected
-                        ? 'border-primary bg-primary-soft/60 ring-1 ring-primary/20'
-                        : 'border-line-strong/30 bg-rail/20 hover:border-line-strong hover:bg-rail'
+                    className={`group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                      selected ? 'bg-primary-soft/40' : 'hover:bg-rail/20'
                     }`}
                   >
                     <span
                       aria-hidden
-                      className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border transition-colors duration-150 ${
-                        selected ? 'border-4 border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+                      className={`mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full border transition-colors duration-100 ${
+                        selected ? 'border-[3px] border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
                       }`}
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-start justify-between gap-2">
+                      <span className="flex items-baseline justify-between gap-2">
                         <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
                           {e2.label}
                           {/* Only the Auto card, only once the router has ruled. */}
@@ -279,21 +283,19 @@ export function SettingsDrawer(props: {
                           )}
                         </span>
                         {isRecommended && (
-                          <span className="mt-0.5 shrink-0 rounded bg-primary-soft px-1.5 py-0.5 text-2xs font-semibold text-primary-strong">
+                          <span className="shrink-0 rounded bg-primary-soft px-1.5 py-0 text-2xs font-semibold text-primary-strong">
                             {t('engine_recommended')}
                           </span>
                         )}
                       </span>
-                      {/* A cloud engine leaves the device: its guidance is a privacy
-                          caution. Integrated warn-line (color + icon), not a nested box. */}
-                      {caption && (isCloud ? (
-                        <span className="mt-1 flex items-start gap-1.5 text-xs leading-4 text-warn-ink">
-                          <TriangleAlert size={13} className="mt-px shrink-0" aria-hidden />
+                      {/* Cloud guidance is a privacy caution — same integrated line as
+                          local captions, distinguished only by warn color + a small icon. */}
+                      {caption && (
+                        <span className={`mt-0.5 flex items-start gap-1 text-xs leading-4 ${isCloud ? 'text-warn-ink' : 'text-ink-2'}`}>
+                          {isCloud && <TriangleAlert size={11} className="mt-px shrink-0" aria-hidden />}
                           <span className="min-w-0">{caption}</span>
                         </span>
-                      ) : (
-                        <span className="mt-0.5 block text-xs leading-4 text-ink-2">{caption}</span>
-                      ))}
+                      )}
                     </span>
                   </button>
                 )
