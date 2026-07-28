@@ -3,7 +3,10 @@
 // `group` ("local" | "cloud") separates on-device engines from ones that send the
 // page image to a third party (api.py _ENGINES). The picker renders one header per
 // group; the field is authoritative — the frontend never hardcodes which key is cloud.
-export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud' }
+// `experimental` (optional, backend-authoritative) flags a custom ARDB fine-tune. These
+// stay `group: 'local'` (they run on-device); the flag only controls whether they're
+// gated behind the Labs toggle. Absent/false = a production engine.
+export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean }
 
 export type Meta = {
   engines: EngineInfo[]

@@ -140,6 +140,9 @@ export default function App() {
   const textPickBlock = useMemo(() => pickBlock('text'), [pickBlock])
   // Silently remember the analyst's last-used engine/settings (no presets UI).
   const [engine, setEngine] = useState(() => localStorage.getItem('engine') ?? 'surya')
+  // Labs mode gates the custom ARDB fine-tunes (experimental engines). Off by default so
+  // the drawer shows a production-clean engine list; persisted per machine.
+  const [labsMode, setLabsMode] = useState(() => localStorage.getItem('labsMode') === 'true')
   // Joining continuation tables is an EXPORT choice; extraction always stays
   // per-page so every row keeps a page image to verify against.
   const [combineExport, setCombineExport] = useState(() => localStorage.getItem('combineExport') !== 'false')
@@ -432,6 +435,18 @@ export default function App() {
   // The server extracts one document at a time; this gate keeps every launch
   // control in the workspace honest instead of letting the API 409 explain it.
   const pipelineBusy = isBusy(documents, batchRunning) || (status.data?.active ?? false)
+
+  // Persist Labs mode, and guard the selection: if labs is off but the selected engine
+  // is experimental (toggled off just now, OR a stale value hydrated from a prior labs
+  // session), fall back to a production engine. Keyed on the loaded meta so it only fires
+  // once engines are known — never clobbering before we can tell what's experimental.
+  useEffect(() => {
+    localStorage.setItem('labsMode', String(labsMode))
+    if (labsMode) return
+    const engines = meta.data?.engines
+    if (!engines) return
+    if (engines.find((e2) => e2.key === engine)?.experimental) setEngine('auto')
+  }, [labsMode, meta.data?.engines, engine])
 
   const rememberSettings = useCallback(() => {
     localStorage.setItem('engine', engine)
@@ -1265,6 +1280,8 @@ export default function App() {
             engines={meta.data?.engines ?? []}
             engine={engine}
             onEngineChange={setEngine}
+            labsMode={labsMode}
+            onLabsModeChange={setLabsMode}
             disabled={pipelineBusy}
             checks={suggestion.data?.checks ?? []}
             scores={suggestion.data?.scores ?? null}

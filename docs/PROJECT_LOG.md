@@ -3728,6 +3728,33 @@ shorter. Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>`
 Chromium light + dark after `./dev.sh build`. Numbered 2.98. (Workstream 1, ARDB Labs scoping, lands
 separately.)
 
+### 2.99 ARDB Labs scoping — production-clean default, gated fine-tunes (2026-07-28)
+
+Custom ARDB fine-tunes now live in an isolated "Labs" space so the default engine list stays
+production-faithful (Automatic / Standard / Khmer-text specialist / Best structure / Cloud). Design
+choice: a fine-tune is *also* on-device, so it stays `group: 'local'` and is expressed by a separate
+**maturity** flag, not a third privacy tab (which would conflate the where-data-goes axis).
+
+- Data model: `EngineInfo.experimental?: boolean` (`api/types.ts`), backend-authoritative.
+- `App.tsx`: `labsMode` state (persist `localStorage 'labsMode'`, default false), passed to the
+  drawer. Guard effect keyed on `[labsMode, meta.engines, engine]` resets the selection to `'auto'`
+  when labs is off and the selected engine is experimental — covers both toggling off AND a stale
+  value hydrated from a prior labs session, and only fires once engines are loaded (never clobbers
+  before it can tell what's experimental).
+- `SettingsDrawer.tsx`: a light **Labs toggle** row under the engine title — rendered ONLY when the
+  API actually returns ≥1 experimental engine (no dead control until the backend flags one). When on,
+  the Local tab splits into production cards + an "Experimental" subsection (FlaskConical header) of
+  the fine-tune cards, inside the same `role="radiogroup"` (arrows still span both). Engine card
+  markup extracted to a shared `engineCard` closure so both lists render identically.
+- i18n: `labs_mode`, `labs_mode_tip`, `engine_group_experimental` — en + km provisional (native review).
+
+**Backend dependency:** `webapp/api.py _ENGINES` must set `experimental: true` on the ARDB fine-tune
+engines (owned by the backend session) — until then the whole feature is invisible by design. Which
+engines get the flag is a pending user decision (existing surya_kiri/vlm vs new Track A/B/C). Verified
+in Chromium via a stubbed `/api/meta` (route-intercepted experimental engine): Labs off → fine-tune
+hidden; on → Experimental subsection appears. Gates: `tsc -b`, 161 vitest, `npm run build`, detector
+(3 known `<img>` FPs). Numbered 2.99.
+
 ---
 
 ## 3. Results Snapshot

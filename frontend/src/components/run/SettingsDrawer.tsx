@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Check, Cloud, Eraser, FileOutput, Files, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { Check, Cloud, Eraser, FileOutput, Files, FlaskConical, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { SegmentedToggle } from '../viewer/PageGrid'
@@ -146,6 +146,9 @@ export function SettingsDrawer(props: {
   engines: EngineInfo[]
   engine: string
   onEngineChange: (key: string) => void
+  /** Labs mode reveals the custom ARDB fine-tunes (experimental engines). */
+  labsMode?: boolean
+  onLabsModeChange?: (v: boolean) => void
   /** Scan-check assessment for the active document (empty until it loads). */
   checks?: SuggestCheck[]
   /** Raw scan scores backing the checks — pick the phrasing tier per finding. */
@@ -165,7 +168,7 @@ export function SettingsDrawer(props: {
   disabled?: boolean
   onClose: () => void
 }) {
-  const { settings, onChange, engines, engine, onEngineChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, effectiveEngine = null, effectiveDpi = null, disabled = false, onClose } = props
+  const { settings, onChange, engines, engine, onEngineChange, labsMode = false, onLabsModeChange, checks = [], scores = null, auto = {}, onAutoOverride, highlight = null, pageCount, effectiveEngine = null, effectiveDpi = null, disabled = false, onClose } = props
   const { t } = useT()
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const [pulsing, setPulsing] = useState<string | null>(null)
@@ -226,6 +229,67 @@ export function SettingsDrawer(props: {
     setActiveGroup(names[next])
     tabRefs.current.get(names[next])?.focus()
   }
+  // The Labs toggle only exists once the API actually returns a fine-tune to reveal;
+  // until the backend flags one, the whole feature stays invisible (no dead control).
+  const hasExperimental = engines.some((e2) => e2.experimental)
+
+  // One engine option card. Shared by the production list and the Labs subsection so
+  // both render identically; only the grouping around them differs.
+  const engineCard = (e2: EngineInfo) => {
+    const selected = e2.key === engine
+    const isCloud = e2.group === 'cloud'
+    // 'Recommended.' rides in the backend guidance for the auto engine; lift it into a
+    // crisp badge and drop it from the caption so it isn't said twice.
+    const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
+    const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
+    return (
+      <button
+        key={e2.key}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        disabled={disabled}
+        onClick={() => onEngineChange(e2.key)}
+        className={`group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+          selected ? 'bg-primary-soft' : 'hover:bg-rail/20'
+        }`}
+      >
+        <span
+          aria-hidden
+          className={`mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full border transition-colors duration-100 ${
+            selected ? 'border-[3px] border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
+          }`}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
+              {e2.label}
+              {/* Only the Auto card, only once the router has ruled. */}
+              {selected && e2.key === 'auto' && resolvedEngineLabel && (
+                <ResolvedBadge
+                  text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
+                  title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
+                />
+              )}
+            </span>
+            {isRecommended && (
+              <span className="shrink-0 rounded bg-primary-soft px-1.5 py-0 text-2xs font-semibold text-primary-strong">
+                {t('engine_recommended')}
+              </span>
+            )}
+          </span>
+          {/* Cloud guidance is a privacy caution — same integrated line as local
+              captions, distinguished only by warn color + a small icon. */}
+          {caption && (
+            <span className={`mt-0.5 flex items-start gap-1 text-xs leading-4 ${isCloud ? 'text-warn-ink' : 'text-ink-2'}`}>
+              {isCloud && <TriangleAlert size={11} className="mt-px shrink-0" aria-hidden />}
+              <span className="min-w-0">{caption}</span>
+            </span>
+          )}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0 w-96 shrink-0 flex-col max-[1279px]:w-80">
@@ -244,6 +308,17 @@ export function SettingsDrawer(props: {
         {/* The engine is a run-setup decision, not an every-minute control. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Sparkles} label={t('engine_section')} />
+          {/* Labs gate — light row (no box), shown only when the API returns a fine-tune.
+              Off → production-clean engine list; on → the Experimental subsection appears. */}
+          {hasExperimental && onLabsModeChange && (
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-xs text-ink-2" title={t('labs_mode_tip')}>
+                <FlaskConical size={12} className="text-ink-3" aria-hidden />
+                {t('labs_mode')}
+              </span>
+              <Switch checked={labsMode} disabled={disabled} onChange={onLabsModeChange} label={t('labs_mode')} />
+            </div>
+          )}
           {/* Group SWITCHER — the house segmented control (§DESIGN Inputs): a bordered
               joined row, active option takes primary-soft fill + primary-strong text,
               matching the DPI toggle right below. Tab semantics + roving keys are kept
@@ -289,8 +364,9 @@ export function SettingsDrawer(props: {
             })}
           </div>
           {/* Only the active group's cards render. ONE outer perimeter + hairline
-              dividers instead of a border on every card; selection reads by a surface
-              tint, not a second border + ring. A SINGLE radiogroup wraps the cards. */}
+              dividers; a SINGLE radiogroup wraps the cards. When Labs is on, the local
+              group splits into production + an "Experimental" subsection (fine-tunes are
+              local; the subheader stays inside the radiogroup so arrows span both). */}
           <div
             role="tabpanel"
             id={`engine-panel-${activeGroup}`}
@@ -301,61 +377,25 @@ export function SettingsDrawer(props: {
               role="radiogroup"
               aria-label={t('engine_section')}
             >
-              {(engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []).map((e2) => {
-                const selected = e2.key === engine
-                const isCloud = e2.group === 'cloud'
-                // 'Recommended.' rides in the backend guidance for the auto engine; lift
-                // it into a crisp badge and drop it from the caption so it isn't said twice.
-                const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
-                const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
+              {(() => {
+                const activeEngines = engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []
+                const production = activeEngines.filter((e2) => !e2.experimental)
+                const experimental = activeEngines.filter((e2) => e2.experimental)
                 return (
-                  <button
-                    key={e2.key}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={disabled}
-                    onClick={() => onEngineChange(e2.key)}
-                    className={`group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                      selected ? 'bg-primary-soft' : 'hover:bg-rail/20'
-                    }`}
-                  >
-                    <span
-                      aria-hidden
-                      className={`mt-[5px] h-2.5 w-2.5 shrink-0 rounded-full border transition-colors duration-100 ${
-                        selected ? 'border-[3px] border-primary bg-surface' : 'border-line-strong bg-surface group-hover:border-ink-3'
-                      }`}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline justify-between gap-2">
-                        <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
-                          {e2.label}
-                          {/* Only the Auto card, only once the router has ruled. */}
-                          {selected && e2.key === 'auto' && resolvedEngineLabel && (
-                            <ResolvedBadge
-                              text={t('auto_resolved_engine', { v: resolvedEngineLabel })}
-                              title={t('auto_resolved_engine_tip', { v: resolvedEngineLabel })}
-                            />
-                          )}
-                        </span>
-                        {isRecommended && (
-                          <span className="shrink-0 rounded bg-primary-soft px-1.5 py-0 text-2xs font-semibold text-primary-strong">
-                            {t('engine_recommended')}
-                          </span>
-                        )}
-                      </span>
-                      {/* Cloud guidance is a privacy caution — same integrated line as
-                          local captions, distinguished only by warn color + a small icon. */}
-                      {caption && (
-                        <span className={`mt-0.5 flex items-start gap-1 text-xs leading-4 ${isCloud ? 'text-warn-ink' : 'text-ink-2'}`}>
-                          {isCloud && <TriangleAlert size={11} className="mt-px shrink-0" aria-hidden />}
-                          <span className="min-w-0">{caption}</span>
-                        </span>
-                      )}
-                    </span>
-                  </button>
+                  <>
+                    {production.map(engineCard)}
+                    {labsMode && experimental.length > 0 && (
+                      <>
+                        <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                          <FlaskConical size={12} aria-hidden />
+                          {t('engine_group_experimental')}
+                        </p>
+                        {experimental.map(engineCard)}
+                      </>
+                    )}
+                  </>
                 )
-              })}
+              })()}
             </div>
           </div>
         </section>
