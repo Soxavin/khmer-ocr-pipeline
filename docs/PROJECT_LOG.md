@@ -3755,6 +3755,24 @@ in Chromium via a stubbed `/api/meta` (route-intercepted experimental engine): L
 hidden; on → Experimental subsection appears. Gates: `tsc -b`, 161 vitest, `npm run build`, detector
 (3 known `<img>` FPs). Numbered 2.99.
 
+### 2.100 Backend: flag the Kiri fine-tunes as experimental (2026-07-28)
+
+Completed the §2.99 backend dependency in-session (no handoff). `webapp/api.py _ENGINES` now sets
+`experimental: True` on `surya_kiri` (Khmer-text specialist) and `surya_kiri_vlm` (Best structure)
+— the two custom ARDB Kiri fine-tunes. Default engine list is now production-clean (Automatic /
+Standard / Cloud); the fine-tunes surface only under the Labs toggle. Additive JSON; keys unchanged,
+so `settings.ocr_engine_key` validation and the registry are untouched.
+
+**Known nuance (left intentional):** the `auto` router (`auto_engine.run_auto`) still routes to
+`surya_kiri`/`vlm` internally (runner.py:81-83). So "experimental" governs *manual selectability +
+UI visibility*, not actual usage — "Automatic" (production) transparently benefits from the
+fine-tunes without cluttering the picker, which is the desired behaviour; degrading auto to avoid
+them would throw away the fine-tunes' value. Documented rather than changed.
+
+Tests: `test_engine_registry` (6) + `test_webapp_api` (64) green; `py_compile` clean. Verified in
+Chromium against the restarted backend (real `/api/meta`, no stub): Labs off → only Automatic /
+Standard under Local; on → the "Experimental" subsection with both Kiri engines. Numbered 2.100.
+
 ---
 
 ## 3. Results Snapshot

@@ -56,14 +56,17 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 # `group` ("local" | "cloud") lets the picker separate on-device engines from ones
 # that send the page to a third party. Cloud engines are opt-in and never chosen
 # by `auto`. The frontend renders the groups; adding the field is additive JSON.
+# `experimental` (optional) flags the custom ARDB Kiri fine-tunes: they stay `local`
+# (on-device) but the UI hides them behind a "Labs" toggle so the default view shows
+# only the production engines (Automatic / Standard / Cloud).
 _ENGINES = [
     {"key": "auto", "label": "Automatic", "group": "local",
      "guidance": "Picks the best engine for each document. Recommended."},
     {"key": "surya", "label": "Standard", "group": "local",
      "guidance": "Best all-round, fastest. Use for number-heavy or wide tables."},
-    {"key": "surya_kiri", "label": "Khmer-text specialist", "group": "local",
+    {"key": "surya_kiri", "label": "Khmer-text specialist", "group": "local", "experimental": True,
      "guidance": "Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower."},
-    {"key": "surya_kiri_vlm", "label": "Best structure (slow)", "group": "local",
+    {"key": "surya_kiri_vlm", "label": "Best structure (slow)", "group": "local", "experimental": True,
      "guidance": "Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest."},
     {"key": "gemini", "label": "Cloud (Gemini)", "group": "cloud",
      "guidance": "Sends the page image to Google. Do not use for confidential documents."},
