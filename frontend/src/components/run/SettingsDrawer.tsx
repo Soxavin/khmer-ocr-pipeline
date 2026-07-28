@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Check, Cloud, Eraser, FileOutput, Files, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
@@ -41,16 +41,19 @@ const OUTPUT_FLAGS: [string, Key, Key][] = [
 
 /** A real switch, not a checkbox: the drawer's clearest "designed" signal.
     36×20 track, 150ms knob travel, token colors, reduced-motion covered globally. */
-function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
-  const { checked, onChange, label, disabled = false } = props
+function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; id?: string }) {
+  const { checked, onChange, label, disabled = false, id } = props
   return (
     <button
       type="button"
       role="switch"
+      id={id}
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      // stopPropagation: when a SettingRow wraps this switch and makes the whole row
+      // clickable, the row's own onClick must not also fire and double-toggle.
+      onClick={(e) => { e.stopPropagation(); onChange(!checked) }}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? 'bg-primary' : 'bg-line-strong'
       }`}
@@ -62,6 +65,52 @@ function Switch(props: { checked: boolean; onChange: (v: boolean) => void; label
         }`}
       />
     </button>
+  )
+}
+
+/** One toggle row inside a SettingList — the shared vocabulary for the Preprocessing,
+    AI-correction, and Output flags. The whole row is clickable (not just the switch);
+    stopPropagation on the Switch keeps that from double-toggling. `rowRef` lands on the
+    outer node so Preprocessing can register it for telemetry scroll-to + pulse. */
+function SettingRow(props: {
+  id: string
+  label: string
+  hint?: string
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+  badge?: ReactNode
+  pulsing?: boolean
+  rowRef?: (el: HTMLDivElement | null) => void
+}) {
+  const { id, label, hint, checked, onChange, disabled = false, badge, pulsing = false, rowRef } = props
+  return (
+    <div
+      ref={rowRef}
+      onClick={() => { if (!disabled) onChange(!checked) }}
+      className={`flex cursor-pointer items-start justify-between gap-3 px-3 py-2 transition-colors duration-150 ${
+        pulsing ? 'bg-primary-soft' : ''
+      } ${disabled ? 'cursor-not-allowed' : ''}`}
+    >
+      <span className="min-w-0">
+        <span className="text-sm font-semibold text-ink">
+          {label}
+          {badge}
+        </span>
+        {hint && <span className="mt-1 block text-xs leading-4 text-ink-2">{hint}</span>}
+      </span>
+      <Switch id={id} checked={checked} disabled={disabled} onChange={onChange} label={label} />
+    </div>
+  )
+}
+
+/** The single-perimeter divided container the rows live in — matches the engine card
+    list, so the whole drawer speaks one "list" language instead of stacked boxes. */
+function SettingList(props: { children: ReactNode }) {
+  return (
+    <div className="divide-y divide-line-strong/40 overflow-hidden rounded-lg border border-line-strong/60">
+      {props.children}
+    </div>
   )
 }
 
@@ -381,9 +430,10 @@ export function SettingsDrawer(props: {
 
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={Eraser} label={t('page_cleanup')} />
-          {/* What the scan check found — the permanent record of "what was done". */}
+          {/* What the scan check found — the permanent record of "what was done".
+              Zones-not-borders: a light rail ground, no heavy border. */}
           {checks.length > 0 && (
-            <div className="mb-1.5 rounded-md border border-line-strong/30 bg-rail/20 p-2">
+            <div className="mb-1.5 rounded-md bg-rail/30 p-2">
               <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink">
                 <ScanSearch size={12} className="text-primary" aria-hidden />
                 {t('scan_check_title')}
@@ -409,57 +459,48 @@ export function SettingsDrawer(props: {
               </ul>
             </div>
           )}
-          <div className="space-y-1.5">
-            {PREPROCESS_FLAGS.map(([k, labelKey, hintKey]) => (
-              <div
-                key={k}
-                ref={(el) => { if (el) rowRefs.current.set(k, el); else rowRefs.current.delete(k) }}
-                className={`flex items-start justify-between gap-3 rounded-md border p-2 transition-[box-shadow,border-color] duration-150 ${
-                  pulsing === k ? 'border-primary ring-2 ring-primary/40' : 'border-line-strong/30'
-                } bg-rail/20`}
-              >
-                <span className="min-w-0">
-                  <span className="text-sm font-semibold text-ink">
-                    {t(labelKey)}
-                    {/* Present only where the scan check made the call — and it says
-                        which way, so a step it disabled stays auditable without ever
-                        looking like it is running. */}
-                    {(() => {
-                      const badge = autoBadge(bool(k), k in auto)
-                      if (badge === null) return null
-                      return (
-                        <span
-                          className={`ml-1.5 rounded px-1.5 py-0.5 text-2xs font-semibold ${
-                            badge === 'applied' ? 'bg-ok-soft text-ok-ink' : 'bg-rail text-ink-2'
-                          }`}
-                        >
-                          {t(badge === 'applied' ? 'auto_applied' : 'auto_off')}
-                        </span>
-                      )
-                    })()}
-                  </span>
-                  <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
-                </span>
-                <Switch
+          <SettingList>
+            {PREPROCESS_FLAGS.map(([k, labelKey, hintKey]) => {
+              // Present only where the scan check made the call — and it says which way,
+              // so a step it disabled stays auditable without ever looking like it is running.
+              const badge = autoBadge(bool(k), k in auto)
+              return (
+                <SettingRow
+                  key={k}
+                  id={`preprocess-${k}`}
+                  rowRef={(el) => { if (el) rowRefs.current.set(k, el); else rowRefs.current.delete(k) }}
+                  pulsing={pulsing === k}
+                  label={t(labelKey)}
+                  hint={t(hintKey)}
                   checked={bool(k)}
                   disabled={disabled}
-                  onChange={(v) => {
-                    set(k, v)
-                    onAutoOverride?.(k)
-                  }}
-                  label={t(labelKey)}
+                  onChange={(v) => { set(k, v); onAutoOverride?.(k) }}
+                  badge={badge && (
+                    <span
+                      className={`ml-1.5 rounded px-1.5 py-0.5 text-2xs font-semibold ${
+                        badge === 'applied' ? 'bg-ok-soft text-ok-ink' : 'bg-rail text-ink-2'
+                      }`}
+                    >
+                      {t(badge === 'applied' ? 'auto_applied' : 'auto_off')}
+                    </span>
+                  )}
                 />
-              </div>
-            ))}
-          </div>
+              )
+            })}
+          </SettingList>
         </section>
 
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={ScanSearch} label={t('ai_correction')} />
-          <div className="flex items-start justify-between gap-3 rounded-md border border-line-strong/30 bg-rail/20 p-2">
-            <span className="min-w-0 text-sm font-semibold text-ink">{t('ai_enable')}</span>
-            <Switch checked={bool('enable_qwen')} disabled={disabled} onChange={(v) => set('enable_qwen', v)} label={t('ai_correction')} />
-          </div>
+          <SettingList>
+            <SettingRow
+              id="enable_qwen"
+              label={t('ai_enable')}
+              checked={bool('enable_qwen')}
+              disabled={disabled}
+              onChange={(v) => set('enable_qwen', v)}
+            />
+          </SettingList>
           {bool('enable_qwen') && (
             <label className="mt-2 flex items-center justify-between">
               <span className="text-ink-2">{t('anomaly')}</span>
@@ -473,17 +514,19 @@ export function SettingsDrawer(props: {
         {/* Export settings close the drawer: the last decisions before files leave. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
           <SectionTitle icon={FileOutput} label={t('output')} />
-          <div className="space-y-1.5">
+          <SettingList>
             {OUTPUT_FLAGS.map(([k, labelKey, hintKey]) => (
-              <div key={k} className="flex items-start justify-between gap-3 rounded-md border border-line-strong/30 bg-rail/20 p-2">
-                <span className="min-w-0">
-                  <span className="text-sm font-semibold text-ink">{t(labelKey)}</span>
-                  <span className="mt-1 block text-xs leading-4 text-ink-2">{t(hintKey)}</span>
-                </span>
-                <Switch checked={bool(k)} disabled={disabled} onChange={(v) => set(k, v)} label={t(labelKey)} />
-              </div>
+              <SettingRow
+                key={k}
+                id={`output-${k}`}
+                label={t(labelKey)}
+                hint={t(hintKey)}
+                checked={bool(k)}
+                disabled={disabled}
+                onChange={(v) => set(k, v)}
+              />
             ))}
-          </div>
+          </SettingList>
           <p className="mt-2 text-xs text-ink-2">{t('join_note')}</p>
         </section>
       </div>

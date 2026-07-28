@@ -3708,6 +3708,26 @@ control visually rhyme. New km short strings provisional — flagged for native 
 `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified Chromium light +
 dark (both tabs, marker dot) after `./dev.sh build`. Numbered 2.97.
 
+### 2.98 Settings drawer declutter — one divided-list vocabulary (2026-07-28)
+
+The Preprocessing / AI-correction / Output sections were stacked per-row bordered boxes
+(`rounded-md border bg-rail/20 p-2` each) → "box-inside-a-box" fatigue + vertical bloat. Unified
+them to the divided-list vocabulary the engine cards now use, via two new local helpers in
+`SettingsDrawer.tsx`:
+- `SettingList` — one perimeter (`rounded-lg border-line-strong/60`) + `divide-y divide-line-strong/40`.
+- `SettingRow` — a `px-3 py-2` row, Switch on the right, **no per-row border**. The whole row is
+  clickable (not just the switch); `Switch` gained an `id` passthrough + `stopPropagation` so the
+  row-click and the switch don't double-toggle. `SettingRow` forwards a `rowRef` to its outer node so
+  Preprocessing keeps registering rows in `rowRefs` for the telemetry scroll-to; the `pulsing`
+  highlight moved from `border-primary ring-2` to a row **`bg-primary-soft` flash** (survives the
+  border removal). Auto badge, hints, and the enable_qwen anomaly sub-field all preserved.
+
+Scan-check panel de-bordered → `bg-rail/30` only (zones-not-borders). DPI stays `SegmentedToggle`
+(already on-system); Pages unchanged. Result: the whole drawer reads as one list language, markedly
+shorter. Gates: `tsc -b`, 161 vitest, `npm run build`, detector (3 known `<img>` FPs). Verified
+Chromium light + dark after `./dev.sh build`. Numbered 2.98. (Workstream 1, ARDB Labs scoping, lands
+separately.)
+
 ---
 
 ## 3. Results Snapshot
