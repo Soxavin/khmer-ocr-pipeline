@@ -384,11 +384,12 @@ def test_suggest_empty_page_list():
     assert out["rationale"] == {}
 
 
-def test_suggest_flat_gray_suggests_nothing():
-    # Flat gray: LOW contrast and LOW sharpness — both defaults stay on.
+def test_suggest_flat_gray_only_disables_stamp_removal():
+    # Flat gray: LOW contrast and LOW sharpness — sharpen/normalise defaults stay on.
+    # It has no stamp colour, though, so stamp removal is auto-disabled (§2.101).
     out = suggest_preprocess_settings([_flat_gray()])
-    assert out["suggested"] == {}
-    assert out["rationale"] == {}
+    assert out["suggested"] == {"remove_stamps": False}
+    assert set(out["rationale"]) == {"remove_stamps"}
 
 
 def test_suggest_sharp_image_disables_sharpen():
@@ -399,9 +400,10 @@ def test_suggest_sharp_image_disables_sharpen():
 
 def test_suggest_high_contrast_disables_normalise():
     out = suggest_preprocess_settings([_full_gradient()])
-    assert out["suggested"] == {"normalise": False}
+    # Grayscale gradient: high contrast disables normalise; no stamp colour disables
+    # removal (§2.101). Sharpen must NOT be suggested (near-zero Laplacian).
+    assert out["suggested"] == {"normalise": False, "remove_stamps": False}
     assert out["scores"]["contrast_std"] > 60
-    # Linear gradient has near-zero Laplacian: sharpen must NOT be suggested.
     assert "sharpen" not in out["suggested"]
 
 
@@ -411,16 +413,18 @@ def test_suggest_rationale_keys_mirror_suggested():
     assert all(isinstance(v, str) and v for v in out["rationale"].values())
 
 
-def test_suggest_only_touches_v1_fields():
+def test_suggest_only_touches_known_fields():
     out = suggest_preprocess_settings([_checkerboard(), _full_gradient()])
-    assert set(out["suggested"]) <= {"sharpen", "normalise"}
+    assert set(out["suggested"]) <= {"sharpen", "normalise", "remove_stamps"}
 
 
 def test_suggest_aggregates_with_median():
-    # Two flat pages + one checkerboard: the median is the flat score, so the
-    # single extreme page must not trigger a suggestion.
+    # Two flat pages + one checkerboard: the median is the flat score, so the single
+    # extreme page must not trigger sharpen/normalise. (Grayscale → stamp removal is
+    # still auto-disabled; that is orthogonal to the median aggregation under test.)
     out = suggest_preprocess_settings([_flat_gray(), _flat_gray(), _checkerboard()])
-    assert out["suggested"] == {}
+    assert "sharpen" not in out["suggested"]
+    assert "normalise" not in out["suggested"]
 
 
 def test_suggest_scores_are_plain_floats():
@@ -502,6 +506,21 @@ def test_suggest_clean_page_no_stamps():
     stamps = next(c for c in out["checks"] if c["field"] == "remove_stamps")
     assert stamps["active"] is False
     assert stamps["reason"] == "no_stamps"
+
+
+def test_suggest_no_stamp_disables_removal():
+    # §2.101: a confident "no stamps" also turns the toggle off (badge + pre-fill),
+    # symmetric with sharpen/normalise — the shape gate can still misfire, so removing
+    # nothing is strictly safer than leaving removal armed.
+    out = suggest_preprocess_settings([_flat_gray()])
+    assert out["suggested"].get("remove_stamps") is False
+    assert isinstance(out["rationale"].get("remove_stamps"), str) and out["rationale"]["remove_stamps"]
+
+
+def test_suggest_stamp_present_keeps_removal_on():
+    # When stamp ink IS detected, removal stays at its default (on) — not suggested off.
+    out = suggest_preprocess_settings([_red_stamp_page()])
+    assert "remove_stamps" not in out["suggested"]
 
 
 def test_suggest_empty_list_has_empty_checks():

@@ -110,7 +110,8 @@ def test_suggest_ingests_lazily_and_caches(client):
     body = r1.json()
     assert set(body) == {"scores", "suggested", "rationale", "checks"}
     assert set(body["scores"]) == {"laplacian_var", "contrast_std", "skew_deg", "stamp_ink_ratio"}
-    assert body["suggested"] == {}  # flat gray page: defaults stand
+    # flat gray page: sharpen/normalise defaults stand; no stamp colour → removal off (§2.101).
+    assert body["suggested"] == {"remove_stamps": False}
     assert r2.json() == body
     assert m.call_count == 1  # cached on the doc — no second rasterization
 
@@ -123,8 +124,9 @@ def test_suggest_returns_suggestions_for_high_contrast_pages(client):
     img = np.stack([np.tile(row, (256, 1))] * 3, axis=2)
     with patch("webapp.api.ingest", return_value=SimpleNamespace(page_images=[img])):
         body = client.get(f"/api/documents/{doc_id}/suggest").json()
-    assert body["suggested"] == {"normalise": False}
-    assert list(body["rationale"]) == ["normalise"]
+    # Grayscale gradient: normalise off (well contrasted) + removal off (no stamp colour, §2.101).
+    assert body["suggested"] == {"normalise": False, "remove_stamps": False}
+    assert set(body["rationale"]) == {"normalise", "remove_stamps"}
 
 
 def test_suggest_unreadable_document_yields_empty_suggestion(client):

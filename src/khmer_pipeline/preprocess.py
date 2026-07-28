@@ -177,6 +177,13 @@ def suggest_preprocess_settings(page_images: list[np.ndarray]) -> dict:
     if contrast_std > _SUGGEST_CONTRAST_STD:
         suggested["normalise"] = False
         rationale["normalise"] = "The pages are already well contrasted, so contrast enhancement is unnecessary."
+    # Stamp removal is shape-gated, so it is a no-op on a page with no stamp colour —
+    # but the shape gate can still misfire on coloured logos/figures. When the scan is
+    # confident there is no stamp ink, disable removal: strictly safer (nothing to
+    # remove) and symmetric with the sharpen/normalise "already good, turn off" story.
+    if stamp_ink_ratio < _SUGGEST_STAMP_INK_RATIO:
+        suggested["remove_stamps"] = False
+        rationale["remove_stamps"] = "No stamp-shaped marks were found, so stamp removal is turned off to protect any coloured text."
 
     # Per-toggle assessment for the UI's "scan check" story. `active` means
     # "this cleanup is useful for THIS document"; `reason` is a stable key the

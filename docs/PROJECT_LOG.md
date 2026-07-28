@@ -3773,6 +3773,29 @@ Tests: `test_engine_registry` (6) + `test_webapp_api` (64) green; `py_compile` c
 Chromium against the restarted backend (real `/api/meta`, no stub): Labs off → only Automatic /
 Standard under Local; on → the "Experimental" subsection with both Kiri engines. Numbered 2.100.
 
+### 2.101 Auto-disable Remove stamps when the scan finds no stamps (2026-07-28)
+
+The drawer's scan check reported "No stamp marks" yet Remove stamps stayed ON with no "Auto: Off"
+badge — unlike Sharpen/Contrast. Root cause: `suggest_preprocess_settings` only ever added
+`sharpen`/`normalise` to the `suggested` map (the map that pre-fills toggles + drives the badges);
+`remove_stamps` was treated as a harmless no-op on stampless pages (shape-gated removal erases
+nothing when nothing qualifies) so it was never suggested off. But the shape gate can still misfire
+on coloured logos/figures (its own comment records a real MoC doc where naïve removal erased 8.61%
+incl. table values), so leaving it armed when the scan is confident there are no stamps is a real
+risk.
+
+Fix (`src/khmer_pipeline/preprocess.py`): when `stamp_ink_ratio < _SUGGEST_STAMP_INK_RATIO`, add
+`suggested["remove_stamps"] = False` + rationale — symmetric with sharpen/normalise. Frontend
+unchanged: `mergeSuggestion` flips the toggle off (unless the user touched it) and `autoBadge`
+renders "Auto: Off". Strictly safe on stampless docs (removal was already a no-op there); a very
+faint stamp below the colour threshold would be skipped (user re-enables; `touched` overrides win).
+
+TDD: 2 new tests (stampless → `remove_stamps: False` + rationale; stamped `_red_stamp_page` → not
+suggested) + updated 4 preprocess + 2 webapp-api tests that encoded the old "only sharpen/normalise"
+contract. Full suite green (`uv run pytest`: 912→ all pass; `py_compile` clean). Verified in Chromium
+against a restarted backend with a clean budget PDF: Remove stamps + Sharpen both show "Auto: Off",
+and the doc's green MEF emblem is correctly left untouched. Numbered 2.101.
+
 ---
 
 ## 3. Results Snapshot
