@@ -318,7 +318,13 @@ export default function App() {
     try {
       last = JSON.parse(localStorage.getItem('runSettings') ?? '{}') as RunSettings
     } catch { /* stale/corrupt entry: fall back to defaults */ }
-    setRunSettings((s) => ({ ...defaults, ...last, ...s }))
+    // Drop persisted keys the backend no longer knows (e.g. a setting removed in a
+    // later version): the run POST validates against the current field set and 400s
+    // on any extra key, so a stale localStorage blob would otherwise block every run.
+    const pruned = Object.fromEntries(
+      Object.entries(last).filter(([k]) => k in defaults),
+    ) as RunSettings
+    setRunSettings((s) => ({ ...defaults, ...pruned, ...s }))
   }, [defaults])
 
   const jumpToIssue = useCallback(
