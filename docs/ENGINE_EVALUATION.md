@@ -90,11 +90,13 @@ A model that owns the grid but not the Khmer is a *complement* success, not a re
 
 | challenger | size | status | verdict |
 |---|---|---|---|
-| **dots.ocr** | 3.0B | tested (Stage A) | **Not proven on Apple Silicon — see below.** Runs, but only one adverse data point completed. |
-| PaddleOCR-VL-1.5 | 0.96B | queued | 3× smaller than dots.ocr; best local candidate to fit where dots.ocr OOM'd |
-| Gemini (Flash) | API | blocked | needs `GEMINI_API_KEY`; free tier; **budget/ARDB only** (circularity guard) |
-| Mistral OCR | API | queued | ~$0.001/page |
-| DeepSeek-OCR-2 | 6.8GB (cached) | deprioritised | SAM encoder + 64-expert MoE — higher MPS risk than a dense model |
+| **Gemini (Flash)** | API (cloud) | **shipped** | Strong all-rounder: struct+numbers match Surya, Khmer 0.70, spans. §2.91, §7. |
+| **dots.ocr** | 3.0B | tested (Stage A) | Structure good (col-align 1.000), Khmer 0.13–0.29, locally impractical (OOM/slow). Fair Colab test pending. §2.85. |
+| **Granite-Docling-258M** | 258M | **tested — NOT VIABLE** | Fast via MLX, but on Khmer: **empty table (structure failed) + confabulated Thai text**. Fails both axes. See below. |
+| **PaddleOCR-VL-1.6** | 0.9B | **not feasible locally** | transformers path broken (config-schema bug, 5.14 & 5.6); official path needs `paddlepaddle` (ARM-fragile). Colab if a number is wanted. See below. |
+| Mistral OCR | API | not run | ~$0.001/page |
+| DeepSeek-OCR-2 | 6.8GB (cached) | deprioritised | SAM + 64-expert MoE — high MPS risk; same family as the rejected Unlimited-OCR |
+| Unlimited-OCR | ~3B MoE | rejected on paper | unlimited-length USP irrelevant to 1–3 page docs; heaviest; Khmer wall |
 
 ### dots.ocr — the honest verdict (§2.85)
 
@@ -141,12 +143,52 @@ uses its own `<|user|>…<|endofuser|><|assistant|>` chat format, not Qwen's; im
 `attn_implementation`** that defaults to flash-attention → silently falls back to eager on Mac →
 OOM. Working spike: `scratchpad/spike_dots_table.py`.
 
-### Structural lesson for all VLM challengers
+### Granite-Docling-258M — tested, NOT VIABLE (§2.103)
 
-Autoregressive HTML generation costs output tokens proportional to **cell count**. A 34×16 budget
-table is 544 cells, so these models scale worst exactly where our documents are hardest — the
-opposite of what we want. Cloud APIs (no local memory) and the smallest local model (PaddleOCR-VL,
-0.96B) are therefore tried before any larger local VLM.
+The most promising *small local* candidate on paper: 258M (runs anywhere), MLX-native (avoids the
+MPS-transformers correctness risk that hurt dots.ocr), trained on FinTabNet/PubTabNet (financial
+tables), emits DocTags → HTML via `docling-core`. It loaded in 1s and ran in 28s on budget p3 —
+the practical path is excellent.
+
+**But it failed on both axes on a Khmer financial table:**
+- **Structure failed.** The DocTags carried an **empty `<otsl>` table (0 cells)** and 234 loose
+  `<text>` lines — it never recognized the 34×16 grid. The FinTabNet training (Latin) did not
+  transfer to a Khmer-script table at 258M.
+- **Text confabulated.** It emitted **Thai** glyphs for the Khmer (`ធរម…` → `ธรรมศូនย៍`-style Thai),
+  the textbook GlotOCR "fluent wrong-script" failure, live.
+
+Worse than dots.ocr, which at least nailed structure. Fast and clean to run, but unusable output —
+dropped.
+
+### PaddleOCR-VL-1.6 — not feasible locally this session
+
+0.9B, ONNX-capable, strong on scanned/tilted pages — the candidate we most wanted to reach the
+scanned case. But the **transformers path is broken**: its modeling code expects
+`PaddleOCRVLConfig.text_config`, which transformers 5.x's refactored config no longer exposes
+(`AttributeError`, reproduced on 5.14 and 5.6). The official path needs the `paddlepaddle` C++
+toolkit, which is fragile on Apple-Silicon (partial Metal, import panics) and heavy on a 95%-full
+disk. Per the timebox, dropped locally. **A real number needs Colab (Linux/CUDA)** — the same
+verdict dots.ocr got: these are CUDA-first models, and fighting them on MPS costs more than a
+notebook round-trip.
+
+### Structural lesson + bake-off conclusion
+
+Autoregressive HTML generation costs output tokens proportional to **cell count** (a 34×16 table
+is 544 cells), so these models scale worst where our documents are hardest.
+
+**The "better local single-pass VLM" search is, for now, closed with a negative.** We have tested
+the field — Surya 2 (baseline), dots.ocr, Granite-Docling, PaddleOCR-VL (attempted), Gemini (cloud)
+— and none is a *local* engine that beats what we have:
+- dots.ocr: good structure, but locally impractical (OOM/slow) and weak Khmer.
+- Granite-Docling: practical to run, but fails structure AND text on Khmer.
+- PaddleOCR-VL: won't run locally via transformers.
+- Gemini: the strongest single-pass all-rounder, but **cloud**, and its Khmer (0.70) still trails
+  Kiri (0.88).
+
+So the best **local** engine remains **`surya_kiri_vlm`** (Surya structure + in-place Kiri Khmer),
+and the highest-value *local* work is the **Kiri fine-tune on scanned pages** — not another general
+VLM. Gemini stands as the cloud option for users who accept it. This closes the "is there something
+better than Surya locally" question with evidence, at least until a Khmer-aware document VLM ships.
 
 ---
 

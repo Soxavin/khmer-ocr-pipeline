@@ -54,3 +54,4 @@ frontend/dist/
 .env.*
 !.env.example
 *.gemini.json
+.venv-challengers/

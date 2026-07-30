@@ -3821,6 +3821,40 @@ numbers stay flag-don't-rewrite) is documented as future work in the memo. Gates
 909 passed (removed the Qwen-behaviour tests; `test_postprocess` 36), `py_compile` clean, frontend
 `tsc -b`/161 vitest/`build`/detector (3 known FPs). Numbered 2.102.
 
+### 2.103 Local structure bake-off: Granite-Docling + PaddleOCR-VL — both out (2026-07-30)
+
+Tested the two single-pass structure VLMs we had never run, as a **local structure** bake-off
+(judged on grid/spans/numbers, not Khmer — GlotOCR says general VLMs trail there). Both ran in an
+isolated `.venv-challengers` (transformers 5.x, mlx-vlm) to keep the shared pipeline env untouched
+— which immediately paid off: the isolated env pulled transformers 5.14, and torchvision bumped
+torch to 2.13; either would have broken Surya in the shared venv.
+
+**Granite-Docling-258M — tested, NOT VIABLE.** Loads in 1s, runs in 28s via MLX (the practical
+path is great). But on budget p3 (Khmer financial table): the DocTags carried an **empty `<otsl>`
+table — 0 cells** — plus 234 loose `<text>` lines (structure detection failed outright), and it
+**confabulated Thai** glyphs for the Khmer text — GlotOCR's "fluent wrong-script" failure, live.
+Fails both structure and text; worse than dots.ocr, which at least got the grid. Its FinTabNet
+(Latin) training does not transfer to Khmer-script tables at 258M.
+
+**PaddleOCR-VL-1.6 — not feasible locally this session.** The transformers path is broken: the
+modeling code expects `PaddleOCRVLConfig.text_config`, which transformers 5.x's refactored config
+no longer exposes (`AttributeError`, reproduced on 5.14 and 5.6). The official path needs the
+`paddlepaddle` C++ toolkit — ARM-fragile (partial Metal, import panics) and heavy on a 95%-full
+disk — so per the timebox it was dropped locally; a real number needs Colab (Linux/CUDA), same as
+dots.ocr.
+
+**Conclusion — the "better local single-pass VLM" search closes with a negative.** Across Surya 2,
+dots.ocr, Granite-Docling, PaddleOCR-VL (attempted) and Gemini (cloud), none is a *local* engine
+that beats what we have. The best local engine stays **`surya_kiri_vlm`** (Surya structure +
+in-place Kiri Khmer — the safe pairing that never re-assigns text), and the highest-value local
+work is the **Kiri fine-tune on scanned pages**, not another general VLM. Gemini remains the
+opt-in cloud all-rounder. Detail + the reusable landscape table live in `docs/ENGINE_EVALUATION.md`
+§6. No production code changed (spikes are throwaway; no challenger earned an engine); only docs +
+a `.gitignore` entry for `.venv-challengers/`.
+
+Also confirmed en route: **Unlimited-OCR** rejected on paper (unlimited-length USP irrelevant to
+1–3 page docs; heaviest candidate; same Khmer wall).
+
 ---
 
 ## 3. Results Snapshot
