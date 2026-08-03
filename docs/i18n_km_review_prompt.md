@@ -58,7 +58,7 @@ Then **Glossary decisions** (your standard Khmer term per domain word), then **R
 
 ---
 
-## NEWEST SET — added since this doc was last generated, NEVER reviewed (46 keys)
+## NEWEST SET — added since this doc was last generated, NEVER reviewed (56 keys)
 
 These are the highest priority: the review-workspace strings from the latest UI passes
 (raw/edited view toggle, confidence show/hide, dismiss-all, page-text blocks, find, copy,
@@ -76,6 +76,16 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 | `contains_selected_engine` | contains the selected engine | មានម៉ាស៊ីនដែលបានជ្រើស |
 | `labs_mode` | Labs engines | ម៉ាស៊ីនពិសោធន៍ |
 | `labs_mode_tip` | Show custom ARDB fine-tuned models (experimental) | បង្ហាញម៉ូដែល ARDB ដែលបានបង្វឹកពិសេស (ពិសោធន៍) |
+| `engine_label_auto` | Automatic | ស្វ័យប្រវត្តិ |
+| `engine_guidance_auto` | Picks the best engine for each document. | ជ្រើសម៉ាស៊ីនល្អបំផុតសម្រាប់ឯកសារនីមួយៗ។ |
+| `engine_label_surya` | Standard | ស្តង់ដារ |
+| `engine_guidance_surya` | Best all-round, fastest. Use for number-heavy or wide tables. | ល្អបំផុតជាទូទៅ លឿនបំផុត។ សម្រាប់តារាងច្រើនលេខ ឬធំទូលាយ។ |
+| `engine_label_surya_kiri` | Khmer-text specialist | ជំនាញអក្សរខ្មែរ |
+| `engine_guidance_surya_kiri` | Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower. | ខ្លាំងបំផុតលើតារាងតូចចង្អៀតដែលមានអក្សរខ្មែរច្រើន (ព្រឹត្តិប័ត្រ ARDB)។ យឺតជាង។ |
+| `engine_label_surya_kiri_vlm` | Best structure (slow) | រចនាសម្ព័ន្ធល្អបំផុត (យឺត) |
+| `engine_guidance_surya_kiri_vlm` | Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest. | រក្សាក្បាលតារាងលាតសន្ធឹងឲ្យនៅដដែល ហើយកែលម្អក្រឡាខ្មែរពេលមានសុវត្ថិភាព។ យឺតបំផុត។ |
+| `engine_label_gemini` | Cloud (Gemini) | ពពក (Gemini) |
+| `engine_guidance_gemini` | Sends the page image to Google. Do not use for confidential documents. | ផ្ញើរូបទំព័រទៅ Google។ កុំប្រើសម្រាប់ឯកសារសម្ងាត់។ |
 | `raw_view` | Raw OCR | OCR ដើម |
 | `raw_banner` | Raw OCR · read only | OCR ដើម · អានតែប៉ុណ្ណោះ |
 | `raw_view_tip` | Show the original OCR reading, read-only. Turn off to edit. | បង្ហាញលទ្ធផល OCR ដើម ក្នុងទម្រង់អានតែប៉ុណ្ណោះ។ បិទដើម្បីកែ។ |
@@ -185,8 +195,8 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 | `conf_regions_scope` | Regions | តំបន់ |
 | `dismiss_all_title` | Dismiss all issues? | លុបចេញបញ្ហាទាំងអស់មែនទេ? |
 | `app_title` | Khmer Document Extraction | ការទាញយកទិន្នន័យពីឯកសារខ្មែរ |
-| `backend_ready` | AI text-correction backend is running | ម៉ាស៊ីនកែអត្ថបទ AI កំពុងដំណើរការ |
-| `backend_off` | AI text-correction backend not running (only needed when Qwen is enabled) | ម៉ាស៊ីនកែអត្ថបទ AI មិនកំពុងដំណើរការទេ (ត្រូវការតែពេលបើក Qwen ប៉ុណ្ណោះ) |
+| `backend_ready` | OCR backend is running | ម៉ាស៊ីន OCR កំពុងដំណើរការ |
+| `backend_off` | OCR backend not running | ម៉ាស៊ីន OCR មិនទាន់ដំណើរការទេ |
 | `notes` | Notes ({n}) | កំណត់ចំណាំ ({n}) |
 | `notes_tip` | Things the pipeline noticed while reading this document | អ្វីដែលប្រព័ន្ធបានសង្កេតឃើញពេលអានឯកសារនេះ |
 | `processing_notes` | Processing notes | កំណត់ចំណាំពេលដំណើរការ |

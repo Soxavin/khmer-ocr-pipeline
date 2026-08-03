@@ -185,10 +185,18 @@ export function SettingsDrawer(props: {
   const set = (k: string, v: unknown) => onChange({ ...settings, [k]: v })
   const bool = (k: string) => Boolean(settings[k])
   const scope = String(settings.page_scope ?? 'all')
-  // The router reports an engine KEY; show the same label the card carries.
+  // Engine label/guidance are localized via i18n when an entry exists (see i18n.tsx);
+  // otherwise fall back to the backend English on EngineInfo (e.g. a future engine key).
+  const localizedEngines = new Set(['auto', 'surya', 'surya_kiri', 'surya_kiri_vlm', 'gemini'])
+  const engineLabel = (e2: EngineInfo) =>
+    localizedEngines.has(e2.key) ? t(`engine_label_${e2.key}` as Parameters<typeof t>[0]) : e2.label
+  const engineGuidance = (e2: EngineInfo) =>
+    localizedEngines.has(e2.key) ? t(`engine_guidance_${e2.key}` as Parameters<typeof t>[0]) : e2.guidance
+  // The router reports an engine KEY; show the same (localized) label the card carries.
+  const resolvedEngine = engines.find((e2) => e2.key === effectiveEngine)
   const resolvedEngineLabel =
     effectiveEngine && effectiveEngine !== 'auto'
-      ? (engines.find((e2) => e2.key === effectiveEngine)?.label ?? effectiveEngine)
+      ? (resolvedEngine ? engineLabel(resolvedEngine) : effectiveEngine)
       : null
   const dpiIsAuto = String(settings.dpi ?? 'auto') === 'auto'
   // Bucket engines by `group`, preserving first-encounter order (local before cloud,
@@ -239,9 +247,10 @@ export function SettingsDrawer(props: {
     const selected = e2.key === engine
     const isCloud = e2.group === 'cloud'
     // 'Recommended.' rides in the backend guidance for the auto engine; lift it into a
-    // crisp badge and drop it from the caption so it isn't said twice.
+    // crisp badge (detected off the canonical English). The localized caption already
+    // omits it (`engine_guidance_auto`), so it is never said twice.
     const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
-    const caption = isRecommended ? e2.guidance.replace(/\s*Recommended\.?$/, '') : e2.guidance
+    const caption = engineGuidance(e2)
     return (
       <button
         key={e2.key}
@@ -263,7 +272,7 @@ export function SettingsDrawer(props: {
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
             <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
-              {e2.label}
+              {engineLabel(e2)}
               {/* Only the Auto card, only once the router has ruled. */}
               {selected && e2.key === 'auto' && resolvedEngineLabel && (
                 <ResolvedBadge

@@ -8,8 +8,8 @@ export type Lang = 'en' | 'km'
 
 const en = {
   app_title: 'Khmer Document Extraction',
-  backend_ready: 'AI text-correction backend is running',
-  backend_off: 'AI text-correction backend not running (only needed when Qwen is enabled)',
+  backend_ready: 'OCR backend is running',
+  backend_off: 'OCR backend not running',
 
   notes: 'Notes ({n})',
   notes_tip: 'Things the pipeline noticed while reading this document',
@@ -285,8 +285,11 @@ const en = {
   extraction_settings: 'Extraction settings',
   engine_section: 'Recognition engine',
   engine_hint: 'Which model reads the pages — applies to the next run.',
-  // Engine-picker group headers. Labels/guidance for the engines themselves come from
-  // the backend in English (not localized); only these headers are translated here.
+  // Engine-picker group headers plus each engine's own label/guidance. The English here
+  // MIRRORS the backend `/api/meta` strings (canonical source); the drawer prefers these
+  // i18n keys so Khmer can be shown, and falls back to the backend text for any engine
+  // key without an entry (e.g. a future engine). `engine_guidance_auto` omits the trailing
+  // "Recommended." — that rides in a separate badge (`engine_recommended`).
   engine_group_local: 'Local (on this device)',
   engine_group_cloud: 'Cloud',
   engine_group_local_short: 'Local',
@@ -296,6 +299,16 @@ const en = {
   labs_mode_tip: 'Show custom ARDB fine-tuned models (experimental)',
   engine_recommended: 'Recommended',
   contains_selected_engine: 'contains the selected engine',
+  engine_label_auto: 'Automatic',
+  engine_guidance_auto: 'Picks the best engine for each document.',
+  engine_label_surya: 'Standard',
+  engine_guidance_surya: 'Best all-round, fastest. Use for number-heavy or wide tables.',
+  engine_label_surya_kiri: 'Khmer-text specialist',
+  engine_guidance_surya_kiri: 'Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower.',
+  engine_label_surya_kiri_vlm: 'Best structure (slow)',
+  engine_guidance_surya_kiri_vlm: 'Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest.',
+  engine_label_gemini: 'Cloud (Gemini)',
+  engine_guidance_gemini: 'Sends the page image to Google. Do not use for confidential documents.',
   more_menu: 'More',
   ks_verify: 'Verify / unverify the focused table',
   close_settings: 'Close settings',
@@ -403,8 +416,8 @@ export type Key = keyof typeof en
 
 const km: Record<Key, string> = {
   app_title: 'ការទាញយកទិន្នន័យពីឯកសារខ្មែរ',
-  backend_ready: 'ម៉ាស៊ីនកែអត្ថបទ AI កំពុងដំណើរការ',
-  backend_off: 'ម៉ាស៊ីនកែអត្ថបទ AI មិនទាន់ដំណើរការទេ (ត្រូវការតែពេលបើក Qwen)',
+  backend_ready: 'ម៉ាស៊ីន OCR កំពុងដំណើរការ',
+  backend_off: 'ម៉ាស៊ីន OCR មិនទាន់ដំណើរការទេ',
 
   notes: 'កំណត់ចំណាំ ({n})',
   notes_tip: 'ចំណុចកត់សម្គាល់ពេលអានឯកសារនេះ',
@@ -689,6 +702,16 @@ const km: Record<Key, string> = {
   labs_mode_tip: 'បង្ហាញម៉ូដែល ARDB ដែលបានបង្វឹកពិសេស (ពិសោធន៍)',
   engine_recommended: 'ណែនាំ',
   contains_selected_engine: 'មានម៉ាស៊ីនដែលបានជ្រើស',
+  engine_label_auto: 'ស្វ័យប្រវត្តិ',
+  engine_guidance_auto: 'ជ្រើសម៉ាស៊ីនល្អបំផុតសម្រាប់ឯកសារនីមួយៗ។',
+  engine_label_surya: 'ស្តង់ដារ',
+  engine_guidance_surya: 'ល្អបំផុតជាទូទៅ លឿនបំផុត។ សម្រាប់តារាងច្រើនលេខ ឬធំទូលាយ។',
+  engine_label_surya_kiri: 'ជំនាញអក្សរខ្មែរ',
+  engine_guidance_surya_kiri: 'ខ្លាំងបំផុតលើតារាងតូចចង្អៀតដែលមានអក្សរខ្មែរច្រើន (ព្រឹត្តិប័ត្រ ARDB)។ យឺតជាង។',
+  engine_label_surya_kiri_vlm: 'រចនាសម្ព័ន្ធល្អបំផុត (យឺត)',
+  engine_guidance_surya_kiri_vlm: 'រក្សាក្បាលតារាងលាតសន្ធឹងឲ្យនៅដដែល ហើយកែលម្អក្រឡាខ្មែរពេលមានសុវត្ថិភាព។ យឺតបំផុត។',
+  engine_label_gemini: 'ពពក (Gemini)',
+  engine_guidance_gemini: 'ផ្ញើរូបទំព័រទៅ Google។ កុំប្រើសម្រាប់ឯកសារសម្ងាត់។',
   more_menu: 'ច្រើនទៀត',
   ks_verify: 'ផ្ទៀងផ្ទាត់ / ដកការផ្ទៀងផ្ទាត់ តារាងដែលកំពុងជ្រើស',
   close_settings: 'បិទការកំណត់',
