@@ -8,11 +8,13 @@ from khmer_pipeline.evaluation.evaluate_structure import (
     _align_rows,
     _levenshtein,
     _fold_numeric,
+    _fold_spaces,
     _is_numeric,
     _has_khmer_digit,
     cer,
     gt_table_grid,
     gt_paragraph_lines,
+    has_text_gt,
     pred_table_grid,
     evaluate_table,
     evaluate_text,
@@ -1064,3 +1066,96 @@ def test_structure_metrics_do_not_perturb_existing_metrics():
     assert m["grid_shape_match"] is True
     assert m["row_alignment_rate"] == 1.0
 
+
+# --- text-GT availability (moc_gas: table-only page) ---
+# A page can lack paragraph GT for two very different reasons: the page genuinely
+# has no prose, or we simply never produced text GT for it. Scoring both as
+# cer("", prediction) == 1.0 marks the second case as a total failure that never
+# happened. `has_text_gt` lets callers tell them apart.
+
+def test_has_text_gt_true_when_paragraphs_present():
+    assert has_text_gt({"tables": [], "paragraphs": ["line"]}) is True
+
+
+def test_has_text_gt_true_when_only_footer_present():
+    assert has_text_gt({"tables": [], "paragraphs": [], "footer": "foot"}) is True
+
+
+def test_has_text_gt_false_when_no_text_at_all():
+    assert has_text_gt({"tables": [{"data": [["a"]]}], "paragraphs": [], "footer": ""}) is False
+
+
+def test_has_text_gt_respects_explicit_opt_out():
+    # A page WITH prose we deliberately do not score (unreliable GT) must be
+    # excludable, so its text metrics are blank rather than falsely perfect/zero.
+    gt = {"tables": [], "paragraphs": ["line"], "text_gt_available": False}
+    assert has_text_gt(gt) is False
+
+
+# --- space-insensitive text-cell equality (§ typography, not recognition) ---
+# The ARDB source PDFs render some parenthesised labels with a wide kerning gap
+# that extracts as a space ("សាច់គោ (សាច់សម្ល )") and others without it
+# ("សាច់គោ (សាច់ភ្លៅ)") -- confirmed against the rendered page, so BOTH the GT and
+# a correct prediction may legitimately differ by that space. Exact-match metrics
+# must not turn a typographic artifact into a whole-cell miss; this mirrors the
+# space-dropping _fold_numeric already applies to split numbers ("7 800"/"7800").
+# Deliberately NOT applied to table_cer: a proportional metric already charges a
+# single space ~1/len(text), and folding there would stop measuring spacing at all.
+
+_SPACED_GT = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់សម្ល )"]]
+
+
+def test_fold_spaces_drops_bracket_hugging_space():
+    assert _fold_spaces("សាច់គោ (សាច់សម្ល )") == _fold_spaces("សាច់គោ (សាច់សម្ល)")
+
+
+def test_fold_spaces_drops_space_after_open_bracket():
+    assert _fold_spaces("សាច់គោ ( សាច់សម្ល)") == _fold_spaces("សាច់គោ (សាច់សម្ល)")
+
+
+def test_fold_spaces_keeps_word_spaces():
+    # PIN the narrow scope: only the verified bracket artifact is folded. A missing
+    # space BETWEEN words is a real difference and must still score as one --
+    # folding every space would touch 4.64% of GT cells instead of 0.12%.
+    assert _fold_spaces("សាច់ជ្រូក សាច់សុទ្ធ (CP)") != _fold_spaces("សាច់ជ្រូកសាច់សុទ្ធ (CP)")
+
+
+def test_fold_spaces_still_separates_different_text():
+    assert _fold_spaces("សាច់គោ (សាច់ភ្លៅ)") != _fold_spaces("សាច់គោ (សាច់សម្ល)")
+
+
+def test_cell_accuracy_ignores_render_gap():
+    # Prediction reads the label correctly but without the render gap.
+    pred_grid = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់សម្ល)"]]
+    result = evaluate_table([_make_table_from_grid(pred_grid)], _SPACED_GT)
+    assert result["cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_khmer_cell_accuracy_ignores_render_gap():
+    pred_grid = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់សម្ល)"]]
+    result = evaluate_table([_make_table_from_grid(pred_grid)], _SPACED_GT)
+    assert result["khmer_cells_correct"] == result["khmer_cells_total"]
+    assert result["khmer_cell_accuracy"] == pytest.approx(1.0)
+
+
+def test_cell_content_recall_ignores_render_gap():
+    pred_grid = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់សម្ល)"]]
+    result = evaluate_table([_make_table_from_grid(pred_grid)], _SPACED_GT)
+    assert result["cell_content_recall"] == pytest.approx(1.0)
+
+
+def test_space_folding_does_not_excuse_a_real_misread():
+    # Guard: folding spaces must not make genuinely different labels compare equal.
+    pred_grid = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់ភ្លៅ)"]]
+    result = evaluate_table([_make_table_from_grid(pred_grid)], _SPACED_GT)
+    assert result["cell_accuracy"] < 1.0
+    # The 2 untouched header labels still score; only the misread label is denied.
+    assert result["khmer_cells_total"] == 3
+    assert result["khmer_cells_correct"] == 2
+
+
+def test_table_cer_still_counts_the_space():
+    # PIN: CER is proportional, so it deliberately keeps charging for spacing.
+    pred_grid = [["ល.រ", "មុខទំនិញ"], ["៣", "សាច់គោ (សាច់សម្ល)"]]
+    result = evaluate_table([_make_table_from_grid(pred_grid)], _SPACED_GT)
+    assert result["table_cer"] > 0.0

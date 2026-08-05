@@ -39,6 +39,29 @@ def _fold_numeric(s: str) -> str:
     return folded.replace(" ", "")
 
 
+def _fold_spaces(s: str) -> str:
+    """Normalize a text cell for EXACT-MATCH comparison by dropping bracket-hugging
+    spaces only — "សាច់គោ (សាច់សម្ល )" == "សាច់គោ (សាច់សម្ល)".
+
+    The ARDB source PDFs render some parenthesised labels with a wide kerning gap
+    that extracts as a space while other labels on the same page have none
+    ("សាច់គោ (សាច់ភ្លៅ)") — verified against the rendered page, so that gap is
+    typography, not content, and GT and a correct prediction may each legitimately
+    carry it or not. Without folding, the artifact flips a whole cell to "wrong".
+    Same argument `_fold_numeric` already makes for a split number ("7 800"), here
+    applied to text.
+
+    Deliberately NARROW — spaces BETWEEN words are left alone. Folding every space
+    would touch 161 of 3,467 GT cells (4.64%) instead of 4 (0.12%), granting credit
+    for word-segmentation differences that were never verified to be render
+    artifacts; only the bracket gap was. Also deliberately NOT used for `table_cer`:
+    a proportional metric already charges a lone space ~1/len(text), so folding
+    there would stop measuring spacing altogether."""
+    normed = _norm(s)
+    normed = re.sub(r"(?<=[(\[])\s+", "", normed)
+    return re.sub(r"\s+(?=[)\]])", "", normed)
+
+
 def _is_unit_token(tok: str) -> bool:
     # A unit affix is short and carries no digits in either script.
     return (
@@ -160,6 +183,20 @@ def gt_table_grid(gt: dict) -> list[list[str]] | None:
     if "data" in gt:
         return gt["data"]
     return None
+
+
+def has_text_gt(gt: dict) -> bool:
+    """Whether this page has usable paragraph/footer ground truth to score text against.
+
+    Distinguishes "no prose on the page" and "text GT deliberately withheld" (e.g.
+    moc_gas, whose prose could not be transcribed reliably — LLM drafts disagreed
+    run-to-run) from a page that simply has text. Without this, an absent text GT
+    scores cer("", prediction) == 1.0, a total failure that never happened. Callers
+    skip text metrics when this is False. `text_gt_available: false` opts a page out
+    explicitly even when `paragraphs` is non-empty."""
+    if gt.get("text_gt_available") is False:
+        return False
+    return bool(gt_paragraph_lines(gt))
 
 
 def gt_paragraph_lines(gt: dict) -> list[str]:
@@ -354,17 +391,20 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
     # Every consumer scores at aligned (row, column) intersections.
     cell_pairs = [((gi, gc), (pj, pc)) for gi, pj in row_pairs for gc, pc in col_pairs]
 
+    # Space-folded equality: a render-gap artifact must not flip a whole cell
+    # to "wrong" (see _fold_spaces).
     cells_correct = sum(
         1 for (gi, gc), (pj, pc) in cell_pairs
-        if _cell(gt_stripped, gi, gc) == _cell(pred_stripped, pj, pc)
+        if _fold_spaces(_cell(gt_stripped, gi, gc)) == _fold_spaces(_cell(pred_stripped, pj, pc))
     )
     cell_accuracy = cells_correct / cells_total if cells_total > 0 else 0.0
 
     # multiset content recall: non-empty GT cells present in pred multiset
     from collections import Counter
-    gt_nonempty = [_norm(gt_stripped[r][c]) for r in range(gt_rows) for c in range(gt_cols)
+    # Multiset membership is exact-match too, so it folds spaces on both sides.
+    gt_nonempty = [_fold_spaces(gt_stripped[r][c]) for r in range(gt_rows) for c in range(gt_cols)
                    if c < len(gt_stripped[r]) and _norm(gt_stripped[r][c])]
-    pred_flat = [_norm(pred_stripped[r][c]) for r in range(pred_rows) for c in range(_grid_cols(pred_stripped))
+    pred_flat = [_fold_spaces(pred_stripped[r][c]) for r in range(pred_rows) for c in range(_grid_cols(pred_stripped))
                  if c < len(pred_stripped[r])]
     pred_counter = Counter(pred_flat)
 
@@ -424,7 +464,7 @@ def evaluate_table(pred_tables: list[dict], gt_grid: list[list[str]] | None) -> 
             empty_gt_cells_total += 1
             if not pred_raw:
                 empty_gt_cells_clean += 1
-        if _is_khmer_text(gt_raw) and pred_raw == gt_raw:
+        if _is_khmer_text(gt_raw) and _fold_spaces(pred_raw) == _fold_spaces(gt_raw):
             khmer_cells_correct += 1
         if not _is_numeric(gt_raw):
             continue
