@@ -441,6 +441,13 @@ export default function App() {
   // The server extracts one document at a time; this gate keeps every launch
   // control in the workspace honest instead of letting the API 409 explain it.
   const pipelineBusy = isBusy(documents, batchRunning) || (status.data?.active ?? false)
+  // A page scope the backend would reject (mirrors the drawer's inline range/single
+  // errors). Block the launch controls rather than fire a run the API only 400s.
+  const scopeInvalid =
+    (runSettings.page_scope === 'range'
+      && Number(runSettings.page_end ?? 5) < Number(runSettings.page_start ?? 1))
+    || (runSettings.page_scope === 'single'
+      && pageCount > 0 && Number(runSettings.page_num ?? 1) > pageCount)
 
   // Persist Labs mode, and guard the selection: if labs is off but the selected engine
   // is experimental (toggled off just now, OR a stale value hydrated from a prior labs
@@ -466,7 +473,7 @@ export default function App() {
     // Guarded so a double-click or a stale button never races the single-run
     // server: a collision is caught here (or swallowed from a 409) rather than
     // surfacing "Another extraction is already running." as a red banner.
-    mutationFn: (id: string) => guardedRun(pipelineBusy, () => api.run(id, draftConfiguration)),
+    mutationFn: (id: string) => guardedRun(pipelineBusy || scopeInvalid, () => api.run(id, draftConfiguration)),
     onSuccess: (outcome) => {
       if (outcome === 'blocked') return
       setError(null)
@@ -524,7 +531,7 @@ export default function App() {
         // bled the previous doc's page index into the next one's preview.
         selectDoc(d.id)
         try {
-          await guardedRun(false, () => api.run(d.id, draftConfiguration))
+          await guardedRun(scopeInvalid, () => api.run(d.id, draftConfiguration))
         } catch (e) {
           setError(friendlyError(e, t('err_unreachable')))
           break
@@ -590,7 +597,7 @@ export default function App() {
         setShowMore(false)
       } else if (e.key === '?') {
         setShowHelp((h) => !h)
-      } else if (e.key === 'r' && active && !pipelineBusy && !run.isPending) {
+      } else if (e.key === 'r' && active && !pipelineBusy && !scopeInvalid && !run.isPending) {
         run.mutate(active.id)
       } else if (e.key === 'v' && active && selectedTable && page.data) {
         const tbl = page.data.tables.find((x) => x.table_id === selectedTable)
@@ -608,7 +615,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [issues.length, issueIdx, pageIdx, pageCount, jumpToIssue, active, status.data?.active, run, selectedTable, page.data, qc, t])
+  }, [issues.length, issueIdx, pageIdx, pageCount, jumpToIssue, active, status.data?.active, run, selectedTable, page.data, qc, t, pipelineBusy, scopeInvalid])
 
   // Grid page selection ⇄ run settings (single source of truth: runSettings).
   // Derived values + handlers below are memoized so React.memo on PageGrid /
@@ -681,7 +688,7 @@ export default function App() {
   // orchestrate existing actions — the palette owns no logic of its own.
   const commands = useMemo<Command[]>(() => {
     const cmds: Command[] = []
-    if (active && !pipelineBusy && !run.isPending) {
+    if (active && !pipelineBusy && !scopeInvalid && !run.isPending) {
       cmds.push({ id: 'run', group: t('group_actions'), label: t('run_extraction'), keywords: 're-run extract', shortcut: 'r', run: () => run.mutate(active.id) })
     }
     if (active?.status === 'done') {
@@ -739,7 +746,7 @@ export default function App() {
       cmds.push({ id: `issue-${i}`, group: t('group_issues'), label: t('cmd_goto_issue', { n: i + 1, total: issues.length }), keywords: `issue ${i + 1}`, run: () => jumpToIssue(i) })
     })
     return cmds
-  }, [active, activeId, status.data?.active, run, combineExport, cycleTheme, setLang, lang, issues, meta.data?.engines, engine, runSettings, documents, pageCount, pageIdx, jumpToIssue, selectDoc, t])
+  }, [active, activeId, status.data?.active, run, combineExport, cycleTheme, setLang, lang, issues, meta.data?.engines, engine, runSettings, documents, pageCount, pageIdx, jumpToIssue, selectDoc, t, pipelineBusy, scopeInvalid])
   const warnings = overview.data?.warnings ?? []
 
   // Deliberate overrides on the Settings button — deviations on the controls the
@@ -830,6 +837,7 @@ export default function App() {
             docSelected={active !== null}
             onUploadClick={() => uploadRef.current?.click()}
             onRun={() => active && run.mutate(active.id)}
+            runBlocked={scopeInvalid}
             onStop={() => active && cancel.mutate(active.id)}
             exportUrl={active && hasResults ? api.exportZipUrl(active.id, combineExport) : null}
             docId={active?.id ?? null}
@@ -982,8 +990,9 @@ export default function App() {
               <p className="min-w-0 text-sm leading-5 text-ink">
                 {t('stale_notice')}{' '}
                 <button
-                  className="font-medium text-primary underline underline-offset-2"
+                  className="font-medium text-primary underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => active && run.mutate(active.id)}
+                  disabled={scopeInvalid}
                 >
                   {t('rerun_now')}
                 </button>

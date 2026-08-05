@@ -31,6 +31,7 @@ export function RunControls(props: {
   docSelected: boolean
   onUploadClick: () => void
   onRun: () => void
+  runBlocked?: boolean
   onStop: () => void
   exportUrl: string | null
   docId: string | null
@@ -40,7 +41,7 @@ export function RunControls(props: {
   onCombineChange: (v: boolean) => void
   multiPage: boolean
 }) {
-  const { status, docSelected, onUploadClick, onRun, onStop, exportUrl, docId, unverifiedTables, openIssues, combineExport, onCombineChange, multiPage } = props
+  const { status, docSelected, onUploadClick, onRun, runBlocked = false, onStop, exportUrl, docId, unverifiedTables, openIssues, combineExport, onCombineChange, multiPage } = props
   const { t } = useT()
   const active = status?.active ?? false
   const [stopping, setStopping] = useState(false)
@@ -61,9 +62,11 @@ export function RunControls(props: {
   } else if (status?.has_results && exportUrl) {
     primary = { label: t('export_results'), icon: Download, href: exportUrl }
   } else if (status?.run_error) {
-    primary = { label: t('retry_extraction'), icon: RotateCw, onClick: onRun }
+    primary = { label: t('retry_extraction'), icon: RotateCw, onClick: onRun, disabled: runBlocked }
   } else {
-    primary = { label: t('run_extraction'), icon: Play, onClick: onRun }
+    // runBlocked: the chosen page scope is invalid (see the drawer's inline error) —
+    // disable the launch so a run the API would only 400 never fires.
+    primary = { label: t('run_extraction'), icon: Play, onClick: onRun, disabled: runBlocked }
   }
   const PrimaryIcon = primary.icon
 
@@ -104,7 +107,7 @@ export function RunControls(props: {
       )}
 
       {docSelected && !active && status?.has_results && (
-        <button className={btnCls} onClick={onRun} title={t('rerun_tip')}>
+        <button className={btnCls} onClick={onRun} disabled={runBlocked} title={t('rerun_tip')}>
           <RotateCw size={ICON} aria-hidden />
           {t('rerun')}
         </button>
