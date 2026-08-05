@@ -4025,23 +4025,48 @@ entirely instead of pinning any specific version — matching `colab_gemma4_e2b_
 already-working pattern, which never pins or reinstalls torch — fixed that, but unmasked a
 **third**: `ImportError: cannot import name 'CUSTOM_KEY' from torch.ao.quantization`.
 
-Three different symbols failing in the identical except-block, each time torch changes, is a
-systemic-drift signal rather than three isolated bugs: `transformers==5.2.0` (from Qwen3.5's
-official notebook) simply predates whatever torch API surface a current/floating torch presents,
-regardless of which specific torch version is paired with it. Fix: bumped `transformers` to
-`5.5.0`, matching `colab_gemma4_e2b_finetune.ipynb`'s own already-proven pin exactly (confirmed via
-source check that `transformers==5.5.0` still ships the Qwen3.5 model module before making the
-change). Also confirmed the official `Qwen3_5_(2B)_Vision.ipynb` notebook shares byte-identical
-stale pins with the 0.8B one — this was never an 0.8B-specific issue, any Qwen3.5 vision size on
-Unsloth's official recipe would hit the same cascade.
+At this point, three different symbols failing in the identical except-block, each time torch
+changed, was read as a systemic version-drift signal between `transformers==5.2.0` and a
+current/floating torch, and "fixed" by bumping `transformers` to `5.5.0` (matching
+`colab_gemma4_e2b_finetune.ipynb`'s own pin). **This diagnosis was wrong** — see the correction
+below. Also confirmed, still true: the official `Qwen3_5_(2B)_Vision.ipynb` notebook shares
+byte-identical stale pins with the 0.8B one, so this was never 0.8B-specific.
 
 Separately: `colab_gemma4_e2b_finetune.ipynb`'s install cell was missing a `torchcodec` install
 present in Unsloth's official `Gemma4_(E2B)-Vision.ipynb` — added back to match (this notebook
 otherwise trained and evaluated cleanly without it — see §2.108 — so this is a preventive
 alignment, not a confirmed fix for anything observed).
 
-**Status**: the `transformers==5.5.0` fix is applied but not yet confirmed by a completed Qwen run
-— unlike the Gemma fixes, which are grounded in a real finished training run (§2.108).
+**Correction (2026-08-05): the real fix, found via a mentor-provided reference notebook that
+trained end to end.** `transformers==5.2.0` — the official pin — was never the problem; the
+mentor's working notebook uses it unchanged. The actual cause: `causal_conv1d` was installed with
+only `--no-build-isolation`, which does *not* prevent a prebuilt wheel compiled against
+`torch==2.8.0`'s ABI from being resolved even after `torch` is bumped to `2.10.0`. A mismatched
+compiled CUDA extension loading successfully-but-corrupted is a coherent explanation for why the
+failure kept relocating to unrelated-looking torch submodules (`ScalingType` →
+`is_opentelemetry_available` → `CUSTOM_KEY`) each time an adjacent version changed, rather than
+resolving — not three separate genuine API gaps, one bad binary. Fix: add `--no-binary
+causal_conv1d` to force a source build against whatever torch is actually installed; keep
+`torch==2.10.0` (still correctly needed, for `ScalingType`) and revert `transformers` back to the
+official `5.2.0`. This combination is confirmed working end-to-end (full training run completed)
+in the mentor's reference notebook, and reproduced in `colab_qwen35_finetune.ipynb`.
+
+Same reference run also surfaced a real, previously-unknown constraint: Unsloth silently clamps
+`max_length`/`max_seq_length` to `2048` for this model regardless of what's requested (a `6144`
+request was reduced automatically) — our longest Table target runs to ~4000 chars, so the
+notebook's `max_length` was reverted to `2048` to match reality, and the truncation risk on long
+tables is now called out explicitly rather than silently assumed away.
+
+**Lesson**: every fix up to the correction was reasoning at the Python-API-version layer (find the
+missing symbol, find which package version has it) — a legitimate method that genuinely explained
+`ScalingType`, but the *pattern* of failure relocating to a new, unrelated torch submodule each
+time an adjacent setting changed was itself a signal worth more suspicion than it got. A wheel-vs-
+source-build packaging detail isn't visible from reading library source on GitHub — this needed
+either execution access to inspect what actually got installed, or (as here) someone else's lived
+experience of the exact failure.
+
+**Status**: fixed and confirmed. Qwen3.5 install cell now matches the mentor's proven recipe;
+Gemma's fixes remain grounded in its own real finished training run (§2.108).
 
 ---
 
