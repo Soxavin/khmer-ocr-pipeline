@@ -273,6 +273,10 @@ export function SettingsDrawer(props: {
           <span className="flex items-baseline justify-between gap-2">
             <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
               {engineLabel(e2)}
+              {/* The engine KEY as a muted technical id: analysts scan by the descriptive
+                  name, but the precise id (surya_kiri, …) makes support/troubleshooting
+                  unambiguous. It's an identifier, so it is never localized. */}
+              <span className="ml-1.5 font-mono text-2xs font-normal text-ink-3">{e2.key}</span>
               {/* Only the Auto card, only once the router has ruled. */}
               {selected && e2.key === 'auto' && resolvedEngineLabel && (
                 <ResolvedBadge
