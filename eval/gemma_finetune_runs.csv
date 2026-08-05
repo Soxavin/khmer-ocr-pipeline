@@ -1,0 +1,11 @@
+run,date,dataset_version,steps,epochs,n_validation_rows,json_parse_failures,mean_bbox_abs_diff,label,label_cer,label_n_matched,notes
+v2-run1,2026-07-28,Soxavin/ardb-gemma-sft-v2,34,2,9,1,4.8,Page-Furniture,0.315,16,GT typo not yet fixed (see run log)
+v2-run1,2026-07-28,Soxavin/ardb-gemma-sft-v2,34,2,9,1,4.8,Section-Header,0.641,3,GT typo not yet fixed (see run log); small sample
+v2-run1,2026-07-28,Soxavin/ardb-gemma-sft-v2,34,2,9,1,4.8,Table,0.399,8,GT typo not yet fixed (see run log)
+v2-run2,2026-07-28,Soxavin/ardb-gemma-sft-v2,85,5,9,3,1.2,Page-Furniture,0.216,12,GT typo not yet fixed (see run log)
+v2-run2,2026-07-28,Soxavin/ardb-gemma-sft-v2,85,5,9,3,1.2,Table,0.010,6,"CAVEAT: CER only over rows that parsed; 3/9 failures excluded, so this understates true error"
+v2-run2,2026-07-28,Soxavin/ardb-gemma-sft-v2,85,5,9,3,1.2,Text,0.000,3,GT typo not yet fixed (see run log)
+v2-run3,2026-07-29,Soxavin/ardb-gemma-sft-v2,85,5,9,9,,,,,"9/9 JSON parse failures (all rows) -- no region parsed successfully, so no per-label CER computable; first run after GT-typo fix. Qualitative inference-check showed hallucinated letterhead text and visibly wrong bboxes (see run log narrative)."
+v5-run4,2026-08-05,Soxavin/ardb-sft-v5,78,3,9,3,4.5,Page-Furniture,0.000,12,"First full run on v5 (era-stratified, 101/9/18 split); 3/9 parse failures matches v2-run2's rate despite more/better data -- see run log narrative"
+v5-run4,2026-08-05,Soxavin/ardb-sft-v5,78,3,9,3,4.5,Section-Header,0.263,3,"small sample (n=3)"
+v5-run4,2026-08-05,Soxavin/ardb-sft-v5,78,3,9,3,4.5,Table,0.115,6,"recurring plausible-but-wrong word substitutions observed in inference check, not yet a confirmed cross-document pattern (see run log narrative)"

@@ -9,6 +9,7 @@ import pytest
 from khmer_pipeline.datagen.harvest_table_gt import (
     build_row_lexicon,
     cap_empty_cells,
+    grid_to_html,
     grid_to_markdown,
     harvest_corpus,
     is_numeric_text,
@@ -39,6 +40,61 @@ class TestGridToMarkdown:
     def test_none_cells_become_empty(self):
         md = grid_to_markdown([[None, "x"]])
         assert md.splitlines()[0] == "|  | x |"
+
+
+class TestGridToHtml:
+    def test_header_row_uses_th(self):
+        html = grid_to_html([["h1", "h2"], ["a", "1"]])
+        assert "<tr><th>h1</th><th>h2</th></tr>" in html
+        assert "<tr><td>a</td><td>1</td></tr>" in html
+
+    def test_special_chars_escaped(self):
+        html = grid_to_html([["a&b", "<x>"]])
+        assert "a&amp;b" in html and "&lt;x&gt;" in html
+        assert "<x>" not in html
+
+    def test_ragged_row_padded_and_treated_as_span(self):
+        # padding a lone value out to width makes it col0-filled/rest-blank, same as a
+        # genuine section row -- same ambiguity _is_section_row already accepts elsewhere.
+        html = grid_to_html([["h1", "h2", "h3"], ["only-one"]])
+        assert '<tr><td colspan="3">only-one</td></tr>' in html
+
+    def test_none_cells_become_empty(self):
+        html = grid_to_html([["h1", "h2"], [None, "x"]])
+        assert "<tr><td></td><td>x</td></tr>" in html
+
+    def test_section_row_gets_colspan(self):
+        # col 0 filled, rest blank -> one spanning cell, not width-many empty <td>s.
+        html = grid_to_html([["h1", "h2", "h3"], ["Grains", "", ""], ["a", "1", "2"]])
+        assert '<tr><td colspan="3">Grains</td></tr>' in html
+        assert "<tr><td>a</td><td>1</td><td>2</td></tr>" in html
+
+    def test_data_row_with_blanks_not_treated_as_section(self):
+        # blank cells outside col 0 too -> a real (partially empty) data row, not a span.
+        html = grid_to_html([["h1", "h2", "h3"], ["rice", "", "3,800"]])
+        assert "<tr><td>rice</td><td></td><td>3,800</td></tr>" in html
+
+    def test_has_header_false_renders_row0_as_td_not_th(self):
+        # Regression: continuation pages (has_header=False) start directly with a real
+        # data row, not a header -- doc_012 page 1's row ២២ (real prices) was previously
+        # emitted as <th> because the function always treated grid[0] as a header.
+        html = grid_to_html([["២២", "ពងមាន់ស្រែ", "800"], ["២៣", "ពងមាន់", "500"]],
+                            has_header=False)
+        assert "<th>" not in html
+        assert "<tr><td>២២</td><td>ពងមាន់ស្រែ</td><td>800</td></tr>" in html
+
+    def test_has_header_false_section_row_at_position_0_keeps_colspan(self):
+        # Second harm of the same bug: a section row (col0-filled/rest-blank) that lands
+        # at grid position 0 on a continuation page previously lost its colspan too,
+        # since the has_header=True path forces allow_span=False on row 0 unconditionally.
+        html = grid_to_html([["Grains", "", ""], ["a", "1", "2"]], has_header=False)
+        assert '<tr><td colspan="3">Grains</td></tr>' in html
+
+    def test_has_header_true_is_still_the_default(self):
+        # Existing callers/tests that don't pass has_header must keep working unchanged.
+        html = grid_to_html([["h1", "h2"], ["a", "1"]])
+        assert "<tr><th>h1</th><th>h2</th></tr>" in html
+        assert "colspan" not in html
 
 
 class TestKhmerOrderValid:

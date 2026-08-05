@@ -21,7 +21,7 @@ import fitz
 from PIL import Image
 
 from .inspect_pdf import khmer_layer_suspect
-from .pseudo_label_layout import assign_splits
+from .pseudo_label_layout import _pdf_date, assign_splits_by_date_cluster
 from ..postprocess import _is_malformed_number
 
 _DPI = 200
@@ -30,7 +30,11 @@ _CELL_PAD_PX = 2             # small margin around cell crops
 _MIN_CROP_PX = 8             # skip degenerate rects
 _MAX_EMPTY_RATIO = 0.25      # empty-cell negatives kept per page, as share of kept cells
 # The frozen eval-GT documents must never enter training data.
-_DEFAULT_EXCLUDE_STEMS = ["09.06.26", "15.06.26", "CambodiaBudget"]
+_DEFAULT_EXCLUDE_STEMS = [
+    "09.06.26", "15.06.26", "CambodiaBudget",
+    # Era A (retail-only) + Era A2 (wholesale+retail, pre-2026 title) template anchors.
+    "០៦_០៧_កុម្ភៈ_២០២៤", "០៣_០៤_សីហា_ឆ្នាំ២០២២", "26_វិច្ឆិកា_2024",
+]
 
 # \d matches Khmer digits ០-៩ too; allows grouping commas, decimals, percent, sign.
 _NUMERIC_TEXT_RE = re.compile(r"^[+-]?[\d,]*\d(?:[.,]\d+)?%?$")
@@ -115,6 +119,47 @@ def grid_to_markdown(grid: list[list[str | None]]) -> str:
     lines += [fmt(row) for row in grid[1:]]
     # fmt pads with single spaces around empty cells → "|  |" like common emitters
     return "\n".join(line.replace("|  |", "|  |") for line in lines)
+
+
+def _html_section_row(cells: list[str]) -> bool:
+    return bool(cells[0]) and not any(cells[1:])
+
+
+def _html_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def grid_to_html(grid: list[list[str | None]], has_header: bool = True) -> str:
+    """Serialize a table grid as an HTML <table>. Unlike grid_to_markdown, a row where
+    only column 0 is filled and the rest are blank (a section/title row spanning the
+    whole table, e.g. a commodity-group heading) renders as one <td colspan> cell
+    instead of one filled cell followed by width-1 empty ones -- plain markdown pipe
+    tables have no way to express a span, so that distinction from a genuinely
+    mostly-blank data row would otherwise be lost.
+
+    has_header=False (continuation pages, whose grid starts directly with body rows --
+    see build_page's has_header contract) renders every row through the normal <td>+
+    colspan path, grid[0] included. Rendering it as <th> regardless of the caller's own
+    has_header context previously wrapped real commodity rows in <th> on every
+    multi-page document (confirmed: doc_012 page 1's row ២២ ពងមាន់ស្រែ, with real
+    prices, emitted as <th>), teaching the model "row 0 of any table is a header" even
+    when it plainly isn't, and silently losing that row's colspan eligibility too."""
+    width = max(len(row) for row in grid)
+
+    def fmt(row: list[str | None], tag: str, allow_span: bool) -> str:
+        cells = [re.sub(r"\s+", " ", (c or "")).strip() for c in row]
+        cells += [""] * (width - len(cells))
+        if allow_span and _html_section_row(cells):
+            return f'<tr><td colspan="{width}">{_html_escape(cells[0])}</td></tr>'
+        inner = "".join(f"<{tag}>{_html_escape(c)}</{tag}>" for c in cells)
+        return f"<tr>{inner}</tr>"
+
+    if has_header:
+        rows = [fmt(grid[0], "th", allow_span=False)]
+        rows += [fmt(row, "td", allow_span=True) for row in grid[1:]]
+    else:
+        rows = [fmt(row, "td", allow_span=True) for row in grid]
+    return "<table>\n" + "\n".join(rows) + "\n</table>"
 
 
 _KHMER_DIGIT_FOLD = str.maketrans("០១២៣៤៥៦៧៨៩", "0123456789")
@@ -230,8 +275,11 @@ def harvest_corpus(corpus_dir: Path, out_dir: Path, dpi: int = _DPI,
         lexicon = build_khmer_lexicon(corpus_dir, gt_dir)
         print(f"Khmer lexicon from verified GT: {len(lexicon)} entries")
     # Split over the FULL doc list (before exclusion) so assignment matches the layout
-    # dataset built from the same corpus with the same seed.
-    splits = assign_splits([p.name for p in pdfs], seed=seed)
+    # dataset built from the same corpus with the same seed. Date-clustered (not plain
+    # assign_splits) so adjacent-day bulletins -- which repeat most of their content --
+    # never straddle train/valid/test, same reasoning as the layout dataset's own split.
+    doc_dates = {p.name: _pdf_date(p) for p in pdfs}
+    splits = assign_splits_by_date_cluster(doc_dates, seed=seed)
 
     counts = {"recognition_pairs": 0, "sft_pairs": 0, "dropped_qa": 0,
               "unverified_khmer": 0, "gt_corrected": 0,

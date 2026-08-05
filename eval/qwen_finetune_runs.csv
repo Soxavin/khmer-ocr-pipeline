@@ -1,0 +1,1 @@
+run,date,dataset_version,steps,epochs,n_validation_rows,json_parse_failures,mean_bbox_abs_diff,script_khmer_rows,script_thai_rows,script_neither_rows,label,label_cer,label_n_matched,notes

@@ -3855,6 +3855,222 @@ a `.gitignore` entry for `.venv-challengers/`.
 Also confirmed en route: **Unlimited-OCR** rejected on paper (unlimited-length USP irrelevant to
 1–3 page docs; heaviest candidate; same Khmer wall).
 
+### 2.104 Qwen3.5-0.8B fine-tune trial: base-model Khmer generation gap, reverted to Gemma (2026-08-03)
+
+Mentor suggested trying `Qwen3.5-0.8B` on Colab Pro (L4) as an alternative to Gemma 4 E2B, given
+its far smaller size. Built the supporting infrastructure first, verifying rather than assuming
+throughout since Qwen3.5 (released Feb–Mar 2026) postdates the assistant's training cutoff and is
+a **different model family from Qwen3-VL** (confirmed by direct check, not assumed by name
+similarity): a format-adapter pass concluded no coordinate/schema conversion was actually needed
+(`box_2d`/`[y1,x1,y2,x2]`/0–1000, reused verbatim from `Soxavin/ardb-gemma-sft-v2` — since this is
+a fine-tune, not zero-shot prompting, training teaches the format directly regardless of whatever
+convention the base model already knows), and a new notebook
+(`scripts/colab_qwen35_finetune.ipynb`) built against Unsloth's own official `Qwen3_5_(0_8B)_
+Vision.ipynb` (fetched directly from GitHub, diffed line-for-line against the install cell) rather
+than assumed by analogy to Gemma's or Qwen3-VL's setup — this mattered concretely: Qwen3.5's Gated
+DeltaNet hybrid-attention backbone needs specialized kernels (`flash-linear-attention`,
+`causal_conv1d`) that Gemma's install cell has no equivalent for.
+
+**Finding**: a smoke-test fine-tuning run (few steps, current v2 dataset) produced fluent,
+well-structured, but **wrong-script** output — confident, grammatical Thai (e.g. `ข้าวหนึ่ง
+กิโลกรัม`) instead of Khmer, not a garbled or partial attempt. Diagnosed with a controlled
+isolation test rather than guessed at: loaded the **base, non-fine-tuned** checkpoint directly and
+ran (1) a plain-text "translate to Khmer" prompt with no image at all, and (2) the exact same
+image + instruction as the real SFT task, zero LoRA applied. Both produced Thai. Since the failure
+is already present at zero training steps, more steps would not be expected to fix it — this is a
+pretraining-time gap in the checkpoint itself, not an undertrained-adapter artifact.
+
+This is the **second** documented instance in this project of the same "fluent wrong-script"
+failure mode: §2.103 already found Granite-Docling-258M confabulating Thai glyphs for Khmer text
+under the same conditions. Two independent small VLMs defaulting to Thai specifically (not
+garbage, not a mix) reinforces GlotOCR's general finding that small general-purpose VLMs trail
+badly on Khmer — here, specifically enough to substitute a different, more web-prevalent
+Southeast Asian script with full confidence.
+
+**Decision**: reverted the "fine-tune run showing improvement" production target back to Gemma 4
+E2B (proven — 4 prior runs, correct Khmer output, existing run log). The Qwen3.5 notebook and
+format-adapter work are kept, not deleted — the diagnostic method (base-model isolation test
+before committing further compute) and the finding itself are directly reusable if a larger
+Qwen3.5 variant or a much larger fine-tuning budget is tried later. No production code changed;
+`scripts/colab_qwen35_finetune.ipynb` is new, docs/memory updated to reflect the revert.
+
+---
+
+### 2.105 v3 dataset audit: adjacent-day split leakage, `<th>` mislabeling, `_FOOTER_TEXT` escaping bug (2026-08-04)
+
+With Gemma Run 4 pending on the newly expanded `Soxavin/ardb-sft-v3` (2022–2026, both structural
+eras), a parallel session ran a dataset-correctness audit specifically because Run 4's test-split
+numbers were confirmed as going into the final report — raising label defects and split leakage
+from "cosmetic" to "report-blocking." Three real bugs were found and fixed, all independently
+verified (not just diagnosed) before touching anything already shipped:
+
+**1. Adjacent-day split leakage.** `assign_splits()` (`pseudo_label_layout.py`) shuffles by
+document name only, with zero date awareness. ARDB issues one bulletin per day, and consecutive
+issues repeat almost all their content (same ~73 items, prices usually unchanged) — real
+adjacent-day pairs in the v3 corpus (e.g. 2026-06-11/06-12, 2026-06-29/06-30) landed in different
+splits, letting validation/test rows leak content already seen in training. Fixed with
+`assign_splits_by_date_cluster` + `_pdf_date` (new, `pseudo_label_layout.py`): documents dated
+within a configurable window (`_DATE_CLUSTER_WINDOW_DAYS = 1`, chosen because a wider 3-day window
+chains transitively into one ~20-doc supercluster on this corpus's densely-dated June–July 2026
+run, starving valid/test of that whole sub-era) are grouped before splitting, so no cluster
+straddles a split boundary. `_pdf_date` itself needed its own fix mid-session: it initially covered
+only 40/55 documents (`parse_filename_date` for the `-DD.MM.YY.pdf` convention, falling back to
+`find_tables()`'s first 2 rows for the rest) — the other 15 use the older Khmer-date-word filename
+convention *and* get fragmented by `find_tables()` (same fragmentation issue already known from
+earlier this session), so their header dates never appeared in the checked rows. Adding the
+`extract_row_blocks()` fallback (mirroring `build_document`'s own retry pattern) brought coverage
+to 55/55 and closed a real gap: two of the 15 previously-undated documents (2025-03-04/03-05) are
+a genuine adjacent pair that only avoided leaking in the shipped v3 by luck of the seed, not by
+construction. Verified via a dedicated test class (`TestAssignSplitsByDateCluster`,
+`tests/test_pseudo_label_layout.py`) plus a direct re-check against the real 55-doc corpus (0
+adjacent-day leaks, confirmed both in isolation and in the actual repackaged output).
+
+**2. `grid_to_html` mislabels every continuation-page row as a header.** `harvest_table_gt.py`
+unconditionally rendered `grid[0]` as `<th>`, regardless of whether that grid actually starts with
+a header row. On continuation pages (page 1, 2 of a 3-page bulletin), `grid[0]` is a real commodity
+row with real prices — confirmed directly in the shipped data (`doc_012` page 1, item ២២
+`ពងមាន់ស្រែ` with its prices, wrapped in `<th>`), and systematic: 81/81 continuation pages affected.
+Two harms: the model is taught "row 0 of any table is a header" even when it plainly isn't, and
+`allow_span=False` on that forced header path additionally stripped `colspan` from any section row
+that happened to land at position 0. Fixed by threading the same `has_header=(page_idx == 0)` flag
+already computed at both call sites (`build_ardb_unified_sft.py`, `build_ardb_template_sft.py`)
+through to `grid_to_html(grid, has_header=...)`; `has_header` defaults to `True` so the 6 existing
+tests (all exercising genuine header rows) needed no changes. Verified: 0/81 continuation pages
+carry `<th>` in the rebuilt dataset (was 81/81).
+
+**3. `_FOOTER_TEXT` escaping bug.** The static footer-boilerplate constant
+(`build_ardb_unified_sft.py`) contained a literal two-character `\n` (backslash + "n") sitting
+mid-word between "១ " and "ផ្សារ...", instead of a real newline — confirmed against the original
+source (`09.06.26_p3_ground_truth.json`, where the JSON's own `\n` escape is a genuine line break)
+that this was a copy-paste double-escaping bug, not intentional formatting. Affected all 38
+training rows carrying a `Text` region. One-character fix (`\\n` → `\n`); added a regression test
+asserting no backslash appears in the constant at all, plus a GT-exact-match test.
+
+**Verifying the fix without discarding manually-verified work**: the natural next step (redo the
+Surya pseudo-labeling pass) would have silently thrown away the user's completed manual Roboflow
+box-correction pass — `ardb-layout-coco-v3`'s box annotations come from that human correction, not
+from Surya directly, and only the split *assignment* (computed once during the earlier,
+pre-Roboflow pseudo-labeling step) was actually wrong. Caught before running the rebuild. Instead,
+wrote `scripts/reassign_dataset_splits.py`: loads the already-packaged, human-corrected COCO
+dataset, recomputes only the doc→split mapping via the fixed `assign_splits_by_date_cluster`, and
+redistributes existing pages/boxes into corrected split folders — no re-annotation, no Surya.
+Verified byte-for-byte: 0 real content mismatches across all 166 pages between the old and
+reassigned datasets (only the COCO annotation `id` field differs, expected — it's a per-split
+running counter, renumbered because pages moved between splits; no downstream code reads it).
+
+**Status**: all three fixes verified locally (944/944 tests passing, plus the targeted checks
+above); `eval/datasets/ardb_layout_coco_v4{,_hf}` and `eval/datasets/ardb_unified_sft_v4{,_hf}`
+built and verified, not yet uploaded to HF. Shipping as **v4** (not overwriting v3) — a parallel
+session's independent audit (`docs/dataset_v3_audit.md`) cites v3 by specific numbers; overwriting
+it in place would make that report describe a dataset that no longer exists under that name.
+Remaining open item from the same audit: test-split era balance (57% Era A vs. train's 19%) is a
+consequence of the corpus only yielding ~37 independent date-clusters at 10%/10% split fractions,
+not fixable by clustering alone without more source documents — flagged as a limitation, not
+silently patched. Commodity-name drift (a separate audit question) was found genuinely
+unverifiable from the text layer (0 of ~3,000 item-name cells trustworthy enough to compare,
+pervasive Khmer glyph-scrambling) and needs a human visual check, not a code fix.
+
+---
+
+### 2.106 v5 dataset: era-stratified splits, train-only augmentation, results-logging infra (2026-08-04)
+
+Closes the era-imbalance limitation flagged at the end of §2.105 (57% Era A in test vs. 19% in
+train — a consequence of date-cluster-only splitting with no concept of the corpus's two
+structural templates). Added `assign_splits_by_date_cluster_stratified` to
+`pseudo_label_layout.py`: clusters by adjacent date exactly as before, then assigns splits
+independently *per era* (using `build_ardb_template_sft.py`'s `classify_era`) before recombining,
+with a small-era floor so a low-cluster-count era still gets ≥1 validation/test cluster rather than
+being rounded to zero by proportional splitting. Wired into both `build_ardb_template_sft.py` and
+`build_ardb_unified_sft.py` as the new default split function.
+
+Also folded in, same pass: a real `grid_to_html` serializer (`harvest_table_gt.py`) replacing the
+old markdown-table renderer — spans a whole-row section/title cell as `<td colspan>` instead of one
+filled cell + blank padding, and (a genuine bug fix, not a format swap) only renders row 0 as
+`<th>` when `has_header` is actually true for that page, fixing continuation pages where row 0 is a
+real commodity entry that was previously always mislabeled as a header. Corpus's Era A/A2 template
+anchor documents added to `_DEFAULT_EXCLUDE_STEMS` so they stay eval-only, never training data.
+
+Rebuilt as **v5**: `Soxavin/ardb-sft-v5` / `Soxavin/ardb-layout-coco-v5` (47 non-frozen documents /
+128 pages: 101 train / 9 validation / 18 test, both structural eras represented in every split).
+v4 given a superseded notice, kept for reproducibility of numbers already cited against it.
+
+Two more additions, applied identically to both `colab_gemma4_e2b_finetune.ipynb` and
+`colab_qwen35_finetune.ipynb`: **train-only image augmentation** (brightness/contrast jitter ±10%,
+20% chance of a light Gaussian blur — deliberately no geometric transforms, since `box_2d` targets
+would need re-projecting to match and this pass doesn't do that), applied only to the training
+conversion path and never to `val_dataset`/`test_dataset`; and a **results-logging pair per model**
+(`eval/gemma_finetune_runs.{csv,md}`, `eval/qwen_finetune_runs.{csv,md}`) plus
+`scripts/plot_run_metrics.py`, which combines any subset of these CSVs into
+`docs/figures/cer_by_run.png` and `parse_failure_rate_by_run.png` for a real cross-model
+comparison chart, not just prose claims.
+
+---
+
+### 2.107 Qwen3.5 Colab install cell: three sequential ImportErrors traced to a stale official pin (2026-08-05)
+
+Running `colab_qwen35_finetune.ipynb` (install cell byte-matched to Unsloth's official
+`Qwen3_5_(0_8B)_Vision.ipynb`: `torch==2.8.0`, `transformers==5.2.0`) threw `ImportError: cannot
+import name 'ScalingType' from 'torch.nn.functional'`, inside `unsloth_zoo`'s `from
+transformers.processing_utils import Unpack` compatibility shim (a generic version-drift detector,
+not something referencing `ScalingType` by name itself — it re-raises whatever the real underlying
+import failure was once it rules out a couple of known signatures). Root-caused via direct PyTorch
+source inspection rather than guessed: `ScalingType` is absent from `torch/nn/functional.py` at
+tags `v2.8.0` and `v2.9.0`, present at `v2.10.0`.
+
+Bumping the pin to `torch==2.10.0` fixed that, but unmasked a second, different failure in the
+exact same except-block: `ImportError: cannot import name 'is_opentelemetry_available' from
+transformers.utils.import_utils`. Confirmed via source check that this symbol genuinely exists in
+`transformers==5.2.0` too, ruling out a simple missing-symbol explanation this time. Floating torch
+entirely instead of pinning any specific version — matching `colab_gemma4_e2b_finetune.ipynb`'s
+already-working pattern, which never pins or reinstalls torch — fixed that, but unmasked a
+**third**: `ImportError: cannot import name 'CUSTOM_KEY' from torch.ao.quantization`.
+
+Three different symbols failing in the identical except-block, each time torch changes, is a
+systemic-drift signal rather than three isolated bugs: `transformers==5.2.0` (from Qwen3.5's
+official notebook) simply predates whatever torch API surface a current/floating torch presents,
+regardless of which specific torch version is paired with it. Fix: bumped `transformers` to
+`5.5.0`, matching `colab_gemma4_e2b_finetune.ipynb`'s own already-proven pin exactly (confirmed via
+source check that `transformers==5.5.0` still ships the Qwen3.5 model module before making the
+change). Also confirmed the official `Qwen3_5_(2B)_Vision.ipynb` notebook shares byte-identical
+stale pins with the 0.8B one — this was never an 0.8B-specific issue, any Qwen3.5 vision size on
+Unsloth's official recipe would hit the same cascade.
+
+Separately: `colab_gemma4_e2b_finetune.ipynb`'s install cell was missing a `torchcodec` install
+present in Unsloth's official `Gemma4_(E2B)-Vision.ipynb` — added back to match (this notebook
+otherwise trained and evaluated cleanly without it — see §2.108 — so this is a preventive
+alignment, not a confirmed fix for anything observed).
+
+**Status**: the `transformers==5.5.0` fix is applied but not yet confirmed by a completed Qwen run
+— unlike the Gemma fixes, which are grounded in a real finished training run (§2.108).
+
+---
+
+### 2.108 Gemma 4 E2B Run 4: first full run on `ardb-sft-v5` (2026-08-05)
+
+78 steps, 3 epochs, 101 train rows, on an L4 (bigger than Runs 1-3's free-tier T4, hence longer
+peak-memory headroom and a different wall-clock baseline). Loss 0.326 → ~0.003-0.01, same clean
+shape as every prior run. Adapter pushed to `Soxavin/gemma4-e2b-ardb-lora-v5-e3`.
+
+Eval: 3/9 JSON parse failures — the same rate Run 2 hit on the smaller, non-era-stratified v2
+dataset at 5 epochs, despite v5 being bigger and better-split and this run using the already-dialed
+-back 3 epochs. Moving to more/better data did not, on its own, close the structural-completeness
+gap the epoch pullback was meant to address (see §2.105's predecessor entries for that trend).
+`Page-Furniture` CER 0.000 (12 matched, perfect), `Section-Header` CER 0.263 (3, small sample),
+`Table` CER 0.115 (6 matched); mean bbox coordinate abs diff 4.5 (0-1000 scale).
+
+Inference-check spot errors: a recurring failure mode where the model swaps in a plausible-but-
+wrong Khmer word rather than misspelling one (e.g. `មាន់ជម្រុះពង រស់` → generated `មាន់ជ្រៃប្រដាប់
+រស់`) — a candidate for the post-hoc correction lexicon (`RULE_BASED_CORRECTIONS` in
+`postprocess.py`, currently empty), but per that plan's own rule a pair only qualifies once it
+recurs across ≥2 distinct documents; this is one document's worth of examples so far, not yet
+actionable. Full numbers and narrative in `eval/gemma_finetune_runs.md`.
+
+**Scope note**: mentor has limited fine-tuning/eval scope to ARDB documents specifically. Of
+`eval/datasets/real`'s 6 hand-verified documents, `CambodiaBudgetExecutioninApr-2024` is not an
+ARDB bulletin (it's the same file already flagged as the corpus's "1 non-ARDB test file" exclusion)
+— any future real-GT eval work against that directory should exclude it and score only the 5 ARDB
+documents (15 pages).
+
 ---
 
 ## 3. Results Snapshot
