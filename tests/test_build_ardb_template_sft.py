@@ -284,6 +284,7 @@ class TestLoadCocoHeaderFurnitureBoxes:
         assert isinstance(src, str) and len(bbox) == 4
 
 
+@pytest.mark.skipif(not _GT_DIR.is_dir(), reason="verified GT fixtures not present")
 class TestBuildCorpus:
     def test_frozen_eval_stems_are_excluded(self, tmp_path):
         corpus_dir = tmp_path / "corpus"
