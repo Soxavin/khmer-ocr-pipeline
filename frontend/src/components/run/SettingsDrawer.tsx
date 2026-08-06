@@ -244,13 +244,35 @@ export function SettingsDrawer(props: {
     setActiveGroup(names[next])
     tabRefs.current.get(names[next])?.focus()
   }
+  // Roving-focus refs for the engine radiogroup: only the checked radio is
+  // tabIndex 0 (the rest -1), and Arrow/Home/End move + SELECT immediately —
+  // per the ARIA APG a radiogroup changes selection on arrow keys, unlike a
+  // tablist. Mirrors `onTabKeyDown` above; the list is whatever's currently
+  // VISIBLE (labs/group filtering already applied), so subheaders are just
+  // visual dividers, not navigation stops.
+  const radioRefs = useRef(new Map<string, HTMLButtonElement>())
+  const onEngineKeyDown = (e: ReactKeyboardEvent, visible: EngineInfo[]) => {
+    const keys = visible.map((e2) => e2.key)
+    const cur = keys.indexOf(engine)
+    let next = -1
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % keys.length
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (cur - 1 + keys.length) % keys.length
+    else if (e.key === 'Home') next = 0
+    else if (e.key === 'End') next = keys.length - 1
+    if (next < 0) return
+    e.preventDefault()
+    onEngineChange(keys[next])
+    radioRefs.current.get(keys[next])?.focus({ preventScroll: true })
+  }
   // The Labs toggle only exists once the API actually returns a fine-tune to reveal;
   // until the backend flags one, the whole feature stays invisible (no dead control).
   const hasExperimental = engines.some((e2) => e2.experimental)
 
   // One engine option card. Shared by the production list and the Labs subsection so
-  // both render identically; only the grouping around them differs.
-  const engineCard = (e2: EngineInfo) => {
+  // both render identically; only the grouping around them differs. `visible` is the
+  // full flat list of engine cards actually rendered in this radiogroup right now
+  // (subheaders excluded) — it drives roving tabIndex and arrow-key navigation.
+  const engineCard = (e2: EngineInfo, visible: EngineInfo[]) => {
     const selected = e2.key === engine
     const isCloud = e2.group === 'cloud'
     // Backend-authoritative: the `auto` engine carries `recommended: true` directly
@@ -260,11 +282,16 @@ export function SettingsDrawer(props: {
     return (
       <button
         key={e2.key}
+        ref={(el) => { if (el) radioRefs.current.set(e2.key, el); else radioRefs.current.delete(e2.key) }}
         type="button"
         role="radio"
         aria-checked={selected}
+        // Roving tabindex: Tab enters/exits the radiogroup once, landing on the
+        // checked radio; Arrow keys move (and select) within it (see `onEngineKeyDown`).
+        tabIndex={selected ? 0 : -1}
         disabled={disabled}
         onClick={() => onEngineChange(e2.key)}
+        onKeyDown={(e) => onEngineKeyDown(e, visible)}
         // The engine KEY (surya_kiri, …) rides in the title tooltip, not the visible
         // label: analysts scan by the descriptive name, and the id is only useful for
         // support/troubleshooting, which a hover already serves without adding a
@@ -404,16 +431,19 @@ export function SettingsDrawer(props: {
                     const activeEngines = engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []
                     const production = activeEngines.filter((e2) => !e2.experimental)
                     const experimental = activeEngines.filter((e2) => e2.experimental)
+                    // Everything actually rendered in this radiogroup right now — the
+                    // flat sequence arrow keys move through (subheaders aren't stops).
+                    const visible = labsMode ? [...production, ...experimental] : production
                     return (
                       <>
-                        {production.map(engineCard)}
+                        {production.map((e2) => engineCard(e2, visible))}
                         {labsMode && experimental.length > 0 && (
                           <>
                             <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
                               <FlaskConical size={12} aria-hidden />
                               {t('engine_group_experimental')}
                             </p>
-                            {experimental.map(engineCard)}
+                            {experimental.map((e2) => engineCard(e2, visible))}
                           </>
                         )}
                       </>
@@ -432,30 +462,40 @@ export function SettingsDrawer(props: {
               role="radiogroup"
               aria-label={t('engine_section')}
             >
-              {engineGroups.map(([groupName, groupEngines]) => {
-                const GroupIcon = ENGINE_GROUP_ICONS[groupName]
-                const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
-                const production = groupEngines.filter((e2) => !e2.experimental)
-                const experimental = groupEngines.filter((e2) => e2.experimental)
-                return (
-                  <div key={groupName} className="contents">
-                    <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
-                      {GroupIcon && <GroupIcon size={12} aria-hidden />}
-                      {fullLabel}
-                    </p>
-                    {production.map(engineCard)}
-                    {labsMode && experimental.length > 0 && (
-                      <>
-                        <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
-                          <FlaskConical size={12} aria-hidden />
-                          {t('engine_group_experimental')}
-                        </p>
-                        {experimental.map(engineCard)}
-                      </>
-                    )}
-                  </div>
-                )
-              })}
+              {(() => {
+                // Arrow-key navigation treats the WHOLE flat list as one linear
+                // sequence (Local → Cloud, production → experimental within each) —
+                // subheaders are visual grouping only, not navigation stops.
+                const visible = engineGroups.flatMap(([, groupEngines]) => {
+                  const production = groupEngines.filter((e2) => !e2.experimental)
+                  const experimental = groupEngines.filter((e2) => e2.experimental)
+                  return labsMode ? [...production, ...experimental] : production
+                })
+                return engineGroups.map(([groupName, groupEngines]) => {
+                  const GroupIcon = ENGINE_GROUP_ICONS[groupName]
+                  const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
+                  const production = groupEngines.filter((e2) => !e2.experimental)
+                  const experimental = groupEngines.filter((e2) => e2.experimental)
+                  return (
+                    <div key={groupName} className="contents">
+                      <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                        {GroupIcon && <GroupIcon size={12} aria-hidden />}
+                        {fullLabel}
+                      </p>
+                      {production.map((e2) => engineCard(e2, visible))}
+                      {labsMode && experimental.length > 0 && (
+                        <>
+                          <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                            <FlaskConical size={12} aria-hidden />
+                            {t('engine_group_experimental')}
+                          </p>
+                          {experimental.map((e2) => engineCard(e2, visible))}
+                        </>
+                      )}
+                    </div>
+                  )
+                })
+              })()}
             </div>
           )}
         </section>
@@ -546,14 +586,24 @@ export function SettingsDrawer(props: {
                     PREPROCESS_FLAGS.findIndex(([k]) => k === a.field) -
                     PREPROCESS_FLAGS.findIndex(([k]) => k === b.field))
                   .map((c) => (
-                  <li key={c.field} className="flex items-start gap-1.5 text-xs text-ink-2" title={c.detail}>
+                  <li key={c.field} className="flex items-start gap-1.5 text-xs text-ink-2">
                     {c.active ? (
                       <Check size={12} className="mt-0.5 shrink-0 text-ok" aria-hidden />
                     ) : (
                       /* Neutral finding: a quiet dot, same optical slot as the check. */
                       <span className="mx-[3px] mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-3/50" aria-hidden />
                     )}
-                    <span className="min-w-0">{scores ? t(scanWordingKey(c, scores)) : c.detail}</span>
+                    <span className="min-w-0">
+                      {scores ? t(scanWordingKey(c, scores)) : c.detail}
+                      {/* When `scores` is present the tiered wording above replaces
+                          `c.detail` — it was previously the ONLY place the raw finding
+                          lived, reachable solely via a hover `title` (no keyboard/AT
+                          path). Render it as visible secondary text instead, same
+                          pattern as SettingRow's `hint` line. */}
+                      {scores && c.detail && (
+                        <span className="mt-0.5 block text-2xs leading-4 text-ink-3">{c.detail}</span>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
