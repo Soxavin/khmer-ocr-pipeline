@@ -291,7 +291,9 @@ not single `Cell_Accuracy` numbers.
 §4.8 found no off-the-shelf model beats Surya and scoped fine-tuning as the justified next step
 (§7). This section reports that experiment's actual result: **fine-tuning neither model beat the
 existing, zero-additional-training pipeline**, and one of the two models failed to produce usable
-output on real documents at all.
+output on real documents at all. Both findings below are summarised on one figure —
+`docs/figures/finetune_eval/finetune_story_overview.png` — with the per-run detail behind them in
+the four charts cited through this section.
 
 **Scope, precisely.** §7's original future-work item envisioned fine-tuning a *recogniser* on
 cropped Khmer word/cell images — a narrower task than what was actually tried here. What this
@@ -498,6 +500,7 @@ tractable recogniser-only fine-tune (§7) as the remaining untested path.
   `eval/gemma_finetune_runs.md` / `eval/qwen_finetune_runs.md` (narrative) with
   `eval/*_finetune_runs.csv` (structured); `eval/real_doc_eval.csv`,
   `eval/efficiency_comparison.csv`, `eval/loss_history.csv`. Figures + a plain-language guide to
-  each one: `docs/figures/finetune_eval/README.md`. Regenerate all four figures via
-  `scripts/plot_run_metrics.py` and `scripts/plot_real_doc_comparison.py` (exact commands in that
-  README).
+  each one: `docs/figures/finetune_eval/README.md`. Regenerate all five figures via
+  `scripts/plot_run_metrics.py`, `scripts/plot_real_doc_comparison.py` and
+  `scripts/plot_finetune_story.py` (exact commands in that README); all three share
+  `scripts/_report_style.py` for palette, type scale and figure conventions.

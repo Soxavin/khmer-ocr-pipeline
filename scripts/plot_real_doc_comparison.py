@@ -22,13 +22,22 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from _report_style import apply_report_style, model_color, save_all_formats
+from _report_style import (
+    ANNOTATION_SIZE,
+    NOTE_SIZE,
+    apply_report_style,
+    model_color,
+    model_hatch,
+    save_all_formats,
+    titled,
+)
 
 # (csv column, display label)
 _HIGHER_IS_BETTER = [
@@ -69,25 +78,53 @@ def _panel(ax, df: pd.DataFrame, metrics: list[tuple[str, str]], title: str, yli
                 failed_positions.append(j)
             else:
                 heights.append(float(val))
+        # hatch + white edge: the redundant, non-color encoding of approach identity (see
+        # _report_style.MODEL_HATCH). It also propagates into the legend swatches automatically,
+        # which is where a grayscale reader most needs it.
         bars = ax.bar(offsets, heights, width=bar_width, label=_APPROACH_LABEL.get(approach, approach),
-                       color=model_color(approach))
+                       color=model_color(approach), hatch=model_hatch(approach),
+                       edgecolor="white", linewidth=0.8)
         for j in failed_positions:
-            ax.annotate("no\noutput", (offsets[j], 0.015), ha="center", va="bottom",
-                        fontsize=7, color=model_color(approach), fontweight="bold")
+            # Rotated so the full phrase fits inside a single bar's slot: at slide-legible type a
+            # horizontal "no output" is already wider than the slot, and the ambiguity this
+            # annotation exists to kill (empty slot = "no bar drawn" vs. "score of zero") is worth
+            # more than the reading comfort of a horizontal label. Sits in the empty slot itself,
+            # so it's unmistakably about that approach and not the neighbouring bar.
+            ax.annotate("no output", (offsets[j], ylim_top * 0.03), ha="center", va="bottom",
+                        rotation=90, fontsize=ANNOTATION_SIZE + 1,
+                        color=model_color(approach), fontweight="bold")
         for bar, h, j in zip(bars, heights, range(n_metrics)):
             if j not in failed_positions:
                 ax.annotate(f"{h:.2f}", (bar.get_x() + bar.get_width() / 2, h),
-                            ha="center", va="bottom", fontsize=7)
+                            ha="center", va="bottom", fontsize=ANNOTATION_SIZE + 1.5,
+                            xytext=(0, 2), textcoords="offset points")
 
     ax.set_xticks(x)
-    ax.set_xticklabels([lbl for _, lbl in metrics], fontsize=8)
+    ax.set_xticklabels([lbl for _, lbl in metrics], fontsize=11)
+    # The rightmost group's "no output" label is the last thing in the panel and sat flush against
+    # the spine at the default bar margins -- enough to look clipped in the render.
+    ax.margins(x=0.06)
     ax.set_ylim(0, ylim_top)
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title, fontsize=13)
     ax.grid(True, axis="y", alpha=0.3)
 
 
+def _no_output_note(df: pd.DataFrame) -> str:
+    """One figure-level sentence naming each approach that produced nothing scorable, and how
+    many pages that was. The per-bar 'no output' labels say an empty slot isn't a zero; this says
+    what actually happened, in numbers, without the viewer needing the README on screen."""
+    parts = []
+    for _, row in df.iterrows():
+        failures, pages = row.get("parse_failures"), row.get("n_pages")
+        if pd.notna(failures) and pd.notna(pages) and int(failures) == int(pages) and int(pages) > 0:
+            name = _APPROACH_LABEL.get(row["model"], row["model"]).split("\n")[0]
+            parts.append(f"{name}: all {int(pages)} pages failed to parse, so it has no bar on "
+                          f"either panel (an empty slot is not a score of zero)")
+    return "  ".join(parts)
+
+
 def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
-    fig, (ax_hi, ax_lo) = plt.subplots(1, 2, figsize=(12, 5.5))
+    fig, (ax_hi, ax_lo) = plt.subplots(1, 2, figsize=(13, 6))
     # Left panel is a genuinely bounded [0, 1] metric family (accuracy/match rate), so a fixed
     # 1.05 ceiling is meaningful -- 1.0 means "perfect". Right panel (CER) is unbounded and its
     # visible values top out well under 1.0 here, so scaling it to the left panel's ceiling
@@ -98,8 +135,16 @@ def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
     _panel(ax_hi, df, _HIGHER_IS_BETTER, "Higher is better", ylim_top=1.05)
     _panel(ax_lo, df, _LOWER_IS_BETTER, "Lower is better", ylim_top=lower_ylim)
     handles, labels = ax_hi.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=3, fontsize=9)
-    fig.suptitle("Real-document evaluation: same 15 hand-verified ARDB pages, all three approaches", y=1.16, fontsize=12, fontweight="bold")
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=3)
+    note = _no_output_note(df)
+    if note:
+        fig.text(0.5, -0.03, textwrap.fill(note, 120), ha="center", va="top", fontsize=NOTE_SIZE,
+                 style="italic", color="0.35", linespacing=1.5)
+    n_pages = df["n_pages"].dropna()
+    pages_phrase = f"same {int(n_pages.iloc[0])} hand-verified ARDB pages" if len(n_pages) else "same held-out ARDB pages"
+    titled(fig, f"Real-document evaluation: {pages_phrase}, all three approaches",
+           "The existing OCR pipeline wins on every metric measured — with no fine-tuning at all.",
+           y=1.19)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)

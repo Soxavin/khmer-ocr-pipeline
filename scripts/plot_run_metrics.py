@@ -16,25 +16,61 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from _report_style import (
+    ANNOTATION_SIZE,
+    HIGHLIGHT_EPOCH,
     MARKERS,
+    NOTE_SIZE,
     apply_report_style,
+    content_label_color,
+    content_label_marker,
     dataset_linestyle,
     dataset_short_label,
+    epoch_color,
+    highlight_epoch,
     model_color,
     model_display_name,
     model_marker,
     run_display_label,
     save_all_formats,
+    titled,
 )
 
 _LINESTYLES = ["-", "--", "-.", ":"]
 _MARKERS = MARKERS
+
+# The dataset version the epoch sweep was actually run as a controlled sweep on. v2 runs predate
+# it (smaller dataset, and a ground-truth typo was fixed partway through -- see
+# eval/gemma_finetune_runs.md), so they're kept on the charts for completeness but drawn
+# recessively: at full weight a v2 line reads as a peer of the v5 sweep and invites exactly the
+# wrong conclusion on a slide, since v2's 2-epoch point is the lowest failure rate anywhere on
+# the chart while measuring a different dataset under different ground truth.
+_PRIMARY_DATASET = "v5"
+# Two weights, because the same de-emphasis does different work on the two epoch-axis charts.
+# On the parse-failure chart the v2 line actively competes with the finding (its 2-epoch point is
+# the lowest failure rate anywhere on the chart, measured on a different dataset under different
+# ground truth), so it's pushed well back. On the CER chart it carries most of Gemma's data and
+# the colors there encode content region rather than model, so the same weight would leave that
+# panel looking empty for no gain.
+_SECONDARY_ALPHA = 0.4
+_SECONDARY_ALPHA_CER = 0.7
+
+# Figure-width footnotes are laid out as one long line by default, and savefig(bbox="tight")
+# then widens the whole canvas to fit it -- which silently stretched the CER figure to a 2.7:1
+# letterbox and squashed both panels. Wrapped instead, so the note grows downward.
+_NOTE_WRAP = 128
+
+# At or below this many matched pages, a per-label CER average is one or two documents' worth of
+# evidence, not a trend -- drawn hollow on the CER chart so the distinction is visible without
+# reading the n= label. Deliberately not a statistical threshold; it's a "read this point
+# cautiously" flag, and the README says so.
+_THIN_SAMPLE_N = 3
 
 
 def _jitter_duplicate_epochs(group: pd.DataFrame, spread: float = 0.12) -> pd.Series:
@@ -54,35 +90,92 @@ def _jitter_duplicate_epochs(group: pd.DataFrame, spread: float = 0.12) -> pd.Se
 
 
 def _place_annotations(ax, entries: list[tuple[float, float, str, float]],
-                        base_dy: float = 8, tier_gap: float = 13) -> None:
+                        base_dy: float = 9, min_gap: float = 18, dx: float = 12) -> None:
     """entries: (x, y, text, epoch_bucket) tuples. Groups by epoch_bucket -- the actual epoch
     count, not the jittered x -- since every observed annotation collision in these charts
-    happens between points that share an epoch, then stacks that bucket's labels in
-    ascending-y order with a small, consistent tier gap. Every annotation gets a thin leader
-    line back to its real point (arrowprops), so even a label pushed up several tiers to clear
-    a crowded cluster stays visually tied to its marker -- an earlier version offset each LINE
-    by a fixed amount regardless of how isolated its points were, which pushed isolated points'
-    labels far from their marker with nothing connecting them, reading as disconnected floating
-    text rather than an annotation."""
+    happens between points that share an epoch. Every annotation gets a thin leader line back to
+    its real point (arrowprops), so a label nudged upward to clear a neighbour stays visually
+    tied to its marker -- an earlier version offset each LINE by a fixed amount regardless of how
+    isolated its points were, which pushed isolated points' labels far from their marker with
+    nothing connecting them, reading as disconnected floating text rather than an annotation.
+
+    Within a bucket, labels are decluttered greedily in *display* space rather than assigned
+    fixed tier offsets by rank: a fixed-tier scheme adds the same offset to the 2nd-lowest point
+    whether it sits next to its neighbour or half a panel away, and at 5 epochs that pushed
+    Gemma's label off its own point and onto Qwen's marker at a different failure rate -- a label
+    that names the wrong series is worse than a crowded one. Each label instead asks for
+    `base_dy` above its own point and is only raised if that would land within `min_gap` of the
+    previous label in the same bucket.
+
+    MUST be called after the axes' final limits and layout are set (see callers): the display
+    transform used to measure those gaps is only meaningful once the axes has its final size.
+    base_dy/min_gap are in points and scale with ANNOTATION_SIZE, which was raised from 6.5pt
+    (fine on a report page, unreadable projected) to ~9.5pt."""
     from collections import defaultdict
     buckets: dict[float, list[tuple[float, float, str]]] = defaultdict(list)
     for x, y, text, epoch in entries:
         buckets[epoch].append((x, y, text))
+    px_per_pt = ax.figure.dpi / 72.0
     for pts in buckets.values():
-        for tier, (x, y, text) in enumerate(sorted(pts, key=lambda t: t[1])):
+        prev_top_px = None
+        for x, y, text in sorted(pts, key=lambda t: t[1]):
+            point_px = ax.transData.transform((x, y))[1]
+            label_px = point_px + base_dy * px_per_pt
+            if prev_top_px is not None:
+                label_px = max(label_px, prev_top_px + min_gap * px_per_pt)
+            # A multi-line label grows upward from its anchor, so the next label has to clear the
+            # whole block, not just the anchor line.
+            extra_lines = text.count("\n")
+            prev_top_px = label_px + extra_lines * ANNOTATION_SIZE * 1.3 * px_per_pt
             ax.annotate(text, (x, y), textcoords="offset points",
-                        xytext=(6, base_dy + tier_gap * tier), fontsize=6.5, color="0.25",
-                        arrowprops=dict(arrowstyle="-", color="0.6", lw=0.5, shrinkA=0, shrinkB=3))
+                        xytext=(dx, (label_px - point_px) / px_per_pt),
+                        fontsize=ANNOTATION_SIZE, color="0.25",
+                        arrowprops=dict(arrowstyle="-", color="0.55", lw=0.6, shrinkA=0, shrinkB=3))
 
 
-def _epoch_disambiguator(run_id: str, label_lookup: dict[str, str]) -> str:
-    """The part of a run's display label beyond its dataset version -- e.g. 'v5\\n3ep, 78 steps'
-    becomes '3ep, 78 steps' -- used as a per-point annotation on epoch-axis charts, where the
-    dataset version is already conveyed by linestyle/panel and the epoch count by x-position, so
-    only the disambiguating remainder (steps, or a date tiebreak) is worth spelling out again."""
-    full = label_lookup.get(run_id, run_id)
-    parts = full.split("\n", 1)
-    return parts[1] if len(parts) > 1 else full
+def _ambiguous_epochs(group_keys: pd.DataFrame, key_cols: list[str]) -> set:
+    """The (…, epochs) buckets that hold more than one distinct run, i.e. the only places where a
+    step-count annotation actually disambiguates anything. Used to keep per-point labels
+    selective: annotating every point with its full '3ep, 78 steps' provenance duplicates the
+    x-axis on isolated points and, at projector-legible type, turns the chart into a wall of
+    grey text. Where a bucket holds one run, position alone already identifies it."""
+    counts = group_keys.drop_duplicates().groupby(key_cols, dropna=False).size()
+    return {k for k, n in counts.items() if n > 1}
+
+
+def _no_cer_epochs(model_runs: pd.DataFrame, scored: pd.DataFrame) -> dict[float, str]:
+    """Epochs this model was run at but has no scorable CER for -> the reason, stated only as far
+    as the run log supports it. An epoch column that is simply blank reads as "we didn't try that"
+    when in fact it's "we tried it and nothing the model emitted could be scored" -- which for
+    Qwen's 2- and 5-epoch runs is the actual finding, not an omission."""
+    scored_epochs = {float(e) for e in scored["epochs"].dropna().unique()}
+    reasons: dict[float, str] = {}
+    for epoch, runs in model_runs.groupby("epochs"):
+        if float(epoch) in scored_epochs:
+            continue
+        failures = runs["json_parse_failures"].sum(min_count=1)
+        rows = runs["n_validation_rows"].sum(min_count=1)
+        total_failure = pd.notna(failures) and pd.notna(rows) and rows > 0 and failures == rows
+        reasons[float(epoch)] = ("no CER —\nevery page failed\nto parse" if total_failure
+                                  else "no CER —\nnothing scorable")
+    return reasons
+
+
+def _run_provenance(row: pd.Series, peers: pd.DataFrame) -> str:
+    """Short 'which run is this point' label for an epoch-axis chart: dataset version + step
+    count, e.g. 'v5, 130 steps'. Epoch count is deliberately omitted (the x-position already
+    states it) and a date is appended only when a peer row on the same line shares BOTH epoch
+    and step count -- Gemma's v2-run2/v2-run3 are a genuine identical-config repeat around a
+    ground-truth typo fix, so the date is the only thing that tells them apart."""
+    ds = dataset_short_label(row["dataset_version"])
+    parts = [ds]
+    if pd.notna(row.get("steps")):
+        parts.append(f"{int(float(row['steps']))} steps")
+    text = ", ".join(parts)
+    same_config = peers[(peers["epochs"] == row["epochs"]) & (peers["steps"] == row["steps"])]
+    if len(same_config) > 1 and pd.notna(row.get("date")):
+        text += f"\n{row['date']}"
+    return text
 
 
 def _infer_model_name(csv_path: Path) -> str:
@@ -153,69 +246,94 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
     """
     labeled = df.dropna(subset=["label_cer"]).copy()
     labeled["dataset_short"] = labeled["dataset_version"].apply(dataset_short_label)
-    label_lookup = _run_label_lookup(df)
     models = sorted(df["model"].unique())
-    fig, axes = plt.subplots(1, len(models), figsize=(6.5 * len(models), 5.5), squeeze=False)
+    fig, axes = plt.subplots(1, len(models), figsize=(7.5 * len(models), 6.0), squeeze=False)
     axes = axes[0]
-    # Collected across panels for one shared external legend instead of a per-panel one --
-    # label->color/marker mapping is consistent across panels (both sort their own labels
-    # alphabetically, and Gemma's one extra label, "Text", sorts last, so shared labels always
-    # land on the same palette index in both panels), so a single legend below the figure is
-    # correct, not just more compact.
+    # Collected across panels for one shared external legend instead of a per-panel one. Colors
+    # and markers now come from a fixed label->style dict (_report_style.CONTENT_LABEL_COLOR),
+    # not from each panel's own cycle position, so a label missing from one panel (Qwen never
+    # produced a scorable "Text" region) can't shift the remaining labels onto different colors
+    # than the neighbouring panel gives them -- the shared legend is then correct by
+    # construction rather than by an alphabetical-ordering coincidence.
     handles_by_label: dict[str, object] = {}
+    pending_annotations: list[tuple[object, list]] = []
 
     for ax, model in zip(axes, models):
         model_data = labeled[labeled["model"] == model]
+        model_runs = df[df["model"] == model].drop_duplicates(subset=["run_id"])
+        # Every epoch this model was actually RUN at, including ones with no scorable CER --
+        # dropping those from the axis silently hid two thirds of Qwen's sweep and made its panel
+        # look like a single-epoch experiment. See _no_cer_epochs for what gets drawn there.
+        epochs_run = sorted(model_runs["epochs"].dropna().unique())
         if model_data.empty:
             ax.text(0.5, 0.5, "no CER data yet", ha="center", va="center", transform=ax.transAxes)
         else:
-            labels_present = sorted(model_data["label"].unique())
-            color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-            color_by_label = {lbl: color_cycle[i % len(color_cycle)] for i, lbl in enumerate(labels_present)}
-            # Marker shape, not just color, per label -- a colorblind-safe palette still relies
-            # on hue, which a true grayscale/luminance-only rendering collapses entirely. Shape
-            # carries the same distinction redundantly so the chart survives desaturation too.
-            marker_by_label = {lbl: MARKERS[i % len(MARKERS)] for i, lbl in enumerate(labels_present)}
-            # Collected across all (label, dataset-version) lines in this panel, then placed
-            # once via _place_annotations -- sample-size annotations are grouped by which
-            # EPOCH they actually collide at, not offset by a fixed per-line amount regardless
-            # of how isolated the point is (see _place_annotations docstring for why that
-            # earlier approach produced disconnected-looking floating text).
+            highlight_epoch(ax, HIGHLIGHT_EPOCH)
+            ambiguous = _ambiguous_epochs(model_data[["label", "epochs", "run_id"]],
+                                          ["label", "epochs"])
             annotation_entries: list[tuple[float, float, str, float]] = []
-            for (label, ds), group in model_data.groupby(["label", "dataset_short"]):
+            for i, ((label, ds), group) in enumerate(model_data.groupby(["label", "dataset_short"])):
                 group = group.sort_values("epochs")
                 xs = _jitter_duplicate_epochs(group)
-                # markeredgecolor: the Okabe-Ito palette's yellow is colorblind-safe but has
-                # very high luminance -- confirmed via an actual grayscale conversion that it
-                # nearly vanishes against a white background without a dark edge. A dark edge
-                # keeps every marker visible regardless of which color in the cycle it lands on.
-                line, = ax.plot(xs.values, group["label_cer"], marker=marker_by_label[label],
-                                 color=color_by_label[label], linestyle=dataset_linestyle(ds),
-                                 label=label, markeredgecolor="0.15", markeredgewidth=0.6)
+                color = content_label_color(label, i)
+                primary = ds == _PRIMARY_DATASET
+                # markeredgecolor: a colorblind-safe palette still relies on hue, which grayscale
+                # collapses; a dark edge keeps every marker readable whatever its fill.
+                line, = ax.plot(xs.values, group["label_cer"], marker=content_label_marker(label, i),
+                                 color=color, linestyle=dataset_linestyle(ds),
+                                 label=label, markeredgecolor="0.15", markeredgewidth=0.6,
+                                 linewidth=2.4 if primary else 1.6,
+                                 markersize=10 if primary else 7,
+                                 alpha=1.0 if primary else _SECONDARY_ALPHA_CER,
+                                 zorder=3 if primary else 2)
                 handles_by_label.setdefault(label, line)
-                # Sample-size annotation on every point -- a single-sample point (e.g. Gemma's
-                # v5/5ep run, where 8/9 rows failed to parse and the one that did was missing
-                # most of its regions) looks identical to a well-sampled point otherwise;
-                # nothing on the line itself signals "this is one row, not sixteen."
-                for run_id, x, y, ep, n in zip(group["run_id"], xs.values, group["label_cer"],
-                                                group["epochs"], group["label_n_matched"]):
-                    if pd.notna(n):
-                        disamb = _epoch_disambiguator(run_id, label_lookup)
-                        annotation_entries.append((x, y, f"n={int(n)} ({disamb})", float(ep)))
-            _place_annotations(ax, annotation_entries)
-            ax.set_xlabel("epochs")
-            epochs_present = sorted(model_data["epochs"].dropna().unique())
-            ax.set_xticks(epochs_present)
-            ax.set_xlim(min(epochs_present) - 0.6, max(epochs_present) + 0.6)
+                # A point averaged over 1-3 pages is drawn hollow. The n= text below says the same
+                # thing, but only if the viewer reads it -- on a slide the shape difference is
+                # what actually lands, and it's the difference between "this line dropped" and
+                # "this line dropped according to one page." Encoded by fill, not color, so it
+                # survives grayscale and CVD alongside everything else here.
+                thin = group[group["label_n_matched"] <= _THIN_SAMPLE_N]
+                if not thin.empty:
+                    ax.plot(xs[thin.index].values, thin["label_cer"], linestyle="none",
+                            marker=content_label_marker(label, i), markersize=10 if primary else 7,
+                            markerfacecolor="white", markeredgecolor=color, markeredgewidth=2.0,
+                            alpha=1.0 if primary else _SECONDARY_ALPHA_CER, zorder=4)
+                for _, row in group.iterrows():
+                    n = row["label_n_matched"]
+                    if pd.isna(n):
+                        continue
+                    text = f"n={int(n)}"
+                    # Step count only where two runs of this label share an epoch (Qwen's two
+                    # 3-epoch runs at different effective batch sizes) -- elsewhere the x-position
+                    # already identifies the run, and repeating it on every point turned the panel
+                    # into a wall of grey provenance text at projector-legible type.
+                    if (row["label"], row["epochs"]) in ambiguous and pd.notna(row.get("steps")):
+                        text += f" · {int(float(row['steps']))} steps"
+                    annotation_entries.append((xs[row.name], row["label_cer"], text,
+                                               float(row["epochs"])))
+            pending_annotations.append((ax, annotation_entries))
+            ax.set_xlabel("training epochs")
+            ax.set_xticks(epochs_run)
+            # Asymmetric right margin: annotations are placed to the RIGHT of their point, so the
+            # rightmost epoch's labels ran past the panel and into the gutter between panels.
+            ax.set_xlim(min(epochs_run) - 0.7, max(epochs_run) + 1.1)
         ax.set_ylabel("CER (lower is better)")
         ax.set_title(model_display_name(model))
-        ax.margins(y=0.18)
+        ax.margins(y=0.20)
         # CER can never be negative -- margins() extends symmetrically for annotation headroom
         # above the highest point, but the same symmetric extension below 0 would be dishonest
         # for a metric that's bounded at zero. Keep the auto top, clamp the bottom explicitly.
         ax.set_ylim(bottom=0)
+        for epoch, reason in _no_cer_epochs(model_runs, model_data).items():
+            # An empty column is ambiguous between "not run" and "run, nothing scorable"; the
+            # difference is the entire point of the 2- and 5-epoch Qwen runs, so it's stated.
+            ax.text(epoch, 0.06, reason, transform=ax.get_xaxis_transform(), ha="center",
+                    va="bottom", fontsize=ANNOTATION_SIZE, color="0.35", style="italic",
+                    linespacing=1.4)
 
-    notes = ["line style shows dataset version (solid = v5, dashed = v2; Qwen has only v5 data)"]
+    notes = ["line style = dataset version (solid = v5, the controlled sweep; dashed = v2, an "
+             "earlier/smaller dataset, faded); hollow marker = averaged over "
+             f"{_THIN_SAMPLE_N} pages or fewer"]
     for model, mgroup in df.groupby("model"):
         meta = mgroup[["run_id", "dataset_version", "epochs", "steps"]].drop_duplicates()
         for (ds, ep), sub in meta.groupby(["dataset_version", "epochs"]):
@@ -225,14 +343,25 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                 notes.append(f"{model_display_name(model)}'s {dataset_short_label(ds)}, "
                               f"{int(ep)}-epoch runs differ in step count ({steps_str} steps = "
                               f"different effective batch size), not duplicate configs")
-    fig.text(0.5, -0.05, "Note: " + "; ".join(notes) + ".", ha="center", fontsize=8, style="italic")
+    fig.text(0.5, -0.06, textwrap.fill("Note: " + "; ".join(notes) + ".", _NOTE_WRAP),
+             ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
+             linespacing=1.5)
 
-    fig.suptitle("Per-label CER vs. epoch count (one panel per model, own y-scale)", y=1.14)
+    titled(fig, "Per-label CER vs. epoch count (one panel per model, own y-scale)",
+           "n = pages behind each average. It shrinks as parse failures rise, so the "
+           "worst-performing runs are also the ones resting on the least data.",
+           y=1.16)
     if handles_by_label:
         ordered_labels = sorted(handles_by_label)
         fig.legend([handles_by_label[l] for l in ordered_labels], ordered_labels,
-                   loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=len(ordered_labels), fontsize=9)
+                   loc="upper center", bbox_to_anchor=(0.5, 1.06), ncol=len(ordered_labels))
     fig.tight_layout()
+    # After tight_layout so the display-space declutter measures each axes' final geometry.
+    # Wider dx/min_gap than the parse-failure chart: this chart's points cluster much more tightly
+    # (all five of Qwen's scorable points sit at 3 epochs), so a label offset that clears its own
+    # marker still landed on a *neighbouring* label's marker at the default spacing.
+    for ax, entries in pending_annotations:
+        _place_annotations(ax, entries, min_gap=20, dx=18)
     save_all_formats(fig, out_path)
     plt.close(fig)
 
@@ -254,47 +383,87 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
     would otherwise land on the exact same point -- jittered apart via _jitter_duplicate_epochs
     and annotated with the disambiguating detail instead of silently overlapping."""
     per_run = df.drop_duplicates(subset=["run_id"]).copy()
-    label_lookup = _run_label_lookup(df)
-    fig, ax = plt.subplots(figsize=(9, 6.5))
+    fig, ax = plt.subplots(figsize=(11.5, 6.5))
+    annotation_entries: list[tuple[float, float, str, float]] = []
     if per_run.empty or per_run["n_validation_rows"].isna().all():
         ax.text(0.5, 0.5, "no run data yet", ha="center", va="center", transform=ax.transAxes)
     else:
         per_run["failure_rate"] = per_run["json_parse_failures"] / per_run["n_validation_rows"]
         per_run["dataset_short"] = per_run["dataset_version"].apply(dataset_short_label)
 
+        # Drawn before any series so the band sits behind the lines.
+        highlight_epoch(ax, HIGHLIGHT_EPOCH, caption="lowest failure rate\nfor both models (v5)")
+
+        # Only buckets holding more than one run get per-point provenance labels -- see
+        # _ambiguous_epochs. Here that's exactly the places a viewer would otherwise ask "why are
+        # there two Gemma points at 2 epochs?", and nowhere else.
+        ambiguous = _ambiguous_epochs(per_run[["model", "epochs", "run_id"]], ["model", "epochs"])
+
+        # _jitter_duplicate_epochs only separates points *within* one line, so two different
+        # models landing on the identical (epoch, rate) still drew on top of each other -- at
+        # (2 epochs, 1.0) Qwen's square completely hid Gemma's circle, silently turning "both
+        # models are at 100% failure here" into "only Qwen is". A small constant per-model
+        # x-offset makes coincident points visible as two points. It's cosmetic and well inside
+        # the 3-epoch highlight band's width, so it never moves a point to a different epoch.
+        models_present = sorted(per_run["model"].unique())
+        model_dx = {m: ((i - (len(models_present) - 1) / 2) * 0.07)
+                    for i, m in enumerate(models_present)}
+
         legend_handles: dict[str, object] = {}
         # Collected across all (model, dataset-version) lines, then placed once via
-        # _place_annotations -- grouped by which epoch they actually collide at (e.g. Gemma's
-        # v2 5-epoch run and Qwen's v5 5-epoch run both sit at (5, 1.0)), not offset by a fixed
-        # per-line amount regardless of how isolated the point is.
-        annotation_entries: list[tuple[float, float, str, float]] = []
+        # _place_annotations after layout is final -- grouped by which epoch they actually
+        # collide at (e.g. Gemma's v2 5-epoch run and Qwen's v5 5-epoch run both sit at (5, 1.0)).
         for (model, ds), group in per_run.groupby(["model", "dataset_short"]):
             group = group.sort_values("epochs")
-            xs = _jitter_duplicate_epochs(group)
+            xs = _jitter_duplicate_epochs(group) + model_dx[model]
+            primary = ds == _PRIMARY_DATASET
             line, = ax.plot(xs.values, group["failure_rate"], marker=model_marker(model),
                              color=model_color(model), linestyle=dataset_linestyle(ds),
+                             linewidth=2.8 if primary else 1.8,
+                             markersize=11 if primary else 7,
+                             alpha=1.0 if primary else _SECONDARY_ALPHA,
+                             zorder=3 if primary else 2,
                              markeredgecolor="0.15", markeredgewidth=0.6)
-            legend_handles[f"{model_display_name(model)} — {ds}"] = line
-            for run_id, x, y, ep in zip(group["run_id"], xs.values, group["failure_rate"], group["epochs"]):
-                disamb = _epoch_disambiguator(run_id, label_lookup)
-                annotation_entries.append((x, y, disamb, float(ep)))
-        _place_annotations(ax, annotation_entries)
+            key = (f"{model_display_name(model)} — {ds}" if primary
+                   else f"{model_display_name(model)} — {ds} (earlier dataset)")
+            legend_handles[key] = (line, primary)
+            for _, row in group.iterrows():
+                if (row["model"], row["epochs"]) not in ambiguous:
+                    continue
+                x = xs[row.name]
+                annotation_entries.append((x, row["failure_rate"],
+                                            _run_provenance(row, group), float(row["epochs"])))
 
-        ordered_keys = sorted(legend_handles)
-        ax.legend([legend_handles[k] for k in ordered_keys], ordered_keys,
-                   fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        # Primary (v5) series first in the legend, so the sweep this chart is actually about
+        # reads before the recessive historical lines rather than after them alphabetically.
+        ordered_keys = sorted(legend_handles, key=lambda k: (not legend_handles[k][1], k))
+        ax.legend([legend_handles[k][0] for k in ordered_keys], ordered_keys,
+                   loc="upper left", bbox_to_anchor=(1.01, 1.0))
         epochs_present = sorted(per_run["epochs"].dropna().unique())
         ax.set_xticks(epochs_present)
         ax.set_xlim(min(epochs_present) - 0.75, max(epochs_present) + 0.75)
-    ax.set_ylabel("JSON parse-failure rate")
-    ax.set_xlabel("epochs")
-    ax.set_title("JSON parse-failure rate vs. epoch count")
+    ax.set_ylabel("JSON parse-failure rate (lower is better)")
+    ax.set_xlabel("training epochs")
     # Top clamp well above 1.0 (not 1.05): with up to 3 stacked annotation tiers on points
     # that sit at failure_rate=1.0 (a common value -- several runs are 100% failures), the
     # highest tier's point-offset text needs real data-space headroom below the title, or it
     # renders on top of the title text (annotate() isn't clipped to the axes by default).
-    ax.set_ylim(-0.05, 1.35)
+    ax.set_ylim(-0.05, 1.28)
+    n_val = per_run["n_validation_rows"].dropna()
+    n_note = (f" Each point is one run scored on {int(n_val.iloc[0])} validation pages."
+              if len(n_val) and n_val.nunique() == 1 else "")
+    fig.text(0.5, -0.02, textwrap.fill(
+                 "Line style = dataset version (solid = v5, the controlled sweep; dashed = v2, "
+                 "an earlier/smaller dataset, shown faded for context only)." + n_note, _NOTE_WRAP),
+             ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
+             linespacing=1.5)
+    titled(fig, "JSON parse-failure rate vs. epoch count",
+           "Both models fail least at 3 epochs on v5; 2 and 5 epochs are worse. "
+           "One run per point — a direction, not a tested effect.",
+           y=1.08)
     fig.tight_layout()
+    # After tight_layout so the display-space declutter measures the axes' final geometry.
+    _place_annotations(ax, annotation_entries)
     save_all_formats(fig, out_path)
     plt.close(fig)
 
@@ -326,38 +495,60 @@ def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFra
         plt.close(fig)
         return
 
-    loss_df = loss_df.merge(run_meta[["run_id", "dataset_version"]], on="run_id", how="left")
+    meta_cols = [c for c in ["run_id", "dataset_version", "epochs", "steps"] if c in run_meta]
+    loss_df = loss_df.merge(run_meta[meta_cols], on="run_id", how="left")
     loss_df["dataset_short"] = loss_df["dataset_version"].apply(dataset_short_label)
     models = sorted(loss_df["run_id"].str.split("/").str[0].unique())
-    fig, axes = plt.subplots(1, len(models), figsize=(7 * len(models), 5.5), squeeze=False, sharey=True)
+    fig, axes = plt.subplots(1, len(models), figsize=(7.5 * len(models), 5.8), squeeze=False,
+                             sharey=True)
     axes = axes[0]
+    all_epochs = sorted(loss_df["epochs"].dropna().unique())
 
     for ax, model in zip(axes, models):
         model_loss = loss_df[loss_df["run_id"].str.startswith(model + "/")]
-        run_ids = sorted(model_loss["run_id"].unique())
-        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        color_by_run = {r: color_cycle[i % len(color_cycle)] for i, r in enumerate(run_ids)}
-        # Sparse markers with a dark edge, not just a colored line -- confirmed via an actual
-        # grayscale conversion that a high-luminance palette color (Okabe-Ito's yellow) nearly
-        # disappears as a plain line against white. A marker every ~10 steps, per-run shape,
-        # gives the same color+shape redundancy the other two trend charts already have.
-        marker_by_run = {r: MARKERS[i % len(MARKERS)] for i, r in enumerate(run_ids)}
-        for run_id, group in model_loss.groupby("run_id"):
-            group = group.sort_values("step")
+        # Ordered by epoch count so the legend reads 2 -> 3 -> 5 rather than by run name, and so
+        # the light-to-dark ramp below appears in ramp order.
+        run_ids = sorted(model_loss["run_id"].unique(),
+                         key=lambda r: (float(model_loss.loc[model_loss["run_id"] == r, "epochs"].iloc[0]), r))
+        for run_id in run_ids:
+            group = model_loss[model_loss["run_id"] == run_id].sort_values("step")
             ds = group["dataset_short"].iloc[0]
-            display = label_lookup.get(run_id, run_id).replace("\n", ", ")
-            ax.plot(group["step"], group["loss"], color=color_by_run[run_id],
+            epochs = group["epochs"].iloc[0]
+            steps = group["steps"].iloc[0]
+            # Color keyed to EPOCH COUNT, not to position in a sorted run list. The old
+            # cycle-by-index scheme only happened to give both panels the same color per epoch
+            # because each model's runs sorted into the same order -- add one run to either model
+            # and "the green line" silently means a different epoch count in each panel. Keying it
+            # to the value makes cross-panel comparison correct by construction. Epoch count is
+            # ordinal, so the ramp is light->dark rather than three unrelated hues (see
+            # _report_style.epoch_color); marker shape carries the same distinction for grayscale.
+            color = epoch_color(epochs, all_epochs)
+            marker = MARKERS[all_epochs.index(epochs) % len(MARKERS)] if epochs in all_epochs else "o"
+            display = (f"{int(float(epochs))} epochs ({int(float(steps))} steps)"
+                       if pd.notna(epochs) and pd.notna(steps)
+                       else label_lookup.get(run_id, run_id).replace("\n", ", "))
+            if dataset_short_label(ds) != _PRIMARY_DATASET:
+                display += f" — {dataset_short_label(ds)}"
+            ax.plot(group["step"], group["loss"], color=color,
                     linestyle=dataset_linestyle(ds), label=display,
-                    marker=marker_by_run[run_id], markevery=10, markersize=5,
+                    marker=marker, markevery=10, markersize=6,
                     markeredgecolor="0.15", markeredgewidth=0.5)
-        ax.legend(fontsize=8, loc="upper right")
+        ax.legend(loc="upper right")
         ax.set_yscale("log")
         ax.set_title(model_display_name(model))
         ax.set_xlabel("training step")
         ax.grid(True, alpha=0.3, which="both")
 
     axes[0].set_ylabel("training loss (log scale)")
-    fig.suptitle("Training loss by step (one panel per model, solid = v5 / dashed = v2)", y=1.02)
+    # Only claim the dashed-v2 convention when a v2 run is actually on this figure -- Gemma's v2
+    # runs predate per-step loss logging, so the earlier fixed subtitle described a line style
+    # that appears nowhere on the chart.
+    datasets_shown = sorted(loss_df["dataset_short"].dropna().unique())
+    style_note = (" (solid = v5 / dashed = v2)" if len(datasets_shown) > 1 else "")
+    titled(fig, f"Training loss by step, one panel per model{style_note}",
+           "Every run converged cleanly — including the ones whose output was unusable. "
+           "This is a training-process check, not a quality signal.",
+           y=1.06)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)
@@ -389,7 +580,7 @@ def main() -> None:
     if args.loss_csv.is_file():
         loss_df = pd.read_csv(args.loss_csv)
         loss_df["run_id"] = loss_df["model"] + "/" + loss_df["run"].astype(str)
-        run_meta = df.drop_duplicates(subset=["run_id"])[["run_id", "dataset_version"]]
+        run_meta = df.drop_duplicates(subset=["run_id"])[["run_id", "dataset_version", "epochs", "steps"]]
         plot_loss_by_run(loss_df, args.out_dir / "loss_by_run.png", run_meta=run_meta,
                           label_lookup=_run_label_lookup(df))
         written += [args.out_dir / "loss_by_run.png", args.out_dir / "loss_by_run.pdf"]
