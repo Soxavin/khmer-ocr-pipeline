@@ -53,6 +53,28 @@ def _jitter_duplicate_epochs(group: pd.DataFrame, spread: float = 0.12) -> pd.Se
     return xs.reindex(group.index)
 
 
+def _place_annotations(ax, entries: list[tuple[float, float, str, float]],
+                        base_dy: float = 8, tier_gap: float = 13) -> None:
+    """entries: (x, y, text, epoch_bucket) tuples. Groups by epoch_bucket -- the actual epoch
+    count, not the jittered x -- since every observed annotation collision in these charts
+    happens between points that share an epoch, then stacks that bucket's labels in
+    ascending-y order with a small, consistent tier gap. Every annotation gets a thin leader
+    line back to its real point (arrowprops), so even a label pushed up several tiers to clear
+    a crowded cluster stays visually tied to its marker -- an earlier version offset each LINE
+    by a fixed amount regardless of how isolated its points were, which pushed isolated points'
+    labels far from their marker with nothing connecting them, reading as disconnected floating
+    text rather than an annotation."""
+    from collections import defaultdict
+    buckets: dict[float, list[tuple[float, float, str]]] = defaultdict(list)
+    for x, y, text, epoch in entries:
+        buckets[epoch].append((x, y, text))
+    for pts in buckets.values():
+        for tier, (x, y, text) in enumerate(sorted(pts, key=lambda t: t[1])):
+            ax.annotate(text, (x, y), textcoords="offset points",
+                        xytext=(6, base_dy + tier_gap * tier), fontsize=6.5, color="0.25",
+                        arrowprops=dict(arrowstyle="-", color="0.6", lw=0.5, shrinkA=0, shrinkB=3))
+
+
 def _epoch_disambiguator(run_id: str, label_lookup: dict[str, str]) -> str:
     """The part of a run's display label beyond its dataset version -- e.g. 'v5\\n3ep, 78 steps'
     becomes '3ep, 78 steps' -- used as a per-point annotation on epoch-axis charts, where the
@@ -154,7 +176,13 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
             # on hue, which a true grayscale/luminance-only rendering collapses entirely. Shape
             # carries the same distinction redundantly so the chart survives desaturation too.
             marker_by_label = {lbl: MARKERS[i % len(MARKERS)] for i, lbl in enumerate(labels_present)}
-            for label_idx, ((label, ds), group) in enumerate(model_data.groupby(["label", "dataset_short"])):
+            # Collected across all (label, dataset-version) lines in this panel, then placed
+            # once via _place_annotations -- sample-size annotations are grouped by which
+            # EPOCH they actually collide at, not offset by a fixed per-line amount regardless
+            # of how isolated the point is (see _place_annotations docstring for why that
+            # earlier approach produced disconnected-looking floating text).
+            annotation_entries: list[tuple[float, float, str, float]] = []
+            for (label, ds), group in model_data.groupby(["label", "dataset_short"]):
                 group = group.sort_values("epochs")
                 xs = _jitter_duplicate_epochs(group)
                 # markeredgecolor: the Okabe-Ito palette's yellow is colorblind-safe but has
@@ -165,25 +193,16 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                                  color=color_by_label[label], linestyle=dataset_linestyle(ds),
                                  label=label, markeredgecolor="0.15", markeredgewidth=0.6)
                 handles_by_label.setdefault(label, line)
-                # Sample-size annotation on every point: a single-sample point (e.g. Gemma's
+                # Sample-size annotation on every point -- a single-sample point (e.g. Gemma's
                 # v5/5ep run, where 8/9 rows failed to parse and the one that did was missing
-                # most of its regions) looks identical to a well-sampled point otherwise --
-                # nothing on the line itself signals "this is one row, not sixteen." Offset is a
-                # distinct tier per (label, dataset-version) line -- not `% 3` -- because up to 7
-                # such lines can share a panel (Gemma has 4 labels x up to 2 dataset versions),
-                # and two DIFFERENT lines' points can land at nearly the same (epoch, CER) by
-                # coincidence (e.g. Page-Furniture/v5 and Table/v2 both near CER 0 at 5 epochs);
-                # wrapping the tier index at 3 put exactly that pair on the same offset,
-                # producing genuinely overlapping, unreadable text.
-                y_offset = 6 + 11 * label_idx
-                # Annotation text stays a fixed dark gray rather than the series color -- a
-                # light palette color (e.g. Okabe-Ito's yellow) reads fine as a marker fill but
-                # is low-contrast as small text against a white background.
-                for run_id, x, y, n in zip(group["run_id"], xs.values, group["label_cer"], group["label_n_matched"]):
+                # most of its regions) looks identical to a well-sampled point otherwise;
+                # nothing on the line itself signals "this is one row, not sixteen."
+                for run_id, x, y, ep, n in zip(group["run_id"], xs.values, group["label_cer"],
+                                                group["epochs"], group["label_n_matched"]):
                     if pd.notna(n):
                         disamb = _epoch_disambiguator(run_id, label_lookup)
-                        ax.annotate(f"n={int(n)} ({disamb})", (x, y), textcoords="offset points",
-                                    xytext=(6, y_offset), fontsize=6.5, color="0.25")
+                        annotation_entries.append((x, y, f"n={int(n)} ({disamb})", float(ep)))
+            _place_annotations(ax, annotation_entries)
             ax.set_xlabel("epochs")
             epochs_present = sorted(model_data["epochs"].dropna().unique())
             ax.set_xticks(epochs_present)
@@ -244,22 +263,22 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
         per_run["dataset_short"] = per_run["dataset_version"].apply(dataset_short_label)
 
         legend_handles: dict[str, object] = {}
-        # Two different (model, dataset) lines can land on the exact same point -- e.g. Gemma's
-        # v2 5-epoch run and Qwen's v5 5-epoch run both sit at (5, 1.0), both being 100%
-        # failures. A fixed xytext offset put both lines' annotation text on top of each other,
-        # unreadable. Each of the (at most 3) lines gets its own vertical tier instead.
-        for line_idx, ((model, ds), group) in enumerate(per_run.groupby(["model", "dataset_short"])):
+        # Collected across all (model, dataset-version) lines, then placed once via
+        # _place_annotations -- grouped by which epoch they actually collide at (e.g. Gemma's
+        # v2 5-epoch run and Qwen's v5 5-epoch run both sit at (5, 1.0)), not offset by a fixed
+        # per-line amount regardless of how isolated the point is.
+        annotation_entries: list[tuple[float, float, str, float]] = []
+        for (model, ds), group in per_run.groupby(["model", "dataset_short"]):
             group = group.sort_values("epochs")
             xs = _jitter_duplicate_epochs(group)
             line, = ax.plot(xs.values, group["failure_rate"], marker=model_marker(model),
                              color=model_color(model), linestyle=dataset_linestyle(ds),
                              markeredgecolor="0.15", markeredgewidth=0.6)
             legend_handles[f"{model_display_name(model)} — {ds}"] = line
-            y_offset = 8 + 14 * line_idx
-            for run_id, x, y in zip(group["run_id"], xs.values, group["failure_rate"]):
+            for run_id, x, y, ep in zip(group["run_id"], xs.values, group["failure_rate"], group["epochs"]):
                 disamb = _epoch_disambiguator(run_id, label_lookup)
-                ax.annotate(disamb, (x, y), textcoords="offset points", xytext=(0, y_offset),
-                            ha="center", fontsize=6.5, color="0.3")
+                annotation_entries.append((x, y, disamb, float(ep)))
+        _place_annotations(ax, annotation_entries)
 
         ordered_keys = sorted(legend_handles)
         ax.legend([legend_handles[k] for k in ordered_keys], ordered_keys,
