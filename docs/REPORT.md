@@ -13,7 +13,12 @@ Using a **free, deterministic evaluation harness** (no paid LLM judge) over both
 real documents, we find that **character recognition is strong (~90%+)** but **table-structure
 extraction is the dominant bottleneck** on dense real tables. We rigorously establish — through a
 baseline comparison and three engineering interventions — that the limiting factor is **OCR
-recognition of small, isolated Khmer table cells**, not layout detection, which is solvable.
+recognition of small, isolated Khmer table cells**, not layout detection, which is solvable. We
+also report a fine-tuning experiment (§4.10) that directly tests whether a fine-tuned
+vision-language model can beat this pipeline outright: on the same held-out real documents, it
+cannot — the existing, zero-additional-training pipeline outperforms both fine-tuned models
+(Gemma 4 E2B, Qwen3.5-0.8B) on every measured axis, a negative result specific to the full-page
+joint-detection-and-transcription design tested, not fine-tuning in general.
 
 > **⚠ Revision (2026-07-01 — see `PROJECT_LOG.md` §2.25).** The "table-structure is the dominant
 > bottleneck" framing throughout this report was measured on **raw (un-preprocessed) page images**. The
@@ -230,8 +235,8 @@ candidate, run locally via MLX) collapsed into repetition loops even after decod
 CER > 1 on every page — it failed to produce usable output. This is bounded to the 4-bit build, but
 with the open *Khmer-specific* models being only hobby-grade line recognisers, the practical conclusion
 is that **no turnkey off-the-shelf model beats Surya today — the empirical justification for the Khmer
-fine-tuning experiment (§7).** (A data-quality aside: the text page's born-digital layer was a legacy
-Khmer font, unusable as ground truth — see §6.)
+fine-tuning experiment (§7; result: §4.10).** (A data-quality aside: the text page's born-digital layer
+was a legacy Khmer font, unusable as ground truth — see §6.)
 
 ### 4.9 The preprocessing confound — what actually drives fragmentation, and how far it generalises
 
@@ -275,6 +280,106 @@ near-term recall win.
 **Caveat.** Accuracy point-estimates are noisy — Surya is non-deterministic (the same config scored 0.179
 vs 0.259 across runs) — so these conclusions rest on the *structural* signals (`Tables_Found`, `Table_CER`),
 not single `Cell_Accuracy` numbers.
+
+### 4.10 Recogniser fine-tuning experiment (Gemma 4 E2B / Qwen3.5-0.8B)
+
+*(Added 2026-08; full run-by-run logs in `eval/gemma_finetune_runs.md` and
+`eval/qwen_finetune_runs.md`, structured data in `eval/gemma_finetune_runs.csv`,
+`eval/qwen_finetune_runs.csv`, `eval/real_doc_eval.csv`, `eval/efficiency_comparison.csv`,
+`eval/loss_history.csv`; figures in `docs/figures/finetune_eval/`.)*
+
+§4.8 found no off-the-shelf model beats Surya and scoped fine-tuning as the justified next step
+(§7). This section reports that experiment's actual result: **fine-tuning neither model beat the
+existing, zero-additional-training pipeline**, and one of the two models failed to produce usable
+output on real documents at all.
+
+**Scope, precisely.** §7's original future-work item envisioned fine-tuning a *recogniser* on
+cropped Khmer word/cell images — a narrower task than what was actually tried here. What this
+section reports is a different, more ambitious design: a single vision-language model performing
+**layout detection and transcription together, in one forward pass** — full page image in, one
+JSON list of `{box_2d, label, text}` per region out — rather than the two-stage detect-then-read
+pipeline this report's own architecture (§2) uses. This distinction matters for §7's revised
+future work below: this section's negative result rules out one specific fine-tuning strategy, not
+fine-tuning in general.
+
+**Setup.** Both models were fine-tuned via LoRA/QLoRA (Unsloth, free/low-cost Colab T4/L4 GPUs) on
+`Soxavin/ardb-sft-v5` — an era-stratified, 101-document ARDB market-bulletin training split (both
+of the corpus's structural table layouts represented in every split). **Gemma 4 E2B** (5.2B
+params; 4-bit QLoRA base + 16-bit LoRA, r=32; 73.85M / 1.42% trainable) and **Qwen3.5-0.8B** (866M
+params; 16-bit LoRA, r=16, no quantization per Unsloth's own guidance against 4-bit for this
+model; 13.18M / 1.52% trainable) were each swept at 2, 3, and 5 epochs, with effective batch size
+held constant at 4 across both models so epoch counts are directly comparable, not confounded by a
+simultaneous batch-size change.
+
+**Finding 1 — epoch count is non-monotonic for both models, independently.** JSON parse-failure
+rate on the (in-distribution) synthetic validation split, 9 rows:
+
+| Epochs | Gemma 4 E2B | Qwen3.5-0.8B |
+|---|---|---|
+| 2 | 9/9 (100%) | 9/9 (100%) |
+| **3** | **3/9 (33%)** | **7/9 (78%)** |
+| 5 | 8/9 (89%) | 9/9 (100%) |
+
+3 epochs is the best-performing point for **both** models on this 101-row dataset; both fewer and
+more epochs made structural reliability *worse*, not better — a genuine local optimum, not run-to-
+run noise. The 5-epoch degradations are qualitatively distinct failure modes, not just "still bad
+the same way": 5-epoch Gemma produced corrupted key names plus fabricated pseudo-XML tags mid-
+generation (content matching no schema seen in training); 5-epoch Qwen produced runaway,
+non-terminating generation that invented an entirely new tag vocabulary, taking 7+ minutes/row
+(7 of 9 rows hit the 4096-token generation cap). See `docs/figures/finetune_eval/parse_failure_rate_by_run.png`
+and `docs/figures/finetune_eval/cer_by_run.png`.
+
+**Why not extend to the mentor-suggested ~10 epochs (a grokking consideration).** The suggestion to
+try ~10 epochs invoked *grokking* (Power et al., 2022) — the observation that some models sit at
+poor validation performance for a long time after training loss saturates, then suddenly jump to
+strong generalisation, but only after **10–100× more optimizer steps past that saturation point**,
+not a modest increase. On this dataset (~26 steps/epoch), 10 epochs is ~260 steps; training loss
+already saturates (drops to ~0.002–0.006) by step ~40–50 in every run logged here, so 10 epochs
+sits inside the same regime already swept, not meaningfully further along a grokking trajectory.
+More importantly, the *shape* of what was observed argues against the hypothesis rather than for
+it: grokking's signature is a **flat** pre-transition plateau, not active degradation, but 5 epochs
+was measurably *worse* than 3 for both models — new failure modes, not persistently-bad old ones —
+consistent with ordinary LoRA instability on a 101-row dataset, not a stalled-but-stable pre-grok
+state. Grokking is also most robustly demonstrated on small algorithmic tasks trained from scratch
+with strong weight decay over very long horizons; LoRA fine-tuning a large pretrained
+vision-language model on natural structured output, with modest weight decay (0.001) over a short
+horizon, is a materially different regime. A genuine test of the hypothesis would need a dedicated
+run on the order of 50–100+ epochs with validation tracked continuously throughout — a real,
+separate experiment (§7), not a natural extension of this sweep.
+
+**Finding 2 — on real, out-of-distribution documents, the existing pipeline wins outright.** Each
+model's best-tested adapter (3 epochs) was scored against the same 15 hand-verified, held-out ARDB
+pages used as the real-document baseline (§4.2–§4.3) — pages neither model saw during training:
+
+| Approach | Cell_Acc | Numeric_Cell_Acc | Table_CER | Document_CER | Grid shape match | Parse failures |
+|---|---|---|---|---|---|---|
+| **Surya (no fine-tune)** | **0.595** | **0.732** | **0.211** | **0.411** | **0.133** | **0/15** |
+| Gemma 4 E2B (3 epochs) | 0.348 | 0.396 | 0.611 | 0.654 | 0.000 | 0/15 |
+| Qwen3.5-0.8B (3 epochs) | — | — | — | — | — | **15/15** |
+
+Surya — the existing, already-shipped, zero-additional-training pipeline — outperforms both
+fine-tuned models on every measured axis. Qwen fails to produce a single parseable page on real
+documents; its raw output shows corrupted key names, mismatched quote characters, and brackets
+swapped for parentheses — a deeper failure class than a bracket-repair post-processing step (used
+to recover some of Gemma's malformed JSON) can fix. See
+`docs/figures/finetune_eval/real_doc_comparison.png`.
+
+**Cost.** Neither model is expensive to iterate on: Gemma's 3-epoch run took 884.2s (~15 min) on an
+L4; Qwen's comparable run took well under 400s. The result is a genuine capability gap at this data
+scale, not a resource-constrained shortcut that more budget would trivially fix.
+
+**Read.** Two findings point the same direction. First, both models independently peak at the same
+epoch count on the same dataset, and both degrade in kind (not just degree) past it — the
+underlying limitation looks like *data scale*, not a per-model quirk correctable by hyperparameter
+search. Second, the in-distribution synthetic-validation numbers (Finding 1) are meaningfully
+better than the out-of-distribution real-document numbers (Finding 2) for both models — expected,
+since the synthetic split's fixed template labels are correct by construction, so it partly tests
+"did the model memorize the template" rather than "did it read the page." The real-document result
+is the one that matters for deployment, and on that measure the already-shipped pipeline wins
+without having required any of this fine-tuning effort. This does not close the door on fine-tuning
+as a strategy (§7) — it rules out *this specific* full-page, joint-detection-and-transcription
+design at this data scale, which is a narrower and more useful conclusion than "fine-tuning
+doesn't work."
 
 ---
 
@@ -321,22 +426,42 @@ behaviour on no-table pages.
 - **Preprocessing tested only on a synthetic proxy** — the OpenCV stack was A/B-tested on
   *synthetically degraded* input (§4.6) and gives a modest, consistent gain, but has not yet been
   validated on a *real scanned* document (synthetic degradation ≠ real scan artifacts).
+- **Fine-tuning results (§4.10) are single-seed** — every training run is one random seed, not
+  averaged over repeated runs (GPU cost was an explicit, managed constraint throughout), so there
+  are no confidence intervals on any fine-tuning number. Trends are corroborated across two
+  independent model families reaching the same epoch-count optimum, which is stronger evidence
+  than either model alone, but individual point estimates should be read as directional, not
+  statistically tested. The real-document fine-tuning comparison also rests on the same 15-page
+  evaluation set as §4.9's `n=2` layout generalisation caveat above — real-world numbers there are
+  indicative, not statistically robust, for the same underlying data-scarcity reason.
 
 ---
 
 ## 7. Future Work
-1. **Khmer recogniser fine-tuning** — the off-the-shelf recogniser A/B is **done** (§4.8): no turnkey
-   model beats Surya (Tesseract weaker on tables; Qwen2.5-VL-7B 4-bit collapses; open Khmer-specific
-   models are only hobby-grade line recognisers). The justified next step is a **fine-tuning**
-   experiment — a recogniser on real and/or synthetic Khmer word data — to try to beat Surya. The recall
-   taxonomy (§4.9) reinforces this: **96% of residual misses are recognition, not layout**, concentrated in
-   a systematic `៛`-glyph confusion and Khmer subscript substitutions — so a cheap **deterministic
-   `៛`-normalisation post-processing rule** is a high-leverage near-term recall win *before* the full fine-tune.
-2. **Layout/structure exploration** — a separate A/B on the *detection* axis (DocLayout-YOLO, PaddleOCR
+1. **Khmer fine-tuning — done, but only one design tested; a narrower one remains open.** The
+   full-page, joint-detection-and-transcription VLM fine-tune (§4.10) is complete and did not beat
+   Surya on real documents. What §4.8 originally scoped, however, was narrower: a **recogniser**
+   fine-tuned on cropped Khmer word/cell images, not a full-page multi-task VLM. That narrower
+   experiment is still untried and may behave differently — a single-cell/single-line
+   transcription task is a much smaller, more constrained target than emitting a whole page's
+   structured JSON in one pass, and could plausibly avoid the format-reliability failures (§4.10)
+   that dominated the design actually tested. The recall taxonomy (§4.9) still motivates this
+   directly: **96% of residual misses are recognition, not layout**, concentrated in a systematic
+   `៛`-glyph confusion and Khmer subscript substitutions — so a cheap **deterministic
+   `៛`-normalisation post-processing rule** remains a high-leverage near-term recall win
+   independent of whichever fine-tuning path (if any) is pursued next.
+2. **A properly-scoped grokking test (§4.10)**, if pursued: a dedicated run of ~50-100+ epochs on
+   the existing 101-row dataset with validation tracked continuously (not just start/end), to
+   determine whether the flat-then-degrading pattern observed at 2/3/5 epochs is a local artifact
+   or genuinely rules out a much-longer-horizon transition. Real GPU cost to budget before
+   committing to it, distinct from the epoch sweep already completed.
+3. **Layout/structure exploration** — a separate A/B on the *detection* axis (DocLayout-YOLO, PaddleOCR
    PP-Structure, more of the PaddlePaddle stack vs Surya-layout + SLANet) targeting table fragmentation.
-3. **More real labelled data**, including scanned documents, to harden the evaluation and test the
-   preprocessing stack on real (not synthetic) degradation.
-4. **Column-fragmentation reconstruction** at the layout level, and recovering the residual stitched
+4. **More real labelled data**, including scanned documents, to harden the evaluation and test the
+   preprocessing stack on real (not synthetic) degradation — also the most direct lever on §4.10's
+   fine-tuning result, which is trained and evaluated on the same 101-document/15-page data scale
+   throughout.
+5. **Column-fragmentation reconstruction** at the layout level, and recovering the residual stitched
    row over-production (near-duplicate splits / recognition hallucinations on harder pages).
 
 ---
@@ -352,6 +477,13 @@ correctness. What remains is a contained
 engineering problem (gating the hybrid on no-table pages), not an open research wall. This precisely scopes the path to the "ultimate Khmer table extractor"
 and is a defensible, evidence-backed thesis result.
 
+We also tested whether a fine-tuned model could simply replace this pipeline outright (§4.10):
+across two model families and an epoch sweep for each, it could not — the existing pipeline wins
+on every real-document metric measured, at zero additional training cost. This is a useful negative
+result, not a dead end: it rules out one specific fine-tuning design (full-page, joint
+detection-and-transcription) rather than the strategy in general, and leaves a narrower, more
+tractable recogniser-only fine-tune (§7) as the remaining untested path.
+
 ---
 
 ### Appendix — reproducibility
@@ -360,3 +492,12 @@ and is a defensible, evidence-backed thesis result.
 - Re-run: `uv run python -m khmer_pipeline.evaluation.run_benchmark` → `analyze_benchmark` →
   `visualize_benchmark`. Each run folder carries a `manifest.json` (git commit, versions, datasets).
 - Engines: `OCR_ENGINE=surya|tesseract|hybrid`. Figures: `docs/figures/`.
+- **Fine-tuning (§4.10)**: training notebooks `scripts/colab_gemma4_e2b_finetune.ipynb` /
+  `scripts/colab_qwen35_finetune.ipynb`; real-doc scoring `scripts/eval_finetune_real.py` (run
+  against predictions from `scripts/colab_eval_real.ipynb`); run logs
+  `eval/gemma_finetune_runs.md` / `eval/qwen_finetune_runs.md` (narrative) with
+  `eval/*_finetune_runs.csv` (structured); `eval/real_doc_eval.csv`,
+  `eval/efficiency_comparison.csv`, `eval/loss_history.csv`. Figures + a plain-language guide to
+  each one: `docs/figures/finetune_eval/README.md`. Regenerate all four figures via
+  `scripts/plot_run_metrics.py` and `scripts/plot_real_doc_comparison.py` (exact commands in that
+  README).
