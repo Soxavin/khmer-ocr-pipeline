@@ -15,6 +15,12 @@ zero. Rendered as an explicit "no output" annotation instead of a bar, on BOTH p
 treating it as a 0-height bar would misleadingly imply a defined-but-bad score on the CER panel
 (where a real 0 would mean a PERFECT score, the opposite of the truth).
 
+The file this script writes is the LEAN render (see plot_run_metrics.py's header for the
+two-tier arrangement): everything above stays, but the figure-level footnote restating Qwen's
+15/15 failures in prose does not -- it lives on the full-detail block in
+scripts/plot_finetune_dashboard.py, drawn by this module's own compose function with
+`detail=True`.
+
 CLI:
     python scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/finetune_eval/real_doc_comparison.png
 """
@@ -123,8 +129,18 @@ def _no_output_note(df: pd.DataFrame) -> str:
     return "  ".join(parts)
 
 
-def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
-    fig, (ax_hi, ax_lo) = plt.subplots(1, 2, figsize=(13, 6))
+def compose_real_doc_comparison(container, df: pd.DataFrame, *, detail: bool = False,
+                                title_y: float = 1.19, legend_y: float = 1.05,
+                                note_y: float = -0.03, heading_prefix: str = "") -> None:
+    """Draws the two-panel real-document comparison into `container` (a Figure for the standalone
+    file, a SubFigure for the dashboard poster).
+
+    Lean vs. `detail=True` differ only in the figure-level footnote spelling out Qwen's 15/15
+    parse failures. Everything else here is load-bearing at any density and stays on both: the
+    per-bar value labels are the numbers a viewer is meant to compare, and the "no output"
+    markers are what stop an empty slot being read as a score of zero -- which on the CER panel
+    would mean a PERFECT transcription, the exact opposite of what happened."""
+    ax_hi, ax_lo = container.subplots(1, 2)
     # Left panel is a genuinely bounded [0, 1] metric family (accuracy/match rate), so a fixed
     # 1.05 ceiling is meaningful -- 1.0 means "perfect". Right panel (CER) is unbounded and its
     # visible values top out well under 1.0 here, so scaling it to the left panel's ceiling
@@ -135,16 +151,25 @@ def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
     _panel(ax_hi, df, _HIGHER_IS_BETTER, "Higher is better", ylim_top=1.05)
     _panel(ax_lo, df, _LOWER_IS_BETTER, "Lower is better", ylim_top=lower_ylim)
     handles, labels = ax_hi.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=3)
-    note = _no_output_note(df)
+    container.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, legend_y), ncol=3)
+    note = _no_output_note(df) if detail else ""
     if note:
-        fig.text(0.5, -0.03, textwrap.fill(note, 120), ha="center", va="top", fontsize=NOTE_SIZE,
-                 style="italic", color="0.35", linespacing=1.5)
+        container.text(0.5, note_y, textwrap.fill(note, 120), ha="center", va="top",
+                       fontsize=NOTE_SIZE, style="italic", color="0.35", linespacing=1.5)
     n_pages = df["n_pages"].dropna()
     pages_phrase = f"same {int(n_pages.iloc[0])} hand-verified ARDB pages" if len(n_pages) else "same held-out ARDB pages"
-    titled(fig, f"Real-document evaluation: {pages_phrase}, all three approaches",
+    titled(container,
+           heading_prefix + f"Real-document evaluation: {pages_phrase}, all three approaches",
            "The existing OCR pipeline wins on every metric measured — with no fine-tuning at all.",
-           y=1.19)
+           y=title_y)
+
+
+def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
+    """Writes the standalone real-document figure -- always the LEAN render. The file at this path
+    is what slides and docs/REPORT.md embed; the annotated version of the same chart is a block on
+    finetune_dashboard.png, never a second file here."""
+    fig = plt.figure(figsize=(13, 6))
+    compose_real_doc_comparison(fig, df)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)

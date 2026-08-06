@@ -1,6 +1,7 @@
 # Fine-tune evaluation figures
 
-Five charts from the Gemma 4 E2B / Qwen3.5-0.8B ARDB fine-tuning work: an overview of the whole
+Five charts (plus one full-detail reference sheet, described below) from the Gemma 4 E2B /
+Qwen3.5-0.8B ARDB fine-tuning work: an overview of the whole
 experiment, the epoch sweep for each model (2, 3, and 5 epochs on the `Soxavin/ardb-sft-v5`
 dataset), and how the best config from each compares against the existing production OCR
 pipeline on real documents. Full numbers and narrative live in `eval/gemma_finetune_runs.md`,
@@ -20,9 +21,39 @@ at this data scale, not an optimizer or training-setup issue.
 time, and this README; a presentation viewer has a projector, no prose, and about forty seconds.
 Sizing for the harder case — larger type throughout, the key finding marked on the chart itself,
 a factual one-line subtitle under every title — also improves the report render, since a report
-embeds these PNGs scaled *down* to column width. There is deliberately only one set of files
-rather than separate "slide" and "report" exports; the only difference would have been a scale
-factor, at the cost of doubling every artifact and every explanation below.
+embeds these PNGs scaled *down* to column width. There is deliberately no separate "slide" and
+"report" export of any chart: the only difference would have been a scale factor, at the cost of
+doubling every artifact and every explanation below. (The lean/detail split described next is a
+different axis — how much *text* a figure carries, not how big it is — and it produces one extra
+image in total, not a second copy of each.)
+
+---
+
+## Two tiers: five lean charts, one detail sheet
+
+The five numbered files below are **lean**. They carry a title, a one-line finding, axis labels,
+a legend and the data — and not much else. Anything a viewer would have to *read* rather than
+*see* has been pulled off them: per-point sample sizes (`n=`), per-run step counts and dates,
+and the italic footnotes explaining conventions. Those charts had reached the point where the
+text was doing work the shape of the data already does, and on a slide the text wins the
+attention while the finding loses it.
+
+That detail wasn't thrown away. It all lives on one extra image:
+
+### `finetune_dashboard.png` — the full-detail reference sheet
+
+![Fine-tune evaluation dashboard](finetune_dashboard.png)
+
+A 2×2 sheet holding the fully-annotated version of charts 1–4 (the overview chart, 0, is
+already minimal and isn't repeated). Every `n=`, step count, date and footnote the lean charts
+drop is on it. It is **not** a presentation asset — it's read on screen at reference scale, so
+it's much denser and its type is sized for a laptop, not a projector. Open it when a specific
+follow-up question gets asked ("how many pages was that average over?", "which of the two
+3-epoch runs is that point?").
+
+Both tiers come out of the same drawing code: each chart's `compose_*()` function takes a
+`detail` flag, the standalone file calls it one way and the dashboard the other. A lean chart
+and its dashboard block therefore cannot drift out of sync, because they are not two charts.
 
 (The four images one level up in `docs/figures/` — `accuracy_by_font.png`, `cer_by_dataset.png`,
 `engine_comparison.png`, `table_fragmentation.png` — are from earlier, separate OCR-engine
@@ -108,10 +139,12 @@ failure rate anywhere on the chart, and at equal visual weight it reads as part 
 suggests the opposite conclusion — while actually measuring a different dataset under different
 ground truth. Qwen has only `v5` data, so its line is always solid.
 
-Only points that need disambiguating are labelled: where two runs of the same model share an
-epoch count, each is annotated with its dataset version and step count (two runs can share an
-epoch count but differ in effective batch size), plus a date where even those are identical.
-Isolated points are left unlabelled — their position already identifies them.
+**Which run is which point** is not on this file. Where two runs of the same model share an
+epoch count they differ in dataset version, in step count (i.e. effective batch size), or — for
+one identical-config repeat — only in date. That provenance is labelled per point on
+`finetune_dashboard.png`, and written out in `eval/*_finetune_runs.md`. The 3-epoch band is
+left uncaptioned here for the same reason: the subtitle already names the finding, so a caption
+would be the third statement of it on one image.
 
 **Takeaway**: for both models, 3 epochs is the best-performing point in the sweep — both
 fewer (2) and more (5) epochs produced *more* failures, not fewer, and with epoch count on
@@ -135,18 +168,21 @@ more relevant point into an unreadable cluster near zero.
 Color is content label (see the shared legend at top); line style is dataset version (solid
 `v5`, dashed `v2` — same meaning as chart 2).
 
-**Two things are marked that a plain line chart would hide.** First, each point is annotated
-with `n=`, how many pages that average is based on, and any point resting on **3 pages or fewer
-is drawn hollow** rather than filled. A point based on `n=1` is a single document, not a trend,
-and shouldn't be read with the same confidence as one based on `n=12`; the hollow fill is there
-so that distinction survives being glanced at rather than read. Second, an epoch column with no
-line at all is labelled **"no CER — every page failed to parse."** Qwen's 2- and 5-epoch runs
-were both run and both produced nothing scorable; an empty column with no note would read as
-"we didn't try that," when in fact the emptiness *is* the finding.
+**One thing is marked that a plain line chart would hide**: an epoch column with no line at all
+is labelled **"no CER — every page failed to parse."** Qwen's 2- and 5-epoch runs were both run
+and both produced nothing scorable; an empty column with no note would read as "we didn't try
+that," when in fact the emptiness *is* the finding. That stays on the lean chart because it
+prevents a misreading, not because it adds detail.
 
-The italic note at the bottom flags a specific case worth knowing about: Qwen's two "3 epoch"
-points aren't duplicates — they used a different gradient-accumulation setting (different
-effective batch size), which is why they have different step counts despite the same epoch count.
+**Sample sizes are not on this file — read them off the dashboard before citing any point.**
+Each point is an average over however many pages parsed on that run, which ranges from 12 down
+to 1. A point based on one document is not a trend, and it looks exactly like a point based on
+twelve here. `finetune_dashboard.png` labels every point with its `n=` and draws any point
+resting on 3 pages or fewer hollow; it also carries the footnote about Qwen's two "3 epoch"
+points not being duplicates (they used a different gradient-accumulation setting, hence
+different step counts at the same epoch count). Those were on this chart until the per-point
+labels became the loudest thing on it — a caveat nobody reads because the chart is too busy is
+worth less than a clean chart plus a sheet that states it.
 
 **Takeaway**: CER trends broadly track the parse-failure chart, but sample sizes shrink a
 lot at the worse-performing runs (fewer pages parse → fewer pages to average), so the
@@ -170,6 +206,9 @@ project's history (an earlier Gemma run, not shown on this specific chart) still
 failures out of 9 validation pages. Use this chart alongside charts 2 and 3, never instead of
 them.
 
+The legend names each run by its epoch count only. Step counts (which identify the exact run in
+`eval/loss_history.csv`) are on the dashboard version of this panel.
+
 Colour here means **epoch count**, not model (the model is the panel), and because epoch count
 is an ordered quantity the three runs use one hue from light to dark — more epochs = darker —
 rather than three unrelated colours. That ordering is readable without consulting the legend and
@@ -188,13 +227,14 @@ generalization/reliability issue, not a training-failure issue.
 - **Every run is a single seed.** Nothing here is averaged over repeated runs with different
   random seeds (Colab GPU time was a real, repeatedly-managed cost constraint throughout this
   project), so there are no error bars or confidence intervals on any chart. Read point-to-point
-  differences as directional trends confirmed across two independent model families (see chart
-  3's `n=` counts for how much data backs any one point), not as statistically tested results.
+  differences as directional trends confirmed across two independent model families (the
+  dashboard sheet's `n=` labels say how much data backs any one point), not as statistically
+  tested results.
   The 3-epoch highlight band on charts 0, 2 and 3 marks where the observed minimum falls; it
   carries no statistical claim beyond that.
 - **Colors are chosen to be colorblind-safe** (the Okabe-Ito palette), and every series that
   needs to survive grayscale printing also varies by marker shape, linestyle, marker fill
-  (hollow = thin sample), or hatch pattern — never by color alone. This is verified by actually
+  (hollow = thin sample, dashboard only), or hatch pattern — never by color alone. This is verified by actually
   converting each rendered PNG to grayscale and re-reading it, not assumed: that check is what
   caught the OCR-pipeline and Gemma *bars* desaturating to the same tone (now hatched), and what
   drove replacing Okabe-Ito's yellow — which fails a colorblind-palette lightness check outright
@@ -212,9 +252,13 @@ Use whichever your report tool handles better; the content is identical either w
 uv run python3 scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv --out-dir docs/figures/finetune_eval
 uv run python3 scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/finetune_eval/real_doc_comparison.png
 uv run python3 scripts/plot_finetune_story.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv --real-doc-csv eval/real_doc_eval.csv --out docs/figures/finetune_eval/finetune_story_overview.png
+uv run python3 scripts/plot_finetune_dashboard.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv --real-doc-csv eval/real_doc_eval.csv --out docs/figures/finetune_eval/finetune_dashboard.png
 ```
 
-All three scripts read directly from the `eval/*.csv` run logs and share `scripts/_report_style.py`
+Run all four — the dashboard is built from the same functions as the three chart scripts, so it
+goes stale the moment one of them changes and nobody re-runs it.
+
+All four scripts read directly from the `eval/*.csv` run logs and share `scripts/_report_style.py`
 (palette, type scale, the 3-epoch highlight helper, the title/subtitle treatment), so figures
 always reflect whatever is currently logged there and stay visually consistent with each other —
 re-run them after logging any new fine-tune result.

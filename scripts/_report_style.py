@@ -223,13 +223,18 @@ def apply_report_style() -> None:
     })
 
 
-def save_all_formats(fig, png_path) -> list[Path]:
+def save_all_formats(fig, png_path, dpi: int = REPORT_DPI) -> list[Path]:
     """Saves a PNG (report DPI) and a same-named PDF (vector, infinite-resolution) alongside
     it -- a report that gets resized or printed has a lossless option available, not just the
-    fixed-DPI raster. Returns both paths written."""
+    fixed-DPI raster. Returns both paths written.
+
+    `dpi` is overridable for the one figure that isn't a report/slide figure: the full-detail
+    dashboard poster is several times the canvas size of a normal chart, so keeping it at the
+    slide DPI would produce a ~40-megapixel PNG for something that is read on screen at
+    reference scale. The PDF stays vector either way."""
     png_path = Path(png_path)
     pdf_path = png_path.with_suffix(".pdf")
-    fig.savefig(png_path, dpi=REPORT_DPI)
+    fig.savefig(png_path, dpi=dpi)
     fig.savefig(pdf_path)
     return [png_path, pdf_path]
 

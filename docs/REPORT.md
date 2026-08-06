@@ -502,5 +502,12 @@ tractable recogniser-only fine-tune (§7) as the remaining untested path.
   `eval/efficiency_comparison.csv`, `eval/loss_history.csv`. Figures + a plain-language guide to
   each one: `docs/figures/finetune_eval/README.md`. Regenerate all five figures via
   `scripts/plot_run_metrics.py`, `scripts/plot_real_doc_comparison.py` and
-  `scripts/plot_finetune_story.py` (exact commands in that README); all three share
+  `scripts/plot_finetune_story.py` (exact commands in that README); all share
   `scripts/_report_style.py` for palette, type scale and figure conventions.
+  The five figures cited above are the lean, presentation-scale renders. Their full-detail
+  counterparts — per-point sample sizes (`n=`), per-run step counts and dates, and the
+  linestyle/thin-sample footnotes — are collected on one reference sheet,
+  `docs/figures/finetune_eval/finetune_dashboard.png` (built by
+  `scripts/plot_finetune_dashboard.py` from the same drawing code, so it can't disagree with
+  them). Nothing in this section depends on it; it's there for follow-up questions about a
+  specific point on a specific chart.

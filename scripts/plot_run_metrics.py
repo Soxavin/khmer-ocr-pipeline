@@ -7,6 +7,13 @@ different models with partly different columns) -- this script is what combines 
 one comparison chart, the "CER & visualize" proof artifact requested directly by the mentor,
 not eyeballed from prose.
 
+The files this script writes are the LEAN renders -- title, axes, legend and the data, with the
+per-point sample sizes, run provenance and footnotes stripped out, because those files are what
+goes on a slide and into docs/REPORT.md. Each chart's `compose_*` function also takes
+`detail=True`, which puts all of that back; the only caller of that is
+scripts/plot_finetune_dashboard.py, which assembles the four full-detail versions into a single
+reference sheet. Same draw code either way, so the two densities can't drift apart.
+
 CLI:
     python scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv --out-dir docs/figures/finetune_eval
     python scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv \
@@ -228,7 +235,16 @@ def _run_label_lookup(df: pd.DataFrame) -> dict[str, str]:
     return lookup
 
 
-def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
+def cer_figsize(df: pd.DataFrame) -> tuple[float, float]:
+    """Standalone-figure size for the CER chart -- one panel per model, so it widens with the
+    model count. Exposed because compose_cer_by_run draws into a container it is *given* (a
+    Figure or a dashboard SubFigure) and therefore can't size the canvas itself."""
+    return (7.5 * len(df["model"].unique()), 6.0)
+
+
+def compose_cer_by_run(container, df: pd.DataFrame, *, detail: bool = False,
+                       title_y: float = 1.16, legend_y: float = 1.06,
+                       note_y: float = -0.06, heading_prefix: str = "") -> list:
     """One panel per model, one line per (content label, dataset version) within it, CER vs.
     EPOCH COUNT (skipping rows with no computable CER, e.g. a run where every validation row
     failed to parse). Split into per-model panels rather than one shared axis for two reasons:
@@ -243,12 +259,27 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
     point that collides on epoch count (a same-config rerun, or a different-batch-size run at
     the same epoch count) is jittered apart via _jitter_duplicate_epochs and annotated with the
     disambiguating detail (steps, or a date) rather than silently overlapping.
-    """
+
+    Draws into `container`, which is a Figure for the standalone file and a SubFigure for the
+    dashboard poster -- ONE draw path at two text densities, so the lean and detailed renders of
+    this chart cannot drift apart the way two copy-pasted plotting functions would:
+
+      detail=False (LEAN, the standalone .png/.pdf that slides and the report body use) --
+        title, axes, legend, the 3-epoch band, and the per-column "this epoch was run and
+        produced nothing scorable" note. Everything else is stripped: on a projected slide the
+        per-point n= labels, the hollow thin-sample markers that only mean anything once you've
+        read those labels, and the three-line footnote were competing with the one thing the
+        chart exists to show.
+      detail=True (the dashboard poster) -- adds the subtitle, per-point n=/step labels, hollow
+        thin-sample markers and the footnote back.
+
+    Returns a list of zero-argument callables the caller must invoke AFTER layout is final (see
+    _place_annotations: the display-space declutter is only meaningful once each axes has its
+    final size)."""
     labeled = df.dropna(subset=["label_cer"]).copy()
     labeled["dataset_short"] = labeled["dataset_version"].apply(dataset_short_label)
     models = sorted(df["model"].unique())
-    fig, axes = plt.subplots(1, len(models), figsize=(7.5 * len(models), 6.0), squeeze=False)
-    axes = axes[0]
+    axes = container.subplots(1, len(models), squeeze=False)[0]
     # Collected across panels for one shared external legend instead of a per-panel one. Colors
     # and markers now come from a fixed label->style dict (_report_style.CONTENT_LABEL_COLOR),
     # not from each panel's own cycle position, so a label missing from one panel (Qwen never
@@ -287,18 +318,21 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                                  alpha=1.0 if primary else _SECONDARY_ALPHA_CER,
                                  zorder=3 if primary else 2)
                 handles_by_label.setdefault(label, line)
-                # A point averaged over 1-3 pages is drawn hollow. The n= text below says the same
-                # thing, but only if the viewer reads it -- on a slide the shape difference is
-                # what actually lands, and it's the difference between "this line dropped" and
-                # "this line dropped according to one page." Encoded by fill, not color, so it
-                # survives grayscale and CVD alongside everything else here.
-                thin = group[group["label_n_matched"] <= _THIN_SAMPLE_N]
+                # A point averaged over 1-3 pages is drawn hollow -- detail render only. The
+                # hollow fill is a pointer to the n= label sitting next to it, not a
+                # self-explanatory encoding: with the n= labels stripped for the lean render it
+                # becomes an unanswerable question on a slide ("why is that one different?"),
+                # which costs more attention than the caveat buys. The caveat itself survives in
+                # the dashboard, the README and §4.10's prose.
+                thin = group[group["label_n_matched"] <= _THIN_SAMPLE_N] if detail else group.iloc[:0]
                 if not thin.empty:
                     ax.plot(xs[thin.index].values, thin["label_cer"], linestyle="none",
                             marker=content_label_marker(label, i), markersize=10 if primary else 7,
                             markerfacecolor="white", markeredgecolor=color, markeredgewidth=2.0,
                             alpha=1.0 if primary else _SECONDARY_ALPHA_CER, zorder=4)
-                for _, row in group.iterrows():
+                # Per-point provenance is detail-only: on the lean render these are the "wall of
+                # grey text" the chart is being stripped of.
+                for _, row in (group.iterrows() if detail else []):
                     n = row["label_n_matched"]
                     if pd.isna(n):
                         continue
@@ -314,12 +348,14 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
             pending_annotations.append((ax, annotation_entries))
             ax.set_xlabel("training epochs")
             ax.set_xticks(epochs_run)
-            # Asymmetric right margin: annotations are placed to the RIGHT of their point, so the
-            # rightmost epoch's labels ran past the panel and into the gutter between panels.
-            ax.set_xlim(min(epochs_run) - 0.7, max(epochs_run) + 1.1)
+            # Asymmetric right margin on the detail render: annotations are placed to the RIGHT of
+            # their point, so the rightmost epoch's labels ran past the panel and into the gutter
+            # between panels. The lean render has no labels to make room for, and carrying the
+            # same margin there just leaves a wedge of empty panel on the right.
+            ax.set_xlim(min(epochs_run) - 0.7, max(epochs_run) + (1.1 if detail else 0.45))
         ax.set_ylabel("CER (lower is better)")
         ax.set_title(model_display_name(model))
-        ax.margins(y=0.20)
+        ax.margins(y=0.20 if detail else 0.12)
         # CER can never be negative -- margins() extends symmetrically for annotation headroom
         # above the highest point, but the same symmetric extension below 0 would be dishonest
         # for a metric that's bounded at zero. Keep the auto top, clamp the bottom explicitly.
@@ -331,42 +367,60 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                     va="bottom", fontsize=ANNOTATION_SIZE, color="0.35", style="italic",
                     linespacing=1.4)
 
-    notes = ["line style = dataset version (solid = v5, the controlled sweep; dashed = v2, an "
-             "earlier/smaller dataset, faded); hollow marker = averaged over "
-             f"{_THIN_SAMPLE_N} pages or fewer"]
-    for model, mgroup in df.groupby("model"):
-        meta = mgroup[["run_id", "dataset_version", "epochs", "steps"]].drop_duplicates()
-        for (ds, ep), sub in meta.groupby(["dataset_version", "epochs"]):
-            steps_here = sorted(sub["steps"].dropna().unique())
-            if len(steps_here) > 1:
-                steps_str = " vs. ".join(str(int(s)) for s in steps_here)
-                notes.append(f"{model_display_name(model)}'s {dataset_short_label(ds)}, "
-                              f"{int(ep)}-epoch runs differ in step count ({steps_str} steps = "
-                              f"different effective batch size), not duplicate configs")
-    fig.text(0.5, -0.06, textwrap.fill("Note: " + "; ".join(notes) + ".", _NOTE_WRAP),
-             ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
-             linespacing=1.5)
+    if detail:
+        notes = ["line style = dataset version (solid = v5, the controlled sweep; dashed = v2, an "
+                 "earlier/smaller dataset, faded); hollow marker = averaged over "
+                 f"{_THIN_SAMPLE_N} pages or fewer"]
+        for model, mgroup in df.groupby("model"):
+            meta = mgroup[["run_id", "dataset_version", "epochs", "steps"]].drop_duplicates()
+            for (ds, ep), sub in meta.groupby(["dataset_version", "epochs"]):
+                steps_here = sorted(sub["steps"].dropna().unique())
+                if len(steps_here) > 1:
+                    steps_str = " vs. ".join(str(int(s)) for s in steps_here)
+                    notes.append(f"{model_display_name(model)}'s {dataset_short_label(ds)}, "
+                                  f"{int(ep)}-epoch runs differ in step count ({steps_str} steps = "
+                                  f"different effective batch size), not duplicate configs")
+        container.text(0.5, note_y, textwrap.fill("Note: " + "; ".join(notes) + ".", _NOTE_WRAP),
+                       ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
+                       linespacing=1.5)
 
-    titled(fig, "Per-label CER vs. epoch count (one panel per model, own y-scale)",
-           "n = pages behind each average. It shrinks as parse failures rise, so the "
-           "worst-performing runs are also the ones resting on the least data.",
-           y=1.16)
+    titled(container,
+           heading_prefix + "Per-label CER vs. epoch count (one panel per model, own y-scale)",
+           ("n = pages behind each average. It shrinks as parse failures rise, so the "
+            "worst-performing runs are also the ones resting on the least data."
+            if detail else None),
+           y=title_y)
     if handles_by_label:
         ordered_labels = sorted(handles_by_label)
-        fig.legend([handles_by_label[l] for l in ordered_labels], ordered_labels,
-                   loc="upper center", bbox_to_anchor=(0.5, 1.06), ncol=len(ordered_labels))
+        container.legend([handles_by_label[l] for l in ordered_labels], ordered_labels,
+                         loc="upper center", bbox_to_anchor=(0.5, legend_y),
+                         ncol=len(ordered_labels))
+    # Deferred: the display-space declutter has to measure each axes' FINAL geometry, which the
+    # caller only establishes after tight_layout()/subplots_adjust(). Wider dx/min_gap than the
+    # parse-failure chart: this chart's points cluster much more tightly (all five of Qwen's
+    # scorable points sit at 3 epochs), so a label offset that clears its own marker still landed
+    # on a *neighbouring* label's marker at the default spacing.
+    return [lambda ax=ax, e=entries: _place_annotations(ax, e, min_gap=20, dx=18)
+            for ax, entries in pending_annotations]
+
+
+def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
+    """Writes the standalone CER figure. Always the LEAN render -- the file at this path is what
+    slides and docs/REPORT.md embed; the annotated version of the same chart is a block on
+    finetune_dashboard.png (plot_finetune_dashboard.py), never a second file here. See
+    compose_cer_by_run for the chart itself."""
+    fig = plt.figure(figsize=cer_figsize(df))
+    finishers = compose_cer_by_run(fig, df)
     fig.tight_layout()
-    # After tight_layout so the display-space declutter measures each axes' final geometry.
-    # Wider dx/min_gap than the parse-failure chart: this chart's points cluster much more tightly
-    # (all five of Qwen's scorable points sit at 3 epochs), so a label offset that clears its own
-    # marker still landed on a *neighbouring* label's marker at the default spacing.
-    for ax, entries in pending_annotations:
-        _place_annotations(ax, entries, min_gap=20, dx=18)
+    for finish in finishers:
+        finish()
     save_all_formats(fig, out_path)
     plt.close(fig)
 
 
-def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
+def compose_parse_failure_rate_by_run(container, df: pd.DataFrame, *, detail: bool = False,
+                                      title_y: float = 1.08, note_y: float = -0.02,
+                                      heading_prefix: str = "") -> list:
     """One point per run (deduplicated by run_id -- json_parse_failures/n_validation_rows is a
     run-level number, repeated across that run's per-label rows in the flat CSV). x = EPOCH
     COUNT, the actual sweep variable -- not run order. This is the single most load-bearing
@@ -381,9 +435,16 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
     always solid). A same-model/same-epoch pair that used a different effective batch size
     (Qwen's two 3-epoch runs, 39 vs. 78 steps) or is a same-config rerun (Gemma's v2-run2/run3)
     would otherwise land on the exact same point -- jittered apart via _jitter_duplicate_epochs
-    and annotated with the disambiguating detail instead of silently overlapping."""
+    and annotated with the disambiguating detail instead of silently overlapping.
+
+    Draws into `container` (Figure for the standalone file, SubFigure for the dashboard poster);
+    `detail=False` is the lean render. Lean keeps the title, the one-line finding, the axes, the
+    legend and the 3-epoch band -- the band and the two V-shapes ARE the finding, and the band's
+    text caption, the per-point 'v5, 52 steps' provenance labels and the linestyle footnote were
+    all restating in words what the reader is already looking at. `detail=True` puts all three
+    back for the dashboard. Returns post-layout callables (see compose_cer_by_run)."""
     per_run = df.drop_duplicates(subset=["run_id"]).copy()
-    fig, ax = plt.subplots(figsize=(11.5, 6.5))
+    ax = container.subplots()
     annotation_entries: list[tuple[float, float, str, float]] = []
     if per_run.empty or per_run["n_validation_rows"].isna().all():
         ax.text(0.5, 0.5, "no run data yet", ha="center", va="center", transform=ax.transAxes)
@@ -391,8 +452,11 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
         per_run["failure_rate"] = per_run["json_parse_failures"] / per_run["n_validation_rows"]
         per_run["dataset_short"] = per_run["dataset_version"].apply(dataset_short_label)
 
-        # Drawn before any series so the band sits behind the lines.
-        highlight_epoch(ax, HIGHLIGHT_EPOCH, caption="lowest failure rate\nfor both models (v5)")
+        # Drawn before any series so the band sits behind the lines. The caption is detail-only:
+        # on the lean render the subtitle already says "both models fail least at 3 epochs", so
+        # captioning the band too states the same finding three times (subtitle, caption, shape).
+        highlight_epoch(ax, HIGHLIGHT_EPOCH,
+                        caption="lowest failure rate\nfor both models (v5)" if detail else None)
 
         # Only buckets holding more than one run get per-point provenance labels -- see
         # _ambiguous_epochs. Here that's exactly the places a viewer would otherwise ask "why are
@@ -427,7 +491,7 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
             key = (f"{model_display_name(model)} — {ds}" if primary
                    else f"{model_display_name(model)} — {ds} (earlier dataset)")
             legend_handles[key] = (line, primary)
-            for _, row in group.iterrows():
+            for _, row in (group.iterrows() if detail else []):
                 if (row["model"], row["epochs"]) not in ambiguous:
                     continue
                 x = xs[row.name]
@@ -444,32 +508,56 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
         ax.set_xlim(min(epochs_present) - 0.75, max(epochs_present) + 0.75)
     ax.set_ylabel("JSON parse-failure rate (lower is better)")
     ax.set_xlabel("training epochs")
-    # Top clamp well above 1.0 (not 1.05): with up to 3 stacked annotation tiers on points
-    # that sit at failure_rate=1.0 (a common value -- several runs are 100% failures), the
-    # highest tier's point-offset text needs real data-space headroom below the title, or it
-    # renders on top of the title text (annotate() isn't clipped to the axes by default).
-    ax.set_ylim(-0.05, 1.28)
-    n_val = per_run["n_validation_rows"].dropna()
-    n_note = (f" Each point is one run scored on {int(n_val.iloc[0])} validation pages."
-              if len(n_val) and n_val.nunique() == 1 else "")
-    fig.text(0.5, -0.02, textwrap.fill(
-                 "Line style = dataset version (solid = v5, the controlled sweep; dashed = v2, "
-                 "an earlier/smaller dataset, shown faded for context only)." + n_note, _NOTE_WRAP),
-             ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
-             linespacing=1.5)
-    titled(fig, "JSON parse-failure rate vs. epoch count",
-           "Both models fail least at 3 epochs on v5; 2 and 5 epochs are worse. "
-           "One run per point — a direction, not a tested effect.",
-           y=1.08)
+    # Detail render: top clamp well above 1.0 (not 1.05) because with up to 3 stacked annotation
+    # tiers on points that sit at failure_rate=1.0 (a common value -- several runs are 100%
+    # failures), the highest tier's point-offset text needs real data-space headroom below the
+    # title, or it renders on top of the title text (annotate() isn't clipped to the axes by
+    # default). The lean render has no annotations to clear, so that headroom would just be a
+    # fifth of the panel left empty above the highest point.
+    ax.set_ylim(-0.05, 1.28 if detail else 1.1)
+    if detail:
+        n_val = per_run["n_validation_rows"].dropna()
+        n_note = (f" Each point is one run scored on {int(n_val.iloc[0])} validation pages."
+                  if len(n_val) and n_val.nunique() == 1 else "")
+        container.text(0.5, note_y, textwrap.fill(
+                           "Line style = dataset version (solid = v5, the controlled sweep; "
+                           "dashed = v2, an earlier/smaller dataset, shown faded for context "
+                           "only)." + n_note, _NOTE_WRAP),
+                       ha="center", va="top", fontsize=NOTE_SIZE, style="italic", color="0.35",
+                       linespacing=1.5)
+    # The single-seed caveat survives into the lean render, compressed to a parenthetical rather
+    # than dropped: it is the one piece of text here that changes how the finding may be CITED,
+    # and a slide is exactly where an uncaveated trend line gets over-read.
+    subtitle = ("Both models fail least at 3 epochs on v5; 2 and 5 epochs are worse. "
+                "One run per point — a direction, not a tested effect." if detail else
+                "Both models fail least at 3 epochs on v5; 2 and 5 epochs are worse "
+                "(one run per point).")
+    titled(container, heading_prefix + "JSON parse-failure rate vs. epoch count", subtitle,
+           y=title_y)
+    return [lambda: _place_annotations(ax, annotation_entries)]
+
+
+def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
+    """Writes the standalone parse-failure figure -- always the LEAN render (see plot_cer_by_run).
+    Chart itself in compose_parse_failure_rate_by_run."""
+    fig = plt.figure(figsize=(11.5, 6.5))
+    finishers = compose_parse_failure_rate_by_run(fig, df)
     fig.tight_layout()
-    # After tight_layout so the display-space declutter measures the axes' final geometry.
-    _place_annotations(ax, annotation_entries)
+    for finish in finishers:
+        finish()
     save_all_formats(fig, out_path)
     plt.close(fig)
 
 
-def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFrame,
-                      label_lookup: dict[str, str] | None = None) -> None:
+def loss_figsize(loss_df: pd.DataFrame) -> tuple[float, float]:
+    """Standalone-figure size for the loss chart -- one panel per model (see cer_figsize)."""
+    n_models = max(1, loss_df["run_id"].str.split("/").str[0].nunique()) if not loss_df.empty else 1
+    return (7.5 * n_models, 5.8)
+
+
+def compose_loss_by_run(container, loss_df: pd.DataFrame, run_meta: pd.DataFrame,
+                        label_lookup: dict[str, str] | None = None, *, detail: bool = False,
+                        title_y: float = 1.06, heading_prefix: str = "") -> list:
     """One panel per model (Gemma left, Qwen right), one line per run within it, from
     eval/loss_history.csv's long-format {model, run, step, loss} rows -- the actual per-step
     training-loss curve, not just the start/end summary logged in the narrative run logs.
@@ -482,27 +570,29 @@ def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFra
     This is a convergence sanity check, not a quality signal: a clean drop here does not imply
     good generalization (Gemma v2-run3's loss dropped just as cleanly as every other run despite
     9/9 eval JSON-parse failures -- see eval/gemma_finetune_runs.md). Use alongside
-    plot_cer_by_run/plot_parse_failure_rate_by_run, never in place of them."""
+    plot_cer_by_run/plot_parse_failure_rate_by_run, never in place of them.
+
+    Draws into `container` (Figure or dashboard SubFigure). This chart carries almost no
+    annotation to begin with, so lean vs. `detail=True` differ only in the legend: lean names
+    each run by the sweep variable alone ("3 epochs"), detail appends the step count and dataset
+    version that identify the exact run in eval/loss_history.csv. Returns post-layout callables
+    (empty here -- kept for interface symmetry with the other two compose functions)."""
     label_lookup = label_lookup or {}
     if loss_df.empty:
-        fig, ax = plt.subplots(figsize=(10, 6))
+        ax = container.subplots()
         ax.text(0.5, 0.5, "no loss history yet", ha="center", va="center", transform=ax.transAxes)
         ax.set_ylabel("training loss (log scale)")
         ax.set_xlabel("training step")
         ax.set_title("Training loss by step, across fine-tune runs")
-        fig.tight_layout()
-        save_all_formats(fig, out_path)
-        plt.close(fig)
-        return
+        return []
 
     meta_cols = [c for c in ["run_id", "dataset_version", "epochs", "steps"] if c in run_meta]
     loss_df = loss_df.merge(run_meta[meta_cols], on="run_id", how="left")
     loss_df["dataset_short"] = loss_df["dataset_version"].apply(dataset_short_label)
     models = sorted(loss_df["run_id"].str.split("/").str[0].unique())
-    fig, axes = plt.subplots(1, len(models), figsize=(7.5 * len(models), 5.8), squeeze=False,
-                             sharey=True)
-    axes = axes[0]
+    axes = container.subplots(1, len(models), squeeze=False, sharey=True)[0]
     all_epochs = sorted(loss_df["epochs"].dropna().unique())
+    multi_dataset = loss_df["dataset_short"].nunique() > 1
 
     for ax, model in zip(axes, models):
         model_loss = loss_df[loss_df["run_id"].str.startswith(model + "/")]
@@ -524,10 +614,18 @@ def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFra
             # _report_style.epoch_color); marker shape carries the same distinction for grayscale.
             color = epoch_color(epochs, all_epochs)
             marker = MARKERS[all_epochs.index(epochs) % len(MARKERS)] if epochs in all_epochs else "o"
-            display = (f"{int(float(epochs))} epochs ({int(float(steps))} steps)"
-                       if pd.notna(epochs) and pd.notna(steps)
-                       else label_lookup.get(run_id, run_id).replace("\n", ", "))
-            if dataset_short_label(ds) != _PRIMARY_DATASET:
+            # Lean legend names the sweep variable only; the step count is run provenance --
+            # useful when cross-referencing eval/loss_history.csv, noise on a slide. It stays on
+            # the lean render wherever epoch count alone would produce two identical legend
+            # entries in the same panel, since an ambiguous legend is worse than a wordy one.
+            if pd.notna(epochs):
+                display = f"{int(float(epochs))} epochs"
+                epoch_peers = (model_loss[model_loss["epochs"] == epochs]["run_id"].nunique())
+                if (detail or epoch_peers > 1) and pd.notna(steps):
+                    display += f" ({int(float(steps))} steps)"
+            else:
+                display = label_lookup.get(run_id, run_id).replace("\n", ", ")
+            if (detail or multi_dataset) and dataset_short_label(ds) != _PRIMARY_DATASET:
                 display += f" — {dataset_short_label(ds)}"
             ax.plot(group["step"], group["loss"], color=color,
                     linestyle=dataset_linestyle(ds), label=display,
@@ -545,10 +643,21 @@ def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFra
     # that appears nowhere on the chart.
     datasets_shown = sorted(loss_df["dataset_short"].dropna().unique())
     style_note = (" (solid = v5 / dashed = v2)" if len(datasets_shown) > 1 else "")
-    titled(fig, f"Training loss by step, one panel per model{style_note}",
+    # Subtitle kept on BOTH renders: this is the one chart whose visual says the opposite of its
+    # meaning if read alone -- six cleanly converging curves look like six successful runs.
+    titled(container, heading_prefix + f"Training loss by step, one panel per model{style_note}",
            "Every run converged cleanly — including the ones whose output was unusable. "
            "This is a training-process check, not a quality signal.",
-           y=1.06)
+           y=title_y)
+    return []
+
+
+def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFrame,
+                      label_lookup: dict[str, str] | None = None) -> None:
+    """Writes the standalone training-loss figure -- always the LEAN render (see plot_cer_by_run).
+    Chart itself in compose_loss_by_run."""
+    fig = plt.figure(figsize=loss_figsize(loss_df))
+    compose_loss_by_run(fig, loss_df, run_meta, label_lookup)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)
