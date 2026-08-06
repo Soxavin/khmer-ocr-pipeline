@@ -402,7 +402,7 @@ export function SettingsDrawer(props: {
                         ? `${fullLabel} (${t('contains_selected_engine')})`
                         : fullLabel}
                       onClick={() => setActiveGroup(groupName)}
-                      className={`flex flex-1 items-center justify-center gap-1.5 h-7 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                      className={`flex flex-1 items-center justify-center gap-1.5 h-6 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
                         gi > 0 ? 'border-l border-line-strong' : ''
                       } ${active ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'}`}
                     >
