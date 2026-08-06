@@ -7,9 +7,10 @@ numbers and narrative live in `eval/gemma_finetune_runs.md`, `eval/qwen_finetune
 and their `.csv` companions — these charts are the visual summary, not a replacement for
 those logs.
 
-(The other four images in this folder — `accuracy_by_font.png`, `cer_by_dataset.png`,
+(The four images one level up in `docs/figures/` — `accuracy_by_font.png`, `cer_by_dataset.png`,
 `engine_comparison.png`, `table_fragmentation.png` — are from earlier, separate OCR-engine
-benchmarking work and aren't covered by this README.)
+benchmarking work and aren't covered by this README; these fine-tune-eval figures live in their
+own `finetune_eval/` subfolder to keep the two sets of charts from mixing together.)
 
 ---
 
@@ -104,8 +105,8 @@ generalization/reliability issue, not a training-failure issue.
 ## Regenerating these figures
 
 ```bash
-uv run python3 scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv --out-dir docs/figures
-uv run python3 scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/real_doc_comparison.png
+uv run python3 scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv --out-dir docs/figures/finetune_eval
+uv run python3 scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/finetune_eval/real_doc_comparison.png
 ```
 
 Both scripts read directly from the `eval/*.csv` run logs, so figures always reflect

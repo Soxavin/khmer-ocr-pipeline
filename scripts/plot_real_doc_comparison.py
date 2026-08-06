@@ -16,7 +16,7 @@ treating it as a 0-height bar would misleadingly imply a defined-but-bad score o
 (where a real 0 would mean a PERFECT score, the opposite of the truth).
 
 CLI:
-    python scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/real_doc_comparison.png
+    python scripts/plot_real_doc_comparison.py eval/real_doc_eval.csv --out docs/figures/finetune_eval/real_doc_comparison.png
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("csv", type=Path, help="eval/real_doc_eval.csv")
-    parser.add_argument("--out", type=Path, default=Path("docs/figures/real_doc_comparison.png"))
+    parser.add_argument("--out", type=Path, default=Path("docs/figures/finetune_eval/real_doc_comparison.png"))
     args = parser.parse_args()
 
     apply_report_style()

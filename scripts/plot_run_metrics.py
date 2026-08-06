@@ -8,9 +8,9 @@ one comparison chart, the "CER & visualize" proof artifact requested directly by
 not eyeballed from prose.
 
 CLI:
-    python scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv --out-dir docs/figures
+    python scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv --out-dir docs/figures/finetune_eval
     python scripts/plot_run_metrics.py eval/gemma_finetune_runs.csv eval/qwen_finetune_runs.csv \
-        --out-dir docs/figures
+        --out-dir docs/figures/finetune_eval
 """
 
 from __future__ import annotations
@@ -267,8 +267,8 @@ def main() -> None:
     parser.add_argument("--loss-csv", type=Path, default=Path("eval/loss_history.csv"),
                         help="Long-format {model,run,step,loss} CSV (default eval/loss_history.csv); "
                              "skipped if the file doesn't exist")
-    parser.add_argument("--out-dir", type=Path, default=Path("docs/figures"),
-                        help="Folder to write PNG charts into (default docs/figures)")
+    parser.add_argument("--out-dir", type=Path, default=Path("docs/figures/finetune_eval"),
+                        help="Folder to write PNG charts into (default docs/figures/finetune_eval)")
     args = parser.parse_args()
 
     apply_report_style()

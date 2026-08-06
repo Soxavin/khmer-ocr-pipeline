@@ -129,7 +129,7 @@ not L4 — the L4 session stopped partway through and was abandoned, so this is 
 a resumption. Training: 271.8s, peak reserved memory 6.443 GB / 79.251 GB (LoRA-only: 4.324 GB;
 the 79.251 GB total confirms A100, vs. Run 1's L4 22.034 GB); loss dropped cleanly 0.604 → ~0.007-
 0.02, same shape as every other run (full per-step curve in `eval/loss_history.csv`, `qwen/v5-
-run2` — see `docs/figures/loss_by_run.png`: notably, Qwen's loss sits roughly an order of
+run2` — see `docs/figures/finetune_eval/loss_by_run.png`: notably, Qwen's loss sits roughly an order of
 magnitude above Gemma's for most of training at this *same* step count, only converging close by
 step 78, a first real signal for "undertrained relative to Gemma" independent of the eval numbers
 below; the loss values are close to but not identical to an earlier same-config attempt, expected

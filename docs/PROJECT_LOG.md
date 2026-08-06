@@ -4001,8 +4001,8 @@ would need re-projecting to match and this pass doesn't do that), applied only t
 conversion path and never to `val_dataset`/`test_dataset`; and a **results-logging pair per model**
 (`eval/gemma_finetune_runs.{csv,md}`, `eval/qwen_finetune_runs.{csv,md}`) plus
 `scripts/plot_run_metrics.py`, which combines any subset of these CSVs into
-`docs/figures/cer_by_run.png` and `parse_failure_rate_by_run.png` for a real cross-model
-comparison chart, not just prose claims.
+`docs/figures/finetune_eval/cer_by_run.png` and `parse_failure_rate_by_run.png` for a real
+cross-model comparison chart, not just prose claims.
 
 ---
 
