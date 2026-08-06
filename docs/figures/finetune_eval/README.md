@@ -7,6 +7,15 @@ numbers and narrative live in `eval/gemma_finetune_runs.md`, `eval/qwen_finetune
 and their `.csv` companions — these charts are the visual summary, not a replacement for
 those logs.
 
+**The story across all four, in one paragraph**: the existing production OCR pipeline needed
+no fine-tuning at all to outperform both models on real documents (chart 1) — that's the
+headline. Both models struggle to produce even syntactically valid output on a meaningful
+share of pages (chart 2), and that struggle doesn't resolve by training longer: for both
+models independently, 3 epochs is the best point in the sweep, with both fewer and more
+epochs making things worse (charts 2 and 3). Training itself was never the problem — every
+run converged cleanly (chart 4) — so the open trade-off is generalization/output-reliability
+at this data scale, not an optimizer or training-setup issue.
+
 (The four images one level up in `docs/figures/` — `accuracy_by_font.png`, `cer_by_dataset.png`,
 `engine_comparison.png`, `table_fragmentation.png` — are from earlier, separate OCR-engine
 benchmarking work and aren't covered by this README; these fine-tune-eval figures live in their
@@ -25,9 +34,9 @@ documents neither model trained on. Left panel is metrics where a higher bar is 
 error rate). Qwen shows no bars at all — every one of its 15 pages failed to produce usable
 output, so there's nothing to score, marked "no output" rather than a misleading zero.
 
-**How to read it**: compare bar heights within each metric group. The OCR pipeline (blue) is
-taller than Gemma (orange) on every "higher is better" metric and shorter on every "lower is
-better" metric — meaning it wins on every axis measured.
+**How to read it**: compare bar heights within each metric group (see the legend for which
+color is which approach). The OCR pipeline is taller than Gemma on every "higher is better"
+metric and shorter on every "lower is better" metric — meaning it wins on every axis measured.
 
 **Takeaway**: this is the headline result. On real documents, the production OCR pipeline
 currently outperforms both fine-tuned models, and Qwen doesn't produce usable structured
@@ -101,6 +110,22 @@ the problem in any of these runs. Whatever is limiting output quality (see chart
 generalization/reliability issue, not a training-failure issue.
 
 ---
+
+## A few things worth knowing before citing these numbers
+
+- **Every run is a single seed.** Nothing here is averaged over repeated runs with different
+  random seeds (Colab GPU time was a real, repeatedly-managed cost constraint throughout this
+  project), so there are no error bars or confidence intervals on any chart. Read point-to-point
+  differences as directional trends confirmed across two independent model families (see chart
+  3's `n=` counts for how much data backs any one point), not as statistically tested results.
+- **Colors are chosen to be colorblind-safe** (the Okabe-Ito palette) and every line/series that
+  needs to survive grayscale printing also varies by marker shape or linestyle, not color alone.
+
+## File formats
+
+Each chart is written as both a `.png` (raster, for pasting directly into a document) and a
+`.pdf` (vector, for print or any context where the image gets resized — it won't pixelate).
+Use whichever your report tool handles better; the content is identical either way.
 
 ## Regenerating these figures
 

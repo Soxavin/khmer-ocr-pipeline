@@ -22,15 +22,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from _report_style import (
-    REPORT_DPI,
+    MARKERS,
     apply_report_style,
     dataset_short_label,
     model_display_name,
     run_display_label,
+    save_all_formats,
 )
 
 _LINESTYLES = ["-", "--", "-.", ":"]
-_MARKERS = ["o", "s", "^", "D", "v"]
+_MARKERS = MARKERS
 
 
 def _infer_model_name(csv_path: Path) -> str:
@@ -96,6 +97,12 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
     models = sorted(df["model"].unique())
     fig, axes = plt.subplots(1, len(models), figsize=(6.5 * len(models), 5.5), squeeze=False)
     axes = axes[0]
+    # Collected across panels for one shared external legend instead of a per-panel one --
+    # label->color/marker mapping is consistent across panels (both sort their own labels
+    # alphabetically, and Gemma's one extra label, "Text", sorts last, so shared labels always
+    # land on the same palette index in both panels), so a single legend below the figure is
+    # correct, not just more compact.
+    handles_by_label: dict[str, object] = {}
 
     for ax, model in zip(axes, models):
         model_data = labeled[labeled["model"] == model]
@@ -105,6 +112,10 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
             labels_present = sorted(model_data["label"].unique())
             color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
             color_by_label = {lbl: color_cycle[i % len(color_cycle)] for i, lbl in enumerate(labels_present)}
+            # Marker shape, not just color, per label -- a colorblind-safe palette still relies
+            # on hue, which a true grayscale/luminance-only rendering collapses entirely. Shape
+            # carries the same distinction redundantly so the chart survives desaturation too.
+            marker_by_label = {lbl: MARKERS[i % len(MARKERS)] for i, lbl in enumerate(labels_present)}
             # Order runs by DATASET VERSION first, then epoch count within it -- not epoch
             # count alone across both versions. v2 and v5 are different datasets (different
             # size/split logic), so interleaving e.g. v2/2ep, v5/3ep, v2/5ep would make it look
@@ -117,7 +128,14 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
             for label_idx, (label, group) in enumerate(model_data.groupby("label")):
                 group = group.set_index("run_id").reindex(run_order).dropna(subset=["label_cer"]).reset_index()
                 xs = [x_pos[r] for r in group["run_id"]]
-                ax.plot(xs, group["label_cer"], marker="o", color=color_by_label[label], label=label)
+                # markeredgecolor: the Okabe-Ito palette's yellow is colorblind-safe but has
+                # very high luminance -- confirmed via an actual grayscale conversion that it
+                # nearly vanishes against a white background without a dark edge. A dark edge
+                # keeps every marker visible regardless of which color in the cycle it lands on.
+                line, = ax.plot(xs, group["label_cer"], marker=marker_by_label[label],
+                                 color=color_by_label[label], label=label,
+                                 markeredgecolor="0.15", markeredgewidth=0.6)
+                handles_by_label.setdefault(label, line)
                 # Sample-size annotation on every point: a single-sample point (e.g. Gemma's
                 # v5/5ep run, where 8/9 rows failed to parse and the one that did was missing
                 # most of its regions) looks identical to a well-sampled point otherwise --
@@ -126,11 +144,13 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                 # near-tied CER values (e.g. Gemma's Table/Text both sitting near 0 on the same
                 # run) would otherwise stack their annotations illegibly on top of each other.
                 y_offset = 6 + 13 * (label_idx % 3)
+                # Annotation text stays a fixed dark gray rather than the series color -- a
+                # light palette color (e.g. Okabe-Ito's yellow) reads fine as a marker fill but
+                # is low-contrast as small text against a white background.
                 for x, y, n in zip(xs, group["label_cer"], group["label_n_matched"]):
                     if pd.notna(n):
                         ax.annotate(f"n={int(n)}", (x, y), textcoords="offset points",
-                                    xytext=(6, y_offset), fontsize=6.5, color=color_by_label[label])
-            ax.legend(fontsize=8, loc="best")
+                                    xytext=(6, y_offset), fontsize=6.5, color="0.25")
             ax.set_xticks(range(len(run_order)))
             ax.set_xticklabels([label_lookup.get(r, r) for r in run_order])
             prev_ds = None
@@ -142,6 +162,10 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
         ax.set_ylabel("CER (lower is better)")
         ax.set_title(model_display_name(model))
         ax.margins(y=0.18)
+        # CER can never be negative -- margins() extends symmetrically for annotation headroom
+        # above the highest point, but the same symmetric extension below 0 would be dishonest
+        # for a metric that's bounded at zero. Keep the auto top, clamp the bottom explicitly.
+        ax.set_ylim(bottom=0)
 
     # Auto-detected caption for same-model, same-epoch-count, different-step-count runs (e.g.
     # Qwen v5-run1 vs v5-run2: both "3 epochs", but GRAD_ACCUM=4 vs 2 gives 39 vs 78 steps --
@@ -161,9 +185,13 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
     if notes:
         fig.text(0.5, -0.05, "Note: " + "; ".join(notes) + ".", ha="center", fontsize=8, style="italic")
 
-    fig.suptitle("Per-label CER across fine-tune runs (one panel per model, own y-scale)", y=1.02)
+    fig.suptitle("Per-label CER across fine-tune runs (one panel per model, own y-scale)", y=1.14)
+    if handles_by_label:
+        ordered_labels = sorted(handles_by_label)
+        fig.legend([handles_by_label[l] for l in ordered_labels], ordered_labels,
+                   loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=len(ordered_labels), fontsize=9)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=REPORT_DPI)
+    save_all_formats(fig, out_path)
     plt.close(fig)
 
 
@@ -198,7 +226,8 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
         for model, group in per_run.groupby("model"):
             group = group.set_index("run_id").reindex([r for r in x_order if r in group["run_id"].values])
             xs = [x_pos[r] for r in group.index]
-            ax.plot(xs, group["failure_rate"], marker=marker_by_model[model], label=model_display_name(model))
+            ax.plot(xs, group["failure_rate"], marker=marker_by_model[model], label=model_display_name(model),
+                    markeredgecolor="0.15", markeredgewidth=0.6)
 
         # Vertical dividers between dataset-version segments (any model).
         prev_ds = None
@@ -211,13 +240,15 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
         ax.set_xticks(range(len(x_order)))
         ax.set_xticklabels([label_lookup.get(r, r) for r in x_order], rotation=35, ha="right")
         if len(models) > 1:
-            ax.legend(fontsize=9, loc="best")
+            # Outside the axes (to the right) rather than "best" inside -- keeps the legend from
+            # ever landing on top of a data point regardless of how the curves happen to shape up.
+            ax.legend(fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     ax.set_ylabel("JSON parse-failure rate")
     ax.set_xlabel(None)
     ax.set_title("JSON parse-failure rate across fine-tune runs")
     ax.set_ylim(-0.05, 1.05)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=REPORT_DPI)
+    save_all_formats(fig, out_path)
     plt.close(fig)
 
 
@@ -238,21 +269,31 @@ def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, label_lookup: dict[s
         color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         linestyle_by_model = {}
         color_by_run = {r: color_cycle[i % len(color_cycle)] for i, r in enumerate(run_ids)}
+        # Sparse markers with a dark edge, not just a colored line -- confirmed via an actual
+        # grayscale conversion that a high-luminance palette color (Okabe-Ito's yellow, which
+        # this 6-run cycle does reach) nearly disappears as a plain line against white. A
+        # marker every ~10 steps, per-run shape, gives the same color+shape redundancy the
+        # other three charts already have.
+        marker_by_run = {r: MARKERS[i % len(MARKERS)] for i, r in enumerate(run_ids)}
         for run_id, group in loss_df.groupby("run_id"):
             model = run_id.split("/")[0]
             linestyle_by_model.setdefault(model, _LINESTYLES[len(linestyle_by_model) % len(_LINESTYLES)])
             group = group.sort_values("step")
             display = label_lookup.get(run_id, run_id).replace("\n", ", ")
             ax.plot(group["step"], group["loss"], color=color_by_run[run_id],
-                    linestyle=linestyle_by_model[model], label=f"{model_display_name(model)} — {display}")
-        ax.legend(fontsize=8.5, loc="upper right")
+                    linestyle=linestyle_by_model[model], label=f"{model_display_name(model)} — {display}",
+                    marker=marker_by_run[run_id], markevery=10, markersize=5,
+                    markeredgecolor="0.15", markeredgewidth=0.5)
+        # Outside the axes (right side) rather than "upper right" inside -- with 6 runs the
+        # legend box was starting to sit over the same region several curves converge into.
+        ax.legend(fontsize=8.5, loc="upper left", bbox_to_anchor=(1.01, 1.0))
         ax.set_yscale("log")
     ax.set_ylabel("training loss (log scale)")
     ax.set_xlabel("training step")
     ax.set_title("Training loss by step, across fine-tune runs")
     ax.grid(True, alpha=0.3, which="both")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=REPORT_DPI)
+    save_all_formats(fig, out_path)
     plt.close(fig)
 
 
@@ -276,13 +317,14 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     plot_cer_by_run(df, args.out_dir / "cer_by_run.png")
     plot_parse_failure_rate_by_run(df, args.out_dir / "parse_failure_rate_by_run.png")
-    written = [args.out_dir / "cer_by_run.png", args.out_dir / "parse_failure_rate_by_run.png"]
+    written = [args.out_dir / "cer_by_run.png", args.out_dir / "cer_by_run.pdf",
+               args.out_dir / "parse_failure_rate_by_run.png", args.out_dir / "parse_failure_rate_by_run.pdf"]
 
     if args.loss_csv.is_file():
         loss_df = pd.read_csv(args.loss_csv)
         loss_df["run_id"] = loss_df["model"] + "/" + loss_df["run"].astype(str)
         plot_loss_by_run(loss_df, args.out_dir / "loss_by_run.png", label_lookup=_run_label_lookup(df))
-        written.append(args.out_dir / "loss_by_run.png")
+        written += [args.out_dir / "loss_by_run.png", args.out_dir / "loss_by_run.pdf"]
 
     print(f"Wrote {', '.join(str(p) for p in written)}")
 

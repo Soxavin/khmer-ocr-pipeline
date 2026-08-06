@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from _report_style import REPORT_DPI, apply_report_style
+from _report_style import apply_report_style, save_all_formats
 
 # (csv column, display label)
 _HIGHER_IS_BETTER = [
@@ -102,7 +102,7 @@ def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=3, fontsize=9)
     fig.suptitle("Real-document evaluation: same 15 hand-verified ARDB pages, all three approaches", y=1.16, fontsize=12, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(out_path, dpi=REPORT_DPI, bbox_inches="tight")
+    save_all_formats(fig, out_path)
     plt.close(fig)
 
 
@@ -116,7 +116,7 @@ def main() -> None:
     df = pd.read_csv(args.csv)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     plot_real_doc_comparison(df, args.out)
-    print(f"Wrote {args.out}")
+    print(f"Wrote {args.out} and {args.out.with_suffix('.pdf')}")
 
 
 if __name__ == "__main__":

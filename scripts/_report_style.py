@@ -8,10 +8,11 @@ DPI so images stay crisp when scaled down into a document, and consistent color/
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-REPORT_DPI = 200
+REPORT_DPI = 300
 
 # Report-facing display names for internal model keys ('gemma', 'qwen', as used throughout
 # eval/*.csv and this project's own file-naming) -- used consistently across every chart so a
@@ -26,13 +27,19 @@ MODEL_DISPLAY_NAME = {
 def model_display_name(model: str) -> str:
     return MODEL_DISPLAY_NAME.get(model, model)
 
-# Muted, colorblind-friendlier alternative to matplotlib's saturated default tab10 cycle --
-# same hue ordering (so existing model/label-to-color assignments don't visually shuffle),
-# just desaturated/darkened slightly for a less "default chart library" look in print.
+# Okabe-Ito palette (Okabe & Ito, 2008) -- the standard peer-reviewed colorblind-safe
+# categorical palette, not a manual desaturation guess. Distinguishable under the common
+# forms of color vision deficiency (protanopia/deuteranopia/tritanopia).
 _PALETTE = [
-    "#3B6FA0", "#D97F35", "#4C9F70", "#B94A48",
-    "#7A5DA0", "#8C6248", "#C767A8", "#6B6B6B",
+    "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+    "#0072B2", "#D55E00", "#CC79A7", "#000000",
 ]
+
+# Distinct marker shapes, cycled alongside color -- color-vision-deficient AND true-grayscale
+# rendering both collapse hue distinctions that a colorblind-safe palette alone doesn't fully
+# protect against (grayscale keeps only luminance, not hue), so shape carries the same
+# information redundantly.
+MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
 
 def apply_report_style() -> None:
@@ -55,6 +62,17 @@ def apply_report_style() -> None:
         "axes.prop_cycle": plt.cycler(color=_PALETTE),
         "savefig.bbox": "tight",
     })
+
+
+def save_all_formats(fig, png_path) -> list[Path]:
+    """Saves a PNG (report DPI) and a same-named PDF (vector, infinite-resolution) alongside
+    it -- a report that gets resized or printed has a lossless option available, not just the
+    fixed-DPI raster. Returns both paths written."""
+    png_path = Path(png_path)
+    pdf_path = png_path.with_suffix(".pdf")
+    fig.savefig(png_path, dpi=REPORT_DPI)
+    fig.savefig(pdf_path)
+    return [png_path, pdf_path]
 
 
 _DATASET_VERSION_RE = re.compile(r"-v(\d+)$")
