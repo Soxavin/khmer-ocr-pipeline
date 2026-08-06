@@ -379,7 +379,10 @@ export function TablesPanel(props: {
           </div>
         ))}
 
-        {(page.corrected_text || text) && (
+        {/* raw_ocr_text also gates this panel: a trial engine (e.g. qwen_ardb)
+            can leave corrected_text/text empty but still have raw output worth
+            showing — see PageTextPanel's empty-state fallback. */}
+        {(page.corrected_text || text || page.raw_ocr_text) && (
           <PageTextPanel
             docId={docId}
             pageIdx={pageIdx}

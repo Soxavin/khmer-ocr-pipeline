@@ -197,7 +197,7 @@ export function SettingsDrawer(props: {
   const scope = String(settings.page_scope ?? 'all')
   // Engine label/guidance are localized via i18n when an entry exists (see i18n.tsx);
   // otherwise fall back to the backend English on EngineInfo (e.g. a future engine key).
-  const localizedEngines = new Set(['auto', 'surya', 'surya_kiri', 'surya_kiri_vlm', 'gemini', 'gemma_ardb'])
+  const localizedEngines = new Set(['auto', 'surya', 'surya_kiri', 'surya_kiri_vlm', 'gemini', 'gemma_ardb', 'qwen_ardb'])
   const engineLabel = (e2: EngineInfo) =>
     localizedEngines.has(e2.key) ? t(`engine_label_${e2.key}` as Parameters<typeof t>[0]) : e2.label
   const engineGuidance = (e2: EngineInfo) =>

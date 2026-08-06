@@ -25,6 +25,7 @@ const pageWith = (over: Partial<PageData> = {}): PageData => ({
   table_bboxes: [],
   table_bbox_index: {},
   qwen_used: false,
+  raw_ocr_text: '',
   ...over,
 })
 

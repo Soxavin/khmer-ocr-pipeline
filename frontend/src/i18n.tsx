@@ -229,6 +229,10 @@ const en = {
   block_edit_raw: 'Edit in Raw',
   block_copy: 'Copy text',
   no_text_blocks: 'No text outside the tables on this page.',
+  // Shown above the raw-output fallback in PageTextPanel: a trial engine
+  // (e.g. Qwen) produced no readable structure, so the panel shows its raw,
+  // unmodified generation instead of a dead "no text" message.
+  raw_output_fallback_note: 'Model output — could not be read as text or tables. Shown as produced.',
 
   verify: 'Verify',
   verified: 'Verified',
@@ -314,6 +318,8 @@ const en = {
   engine_guidance_surya_kiri_vlm: 'Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest.',
   engine_label_gemma_ardb: 'ARDB specialist (trial)',
   engine_guidance_gemma_ardb: 'Tuned on ARDB bulletins. Under evaluation — may return incomplete rows.',
+  engine_label_qwen_ardb: 'Qwen ARDB (unreliable, trial)',
+  engine_guidance_qwen_ardb: 'Frequently fails to produce valid output. Shown for comparison, not real extraction.',
   engine_label_gemini: 'Cloud (Gemini)',
   engine_guidance_gemini: 'Sends the page image to Google. Do not use for confidential documents.',
   more_menu: 'More',
@@ -345,6 +351,7 @@ const en = {
   step_layout: 'finding the layout',
   step_text: 'reading the text',
   step_tables: 'reading the tables',
+  step_finetune_slow: 'running the fine-tune (may take several minutes)',
   busy_elsewhere: 'Another document is being extracted right now.',
   delete_all_title: 'Remove all documents?',
   delete_all_confirm: 'All {n} documents leave the workspace. Results and edits are discarded.',
@@ -642,6 +649,7 @@ const km: Record<Key, string> = {
   block_edit_raw: 'កែប្រែក្នុងអត្ថបទឆៅ',
   block_copy: 'ចម្លងអត្ថបទ',
   no_text_blocks: 'គ្មានអត្ថបទនៅខាងក្រៅតារាងលើទំព័រនេះទេ។',
+  raw_output_fallback_note: 'លទ្ធផលម៉ូដែល — មិនអាចអានជាអត្ថបទ ឬតារាងបានទេ។ បង្ហាញតាមដែលបានផលិត។',
 
   verify: 'ផ្ទៀងផ្ទាត់',
   verified: 'បានផ្ទៀងផ្ទាត់',
@@ -720,6 +728,8 @@ const km: Record<Key, string> = {
   engine_guidance_surya_kiri_vlm: 'រក្សាក្បាលតារាងលាតសន្ធឹងឲ្យនៅដដែល ហើយកែលម្អក្រឡាខ្មែរពេលមានសុវត្ថិភាព។ យឺតបំផុត។',
   engine_label_gemma_ardb: 'ជំនាញ ARDB (សាកល្បង)',
   engine_guidance_gemma_ardb: 'បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។',
+  engine_label_qwen_ardb: 'Qwen ARDB (មិនទាន់ជឿទុកចិត្ត សាកល្បង)',
+  engine_guidance_qwen_ardb: 'ភាគច្រើនបរាជ័យក្នុងការផលិតលទ្ធផលត្រឹមត្រូវ។ បង្ហាញសម្រាប់ប្រៀបធៀប មិនមែនសម្រាប់ការស្រង់ទិន្នន័យពិតប្រាកដទេ។',
   engine_label_gemini: 'ពពក (Gemini)',
   engine_guidance_gemini: 'ផ្ញើរូបទំព័រទៅ Google។ កុំប្រើសម្រាប់ឯកសារសម្ងាត់។',
   more_menu: 'ច្រើនទៀត',
@@ -753,6 +763,7 @@ const km: Record<Key, string> = {
   step_layout: 'កំពុងរកប្លង់ទំព័រ',
   step_text: 'កំពុងអានអក្សរ',
   step_tables: 'កំពុងអានតារាង',
+  step_finetune_slow: 'កំពុងដំណើរការម៉ូដែលដែលបានបង្វឹក (អាចចំណាយពេលច្រើននាទី)',
   busy_elsewhere: 'កំពុងទាញយកទិន្នន័យពីឯកសារមួយទៀត។',
   delete_all_title: 'លុបឯកសារទាំងអស់មែនទេ?',
   delete_all_confirm: 'ឯកសារទាំង {n} នឹងត្រូវលុបចេញពីកន្លែងធ្វើការ។ លទ្ធផល និងការកែប្រែទាំងអស់នឹងត្រូវលុបចោល។',

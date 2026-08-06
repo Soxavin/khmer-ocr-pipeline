@@ -74,3 +74,36 @@ def test_timeout_raises_runtimeerror(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(RuntimeError, match="timed out"):
         run_isolated_inference(_img(), _config())
+
+
+def test_default_timeout_is_600s(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_isolated_inference(_img(), _config())
+    assert captured["timeout"] == 600
+
+
+def test_custom_timeout_s_is_honored(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["timeout"] = kwargs.get("timeout")
+        return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_isolated_inference(_img(), _config(timeout_s=1200))
+    assert captured["timeout"] == 1200
+
+
+def test_custom_timeout_message_reports_actual_value(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="1200s"):
+        run_isolated_inference(_img(), _config(timeout_s=1200))

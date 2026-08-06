@@ -292,7 +292,23 @@ export function PageTextPanel(props: {
 
       {mode === 'blocks' ? (
         rows.length === 0 ? (
-          <p className="mt-2 text-xs text-ink-3">{t('no_text_blocks')}</p>
+          page.raw_ocr_text ? (
+            // A trial/experimental engine (e.g. qwen_ardb) failed to produce
+            // structured output but left its raw generation behind — showing
+            // it, unmodified, is the whole point of exposing an unreliable
+            // engine (see qwen_ardb_engine.py). Read-only: this is NOT
+            // corrected_text and must never be conflated with the editable
+            // text above (see this file's own header comment on why a second
+            // raw string caused bugs before) or persisted by `save`.
+            <div className="mt-2">
+              <p className="text-2xs text-warn-ink">{t('raw_output_fallback_note')}</p>
+              <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-rail/30 p-2 font-mono text-2xs leading-4 text-ink-2">
+                {page.raw_ocr_text}
+              </pre>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-ink-3">{t('no_text_blocks')}</p>
+          )
         ) : (
           <>
             {/* The filter track lives in the header row above; here only the honest

@@ -24,6 +24,11 @@ const SUB_STEPS: Record<string, Key> = {
   layout: 'step_layout',
   text: 'step_text',
   tables: 'step_tables',
+  // Emitted by qwen_ardb_engine.py (and any future slow fine-tune engine) —
+  // generation can take several minutes per page and may hit its token cap
+  // without a clean stop, so this sets a different expectation than Surya's
+  // sub-second sub-steps rather than looking hung.
+  finetune_slow: 'step_finetune_slow',
 }
 
 export function RunControls(props: {

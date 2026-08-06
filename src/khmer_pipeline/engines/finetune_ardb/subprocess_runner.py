@@ -23,7 +23,9 @@ TableTextFormat = Literal["html", "markdown"]
 
 # Cold-start (model download + load) can take minutes on first run; generous but
 # bounded so a hung subprocess doesn't hang the whole extraction run forever.
-_TIMEOUT_S = 600
+# Per-model override via FineTuneConfig.timeout_s (e.g. Qwen's known-slow, may-
+# hit-its-token-cap generations need longer than this default).
+_DEFAULT_TIMEOUT_S = 600
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class FineTuneConfig:
     infer_script: str                    # path to the per-model script, repo-root-relative
     extra_pins: list[str] = field(default_factory=list)   # e.g. ["transformers>=5.5,<6", "peft>=0.13,<1"]
     table_text_format: TableTextFormat = "html"
+    timeout_s: int = _DEFAULT_TIMEOUT_S
 
 
 def run_isolated_inference(page_image: np.ndarray, config: FineTuneConfig) -> str:
@@ -58,10 +61,10 @@ def run_isolated_inference(page_image: np.ndarray, config: FineTuneConfig) -> st
             "--image", str(img_path),
         ]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_S)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout_s)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
-                f"{config.infer_script} timed out after {_TIMEOUT_S}s"
+                f"{config.infer_script} timed out after {config.timeout_s}s"
             ) from exc
 
         if proc.returncode != 0:

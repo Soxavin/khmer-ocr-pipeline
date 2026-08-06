@@ -22,6 +22,7 @@ const page: PageData = {
   table_bboxes: [],
   table_bbox_index: {},
   qwen_used: false,
+  raw_ocr_text: '',
 }
 const TEXT = 'first block\n\nsecond block'
 

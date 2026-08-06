@@ -65,7 +65,7 @@ def _completed_doc(doc_id="abc123def456"):
         )],
         warnings=["w1"],
     )
-    doc.postprocess_result = SimpleNamespace(pages=[SimpleNamespace(qwen_used=False)], warnings=[])
+    doc.postprocess_result = SimpleNamespace(pages=[SimpleNamespace(qwen_used=False, raw_ocr_text="")], warnings=[])
     doc.stage_times = {"Stage 3 — OCR": 1.5}
     return registry.add(doc)
 
@@ -656,7 +656,7 @@ def _two_page_doc():
     doc.surya_result = SimpleNamespace(
         pages=[SimpleNamespace(text_blocks=[], tables=[{"bbox": [0, 0, 10, 10]}])] * 2, warnings=[])
     doc.postprocess_result = SimpleNamespace(
-        pages=[SimpleNamespace(qwen_used=False)] * 2, warnings=[])
+        pages=[SimpleNamespace(qwen_used=False, raw_ocr_text="")] * 2, warnings=[])
     return registry.add(doc)
 
 

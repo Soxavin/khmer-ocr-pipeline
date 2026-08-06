@@ -95,6 +95,11 @@ export type PageData = {
   table_bboxes: (number[] | null)[]
   table_bbox_index: Record<string, number[]>
   qwen_used: boolean
+  // Untouched by the correction pass (unlike corrected_text) — byte-for-byte
+  // what the OCR/fine-tune engine produced. Empty except on engines that
+  // deliberately preserve raw text on a failed page (e.g. qwen_ardb); see
+  // PageTextPanel's empty-state fallback.
+  raw_ocr_text: string
 }
 
 export type Overview = {

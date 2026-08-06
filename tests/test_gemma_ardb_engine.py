@@ -120,6 +120,3 @@ def test_gemma_ardb_present_in_api_engines_as_experimental():
     assert entry.get("experimental") is True
 
 
-def test_qwen_ardb_absent_from_api_engines():
-    from webapp.api import _ENGINES
-    assert not any(e["key"] == "qwen_ardb" for e in _ENGINES)

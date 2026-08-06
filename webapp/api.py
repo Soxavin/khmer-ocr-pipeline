@@ -72,11 +72,7 @@ _ENGINES = [
     {"key": "surya_kiri_vlm", "label": "Best structure (slow)", "group": "local", "experimental": True,
      "guidance": "Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest."},
     # gemma_ardb: the ARDB LoRA fine-tune (Gemma 4 E2B) — the one adapter that has
-    # cleared real-document eval (eval/gemma_finetune_runs.md). A sibling Qwen3.5
-    # engine exists (qwen_ardb_engine.py, registered in engine_registry.py) but is
-    # deliberately NOT listed here: no Qwen config has passed real-doc eval yet, and
-    # this list is what makes an engine selectable in the UI — being registered
-    # elsewhere does not.
+    # cleared real-document eval (eval/gemma_finetune_runs.md).
     # Label/guidance follow the sibling pattern (named by tradeoff, not model
     # identity — the model name lives in the card's `title` tooltip, same as every
     # engine key). `trial: true` badges it distinctly from "just slower" engines:
@@ -84,6 +80,15 @@ _ENGINES = [
     {"key": "gemma_ardb", "label": "ARDB specialist (trial)", "group": "local", "experimental": True,
      "trial": True,
      "guidance": "Tuned on ARDB bulletins. Under evaluation — may return incomplete rows."},
+    # qwen_ardb: the ARDB LoRA fine-tune (Qwen3.5-0.8B) — included DESPITE (in
+    # fact because of) its unreliability: every tested config fails to produce
+    # valid structured output on most real documents. The point is to show that
+    # failure live (see qwen_ardb_engine.py's ocr_text-on-failure behavior +
+    # PageTextPanel.tsx's raw-output fallback), not hide a broken option. Guidance
+    # is honest about the failure rate rather than framed as a capability.
+    {"key": "qwen_ardb", "label": "Qwen ARDB (unreliable, trial)", "group": "local", "experimental": True,
+     "trial": True,
+     "guidance": "Frequently fails to produce valid output. Shown for comparison, not real extraction."},
     {"key": "gemini", "label": "Cloud (Gemini)", "group": "cloud",
      "guidance": "Sends the page image to Google. Do not use for confidential documents."},
 ]
@@ -357,6 +362,11 @@ def api_page(doc_id: str, n: int) -> dict:
         "table_bboxes": [t.get("bbox") for t in surya_page.tables],
         "table_bbox_index": bbox_index,
         "qwen_used": bool(doc.postprocess_result.pages[n].qwen_used),
+        # Untouched by postprocess.py's normalization/foreign-script-strip pass
+        # (unlike corrected_text) — the review UI's raw-output fallback needs
+        # this exact byte-for-byte field so a failed fine-tune generation (e.g.
+        # qwen_ardb) is shown as-is, not a cleaned-up version of the failure.
+        "raw_ocr_text": doc.postprocess_result.pages[n].raw_ocr_text,
     }
 
 

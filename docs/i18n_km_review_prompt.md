@@ -58,7 +58,7 @@ Then **Glossary decisions** (your standard Khmer term per domain word), then **R
 
 ---
 
-## NEWEST SET — added since this doc was last generated, NEVER reviewed (59 keys)
+## NEWEST SET — added since this doc was last generated, NEVER reviewed (63 keys)
 
 These are the highest priority: the review-workspace strings from the latest UI passes
 (raw/edited view toggle, confidence show/hide, dismiss-all, page-text blocks, find, copy,
@@ -67,6 +67,10 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 
 | key | English | Current Khmer |
 |---|---|---|
+| `engine_label_qwen_ardb` | Qwen ARDB (unreliable, trial) | Qwen ARDB (មិនទាន់ជឿទុកចិត្ត សាកល្បង) |
+| `engine_guidance_qwen_ardb` | Frequently fails to produce valid output. Shown for comparison, not real extraction. | ភាគច្រើនបរាជ័យក្នុងការផលិតលទ្ធផលត្រឹមត្រូវ។ បង្ហាញសម្រាប់ប្រៀបធៀប មិនមែនសម្រាប់ការស្រង់ទិន្នន័យពិតប្រាកដទេ។ |
+| `raw_output_fallback_note` | Model output — could not be read as text or tables. Shown as produced. | លទ្ធផលម៉ូដែល — មិនអាចអានជាអត្ថបទ ឬតារាងបានទេ។ បង្ហាញតាមដែលបានផលិត។ |
+| `step_finetune_slow` | running the fine-tune (may take several minutes) | កំពុងដំណើរការម៉ូដែលដែលបានបង្វឹក (អាចចំណាយពេលច្រើននាទី) |
 | `engine_label_gemma_ardb` | ARDB specialist (trial) | ជំនាញ ARDB (សាកល្បង) |
 | `engine_guidance_gemma_ardb` | Tuned on ARDB bulletins. Under evaluation — may return incomplete rows. | បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។ |
 | `engine_trial` | Trial | សាកល្បង |
