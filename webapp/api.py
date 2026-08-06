@@ -77,8 +77,13 @@ _ENGINES = [
     # deliberately NOT listed here: no Qwen config has passed real-doc eval yet, and
     # this list is what makes an engine selectable in the UI — being registered
     # elsewhere does not.
-    {"key": "gemma_ardb", "label": "Gemma 4 E2B (ARDB fine-tune)", "group": "local", "experimental": True,
-     "guidance": "Custom fine-tune, under active evaluation. May produce incomplete or malformed output."},
+    # Label/guidance follow the sibling pattern (named by tradeoff, not model
+    # identity — the model name lives in the card's `title` tooltip, same as every
+    # engine key). `trial: true` badges it distinctly from "just slower" engines:
+    # its risk is unreliable OUTPUT (may return incomplete rows), not latency.
+    {"key": "gemma_ardb", "label": "ARDB specialist (trial)", "group": "local", "experimental": True,
+     "trial": True,
+     "guidance": "Tuned on ARDB bulletins. Under evaluation — may return incomplete rows."},
     {"key": "gemini", "label": "Cloud (Gemini)", "group": "cloud",
      "guidance": "Sends the page image to Google. Do not use for confidential documents."},
 ]

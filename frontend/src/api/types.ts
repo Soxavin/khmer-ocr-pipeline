@@ -8,7 +8,12 @@
 // gated behind the Labs toggle. Absent/false = a production engine.
 // `recommended` (optional, backend-authoritative) flags the one engine the picker
 // badges as the default steer. Absent/false = no badge.
-export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean; recommended?: boolean }
+// `trial` (optional, backend-authoritative) flags a LOCAL engine whose risk is
+// unreliable OUTPUT (may return incomplete/wrong content), not latency — a
+// distinct caution from `experimental`'s "slower" siblings, badged separately so
+// the two risks aren't visually conflated. Cloud engines use their own
+// warn-styled caption instead (a data-privacy caution, a different risk class).
+export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean; recommended?: boolean; trial?: boolean }
 
 export type Meta = {
   engines: EngineInfo[]

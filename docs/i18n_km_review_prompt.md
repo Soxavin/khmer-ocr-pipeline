@@ -58,7 +58,7 @@ Then **Glossary decisions** (your standard Khmer term per domain word), then **R
 
 ---
 
-## NEWEST SET — added since this doc was last generated, NEVER reviewed (56 keys)
+## NEWEST SET — added since this doc was last generated, NEVER reviewed (59 keys)
 
 These are the highest priority: the review-workspace strings from the latest UI passes
 (raw/edited view toggle, confidence show/hide, dismiss-all, page-text blocks, find, copy,
@@ -67,6 +67,9 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 
 | key | English | Current Khmer |
 |---|---|---|
+| `engine_label_gemma_ardb` | ARDB specialist (trial) | ជំនាញ ARDB (សាកល្បង) |
+| `engine_guidance_gemma_ardb` | Tuned on ARDB bulletins. Under evaluation — may return incomplete rows. | បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។ |
+| `engine_trial` | Trial | សាកល្បង |
 | `engine_group_local` | Local (on this device) | ក្នុងម៉ាស៊ីន (លើឧបករណ៍នេះ) |
 | `engine_group_cloud` | Cloud | ពពក (Cloud) |
 | `engine_group_local_short` | Local | ក្នុងម៉ាស៊ីន |

@@ -197,7 +197,7 @@ export function SettingsDrawer(props: {
   const scope = String(settings.page_scope ?? 'all')
   // Engine label/guidance are localized via i18n when an entry exists (see i18n.tsx);
   // otherwise fall back to the backend English on EngineInfo (e.g. a future engine key).
-  const localizedEngines = new Set(['auto', 'surya', 'surya_kiri', 'surya_kiri_vlm', 'gemini'])
+  const localizedEngines = new Set(['auto', 'surya', 'surya_kiri', 'surya_kiri_vlm', 'gemini', 'gemma_ardb'])
   const engineLabel = (e2: EngineInfo) =>
     localizedEngines.has(e2.key) ? t(`engine_label_${e2.key}` as Parameters<typeof t>[0]) : e2.label
   const engineGuidance = (e2: EngineInfo) =>
@@ -209,13 +209,15 @@ export function SettingsDrawer(props: {
       ? (resolvedEngine ? engineLabel(resolvedEngine) : effectiveEngine)
       : null
   // One-line receipt shown while the section is collapsed — the fold hides the
-  // PICKER, never what's actually selected (see engineSectionOpen above).
+  // PICKER, never what's actually selected (see engineSectionOpen above). No
+  // option count here: it was the first thing sacrificed to truncation on a long
+  // label anyway, and the receipt's only job is the SELECTION, not inventory.
   const selectedEngineInfo = engines.find((e2) => e2.key === engine)
   const engineSummary = selectedEngineInfo
     ? `${engineLabel(selectedEngineInfo)}${
         resolvedEngineLabel ? ` → ${resolvedEngineLabel}` : ''
-      } · ${engines.length}`
-    : String(engines.length)
+      }`
+    : ''
   const dpiIsAuto = String(settings.dpi ?? 'auto') === 'auto'
   // Bucket engines by `group`, preserving first-encounter order (local before cloud,
   // as the API returns them). Driven entirely by the data — no hardcoded engine keys.
@@ -296,6 +298,11 @@ export function SettingsDrawer(props: {
     // Backend-authoritative: the `auto` engine carries `recommended: true` directly
     // (no longer regexed off the guidance copy, which is fragile against wording changes).
     const isRecommended = e2.recommended ?? false
+    // `trial`: a LOCAL engine's risk is unreliable OUTPUT, not latency — a distinct
+    // caution from the "Slower."/"Slowest." tradeoff captions on other experimental
+    // engines, so it gets its own (warn-toned, not ok-toned) badge rather than
+    // reading like a second Recommended pill.
+    const isTrial = e2.trial ?? false
     const caption = engineGuidance(e2)
     return (
       <button
@@ -342,6 +349,11 @@ export function SettingsDrawer(props: {
                 {t('engine_recommended')}
               </span>
             )}
+            {isTrial && (
+              <span className="shrink-0 rounded bg-warn-soft px-1.5 py-0 text-2xs font-semibold text-warn-ink">
+                {t('engine_trial')}
+              </span>
+            )}
           </span>
           {/* Cloud guidance is a privacy caution — same integrated line as local
               captions, distinguished only by warn color + a small icon. */}
@@ -380,15 +392,20 @@ export function SettingsDrawer(props: {
             type="button"
             onClick={() => setEngineSectionOpen((o) => !o)}
             aria-expanded={engineSectionOpen}
-            className="mb-2.5 flex w-full items-center justify-between gap-2 text-left"
+            className="mb-2.5 flex w-full items-center gap-2 text-left"
           >
-            <span className="flex items-center gap-1.5 text-title font-semibold text-ink">
+            {/* shrink-0 + whitespace-nowrap: the TITLE never wraps, no matter how
+                long a future engine's summary gets — only the summary span (below,
+                min-w-0 + truncate) absorbs overflow. Ellipsis over a two-line
+                header is the contract; see the 2026-08-06 collapsed-header bug this
+                fixes (a long engine label wrapped "Recognition engine" itself). */}
+            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-title font-semibold text-ink">
               <Sparkles size={13} className="text-ink-3" aria-hidden />
               {t('engine_section')}
             </span>
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
               {!engineSectionOpen && (
-                <span className="truncate text-xs font-normal text-ink-2">{engineSummary}</span>
+                <span className="min-w-0 truncate text-xs font-normal text-ink-2">{engineSummary}</span>
               )}
               <ChevronDown
                 size={14}

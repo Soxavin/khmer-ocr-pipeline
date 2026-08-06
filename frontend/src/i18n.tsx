@@ -298,6 +298,11 @@ const en = {
   labs_mode: 'Labs engines',
   labs_mode_tip: 'Show custom ARDB fine-tuned models (experimental)',
   engine_recommended: 'Recommended',
+  // `engine_trial`: badges a LOCAL engine whose risk is unreliable output (may
+  // return incomplete/wrong content), not latency — kept visually and lexically
+  // distinct from "Slower."/"Slowest." tradeoff captions on other experimental
+  // engines, and from Cloud's data-privacy caution (a different risk class).
+  engine_trial: 'Trial',
   contains_selected_engine: 'contains the selected engine',
   engine_label_auto: 'Automatic',
   engine_guidance_auto: 'Picks the best engine for each document.',
@@ -307,6 +312,8 @@ const en = {
   engine_guidance_surya_kiri: 'Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower.',
   engine_label_surya_kiri_vlm: 'Best structure (slow)',
   engine_guidance_surya_kiri_vlm: 'Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest.',
+  engine_label_gemma_ardb: 'ARDB specialist (trial)',
+  engine_guidance_gemma_ardb: 'Tuned on ARDB bulletins. Under evaluation — may return incomplete rows.',
   engine_label_gemini: 'Cloud (Gemini)',
   engine_guidance_gemini: 'Sends the page image to Google. Do not use for confidential documents.',
   more_menu: 'More',
@@ -701,6 +708,7 @@ const km: Record<Key, string> = {
   labs_mode: 'ម៉ាស៊ីនពិសោធន៍',
   labs_mode_tip: 'បង្ហាញម៉ូដែល ARDB ដែលបានបង្វឹកពិសេស (ពិសោធន៍)',
   engine_recommended: 'ណែនាំ',
+  engine_trial: 'សាកល្បង',
   contains_selected_engine: 'មានម៉ាស៊ីនដែលបានជ្រើស',
   engine_label_auto: 'ស្វ័យប្រវត្តិ',
   engine_guidance_auto: 'ជ្រើសម៉ាស៊ីនល្អបំផុតសម្រាប់ឯកសារនីមួយៗ។',
@@ -710,6 +718,8 @@ const km: Record<Key, string> = {
   engine_guidance_surya_kiri: 'ខ្លាំងបំផុតលើតារាងតូចចង្អៀតដែលមានអក្សរខ្មែរច្រើន (ព្រឹត្តិប័ត្រ ARDB)។ យឺតជាង។',
   engine_label_surya_kiri_vlm: 'រចនាសម្ព័ន្ធល្អបំផុត (យឺត)',
   engine_guidance_surya_kiri_vlm: 'រក្សាក្បាលតារាងលាតសន្ធឹងឲ្យនៅដដែល ហើយកែលម្អក្រឡាខ្មែរពេលមានសុវត្ថិភាព។ យឺតបំផុត។',
+  engine_label_gemma_ardb: 'ជំនាញ ARDB (សាកល្បង)',
+  engine_guidance_gemma_ardb: 'បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។',
   engine_label_gemini: 'ពពក (Gemini)',
   engine_guidance_gemini: 'ផ្ញើរូបទំព័រទៅ Google។ កុំប្រើសម្រាប់ឯកសារសម្ងាត់។',
   more_menu: 'ច្រើនទៀត',
