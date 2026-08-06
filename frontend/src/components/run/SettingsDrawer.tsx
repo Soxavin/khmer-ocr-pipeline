@@ -266,6 +266,11 @@ export function SettingsDrawer(props: {
         aria-checked={selected}
         disabled={disabled}
         onClick={() => onEngineChange(e2.key)}
+        // The engine KEY (surya_kiri, …) rides in the title tooltip, not the visible
+        // label: analysts scan by the descriptive name, and the id is only useful for
+        // support/troubleshooting, which a hover already serves without adding a
+        // permanent, unlocalized technical string to every card.
+        title={`${engineLabel(e2)} — ${e2.key}`}
         className={`group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors duration-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
           selected ? 'bg-primary-soft' : 'hover:bg-rail/20'
         }`}
@@ -280,10 +285,6 @@ export function SettingsDrawer(props: {
           <span className="flex items-baseline justify-between gap-2">
             <span className={`block text-sm leading-5 ${selected ? 'font-semibold text-primary-strong' : 'font-medium text-ink'}`}>
               {engineLabel(e2)}
-              {/* The engine KEY as a muted technical id: analysts scan by the descriptive
-                  name, but the precise id (surya_kiri, …) makes support/troubleshooting
-                  unambiguous. It's an identifier, so it is never localized. */}
-              <span className="ml-1.5 font-mono text-2xs font-normal text-ink-3">{e2.key}</span>
               {/* Only the Auto card, only once the router has ruled. */}
               {selected && e2.key === 'auto' && resolvedEngineLabel && (
                 <ResolvedBadge
