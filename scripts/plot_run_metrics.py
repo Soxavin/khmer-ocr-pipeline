@@ -385,10 +385,11 @@ def compose_cer_by_run(container, df: pd.DataFrame, *, detail: bool = False,
                        linespacing=1.5)
 
     titled(container,
-           heading_prefix + "Per-label CER vs. epoch count (one panel per model, own y-scale)",
+           heading_prefix + "Per-label CER on the validation split vs. epoch count "
+           "(one panel per model, own y-scale)",
            ("n = pages behind each average. It shrinks as parse failures rise, so the "
             "worst-performing runs are also the ones resting on the least data."
-            if detail else None),
+            if detail else "Scored on the held-out validation split, not the real-document test."),
            y=title_y)
     if handles_by_label:
         ordered_labels = sorted(handles_by_label)
@@ -532,8 +533,8 @@ def compose_parse_failure_rate_by_run(container, df: pd.DataFrame, *, detail: bo
                 "One run per point — a direction, not a tested effect." if detail else
                 "Both models fail least at 3 epochs on v5; 2 and 5 epochs are worse "
                 "(one run per point).")
-    titled(container, heading_prefix + "JSON parse-failure rate vs. epoch count", subtitle,
-           y=title_y)
+    titled(container, heading_prefix + "JSON parse-failure rate on the validation split vs. epoch count",
+           subtitle, y=title_y)
     return [lambda: _place_annotations(ax, annotation_entries)]
 
 
