@@ -59,9 +59,12 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 # `experimental` (optional) flags the custom ARDB Kiri fine-tunes: they stay `local`
 # (on-device) but the UI hides them behind a "Labs" toggle so the default view shows
 # only the production engines (Automatic / Standard / Cloud).
+# `recommended` (optional) flags the one engine the picker should badge as the
+# default steer — an explicit field so the frontend never has to regex it out of
+# `guidance` (a copy change there must not silently delete the badge).
 _ENGINES = [
-    {"key": "auto", "label": "Automatic", "group": "local",
-     "guidance": "Picks the best engine for each document. Recommended."},
+    {"key": "auto", "label": "Automatic", "group": "local", "recommended": True,
+     "guidance": "Picks the best engine for each document."},
     {"key": "surya", "label": "Standard", "group": "local",
      "guidance": "Best all-round, fastest. Use for number-heavy or wide tables."},
     {"key": "surya_kiri", "label": "Khmer-text specialist", "group": "local", "experimental": True,

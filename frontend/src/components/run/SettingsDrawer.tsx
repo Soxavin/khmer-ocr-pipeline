@@ -253,10 +253,9 @@ export function SettingsDrawer(props: {
   const engineCard = (e2: EngineInfo) => {
     const selected = e2.key === engine
     const isCloud = e2.group === 'cloud'
-    // 'Recommended.' rides in the backend guidance for the auto engine; lift it into a
-    // crisp badge (detected off the canonical English). The localized caption already
-    // omits it (`engine_guidance_auto`), so it is never said twice.
-    const isRecommended = e2.key === 'auto' && / Recommended\.?$/.test(e2.guidance)
+    // Backend-authoritative: the `auto` engine carries `recommended: true` directly
+    // (no longer regexed off the guidance copy, which is fragile against wording changes).
+    const isRecommended = e2.recommended ?? false
     const caption = engineGuidance(e2)
     return (
       <button
@@ -294,7 +293,7 @@ export function SettingsDrawer(props: {
               )}
             </span>
             {isRecommended && (
-              <span className="shrink-0 rounded bg-primary-soft px-1.5 py-0 text-2xs font-semibold text-primary-strong">
+              <span className="shrink-0 rounded bg-ok-soft px-1.5 py-0 text-2xs font-semibold text-ok-ink">
                 {t('engine_recommended')}
               </span>
             )}

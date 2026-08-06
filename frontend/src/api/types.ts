@@ -6,7 +6,9 @@
 // `experimental` (optional, backend-authoritative) flags a custom ARDB fine-tune. These
 // stay `group: 'local'` (they run on-device); the flag only controls whether they're
 // gated behind the Labs toggle. Absent/false = a production engine.
-export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean }
+// `recommended` (optional, backend-authoritative) flags the one engine the picker
+// badges as the default steer. Absent/false = no badge.
+export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean; recommended?: boolean }
 
 export type Meta = {
   engines: EngineInfo[]
