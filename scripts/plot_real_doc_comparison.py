@@ -28,6 +28,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from _report_style import REPORT_DPI, apply_report_style
+
 # (csv column, display label)
 _HIGHER_IS_BETTER = [
     ("mean_cell_accuracy", "cell\naccuracy"),
@@ -87,13 +89,20 @@ def _panel(ax, df: pd.DataFrame, metrics: list[tuple[str, str]], title: str, yli
 
 def plot_real_doc_comparison(df: pd.DataFrame, out_path: Path) -> None:
     fig, (ax_hi, ax_lo) = plt.subplots(1, 2, figsize=(12, 5.5))
+    # Left panel is a genuinely bounded [0, 1] metric family (accuracy/match rate), so a fixed
+    # 1.05 ceiling is meaningful -- 1.0 means "perfect". Right panel (CER) is unbounded and its
+    # visible values top out well under 1.0 here, so scaling it to the left panel's ceiling
+    # would just waste over a third of the panel as dead space above the tallest bar -- scale
+    # it to its own data instead, with a floor so a small-value chart doesn't look absurdly tall.
+    lower_max = df[[c for c, _ in _LOWER_IS_BETTER]].max(numeric_only=True).max()
+    lower_ylim = max(0.3, lower_max * 1.2) if pd.notna(lower_max) else 1.05
     _panel(ax_hi, df, _HIGHER_IS_BETTER, "Higher is better", ylim_top=1.05)
-    _panel(ax_lo, df, _LOWER_IS_BETTER, "Lower is better", ylim_top=max(1.05, df[[c for c, _ in _LOWER_IS_BETTER]].max(numeric_only=True).max() * 1.15))
+    _panel(ax_lo, df, _LOWER_IS_BETTER, "Lower is better", ylim_top=lower_ylim)
     handles, labels = ax_hi.get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=3, fontsize=9)
-    fig.suptitle("Real-document evaluation: same 15 hand-verified ARDB pages, all three approaches", y=1.16, fontsize=11)
+    fig.suptitle("Real-document evaluation: same 15 hand-verified ARDB pages, all three approaches", y=1.16, fontsize=12, fontweight="bold")
     fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight")
+    fig.savefig(out_path, dpi=REPORT_DPI, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -103,6 +112,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("docs/figures/real_doc_comparison.png"))
     args = parser.parse_args()
 
+    apply_report_style()
     df = pd.read_csv(args.csv)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     plot_real_doc_comparison(df, args.out)
