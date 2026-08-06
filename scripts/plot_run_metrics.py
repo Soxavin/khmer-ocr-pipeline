@@ -24,14 +24,43 @@ import pandas as pd
 from _report_style import (
     MARKERS,
     apply_report_style,
+    dataset_linestyle,
     dataset_short_label,
+    model_color,
     model_display_name,
+    model_marker,
     run_display_label,
     save_all_formats,
 )
 
 _LINESTYLES = ["-", "--", "-.", ":"]
 _MARKERS = MARKERS
+
+
+def _jitter_duplicate_epochs(group: pd.DataFrame, spread: float = 0.12) -> pd.Series:
+    """x-position per row, aligned to group.index: the row's epoch value, except when more than
+    one row in this single (model[, label], dataset-version) line shares the same epoch value --
+    a same-config repeat (e.g. Gemma's v2-run2/run3, an identical-config rerun after a GT-typo
+    fix) or a different-batch-size run at the same epoch count (e.g. Qwen's two 3-epoch runs, 39
+    vs. 78 steps). Those rows are spread symmetrically around the shared epoch value, ordered by
+    step count then run_id, so neither point silently lands exactly on top of the other."""
+    xs = pd.Series(index=group.index, dtype=float)
+    for epochs, sub in group.groupby("epochs"):
+        sub = sub.sort_values(["steps", "run_id"], kind="stable")
+        n = len(sub)
+        for i, idx in enumerate(sub.index):
+            xs[idx] = float(epochs) + spread * (i - (n - 1) / 2)
+    return xs.reindex(group.index)
+
+
+def _epoch_disambiguator(run_id: str, label_lookup: dict[str, str]) -> str:
+    """The part of a run's display label beyond its dataset version -- e.g. 'v5\\n3ep, 78 steps'
+    becomes '3ep, 78 steps' -- used as a per-point annotation on epoch-axis charts, where the
+    dataset version is already conveyed by linestyle/panel and the epoch count by x-position, so
+    only the disambiguating remainder (steps, or a date tiebreak) is worth spelling out again."""
+    full = label_lookup.get(run_id, run_id)
+    parts = full.split("\n", 1)
+    return parts[1] if len(parts) > 1 else full
 
 
 def _infer_model_name(csv_path: Path) -> str:
@@ -85,14 +114,23 @@ def _run_label_lookup(df: pd.DataFrame) -> dict[str, str]:
 
 
 def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
-    """One panel per model, one line per label within it, CER vs. run (skipping rows with no
-    computable CER, e.g. a run where every validation row failed to parse). Split into
-    per-model panels rather than one shared axis for two reasons: (1) a single Qwen outlier
-    (Page-Furniture CER 5.18 on v5-run1) would otherwise compress every other, more relevant
-    point into an unreadable cluster near zero on a shared y-axis; (2) each model's own panel
-    can legibly label its x-axis with dataset version + epoch count (see _run_label_lookup)
-    without a combined axis getting overcrowded."""
-    labeled = df.dropna(subset=["label_cer"])
+    """One panel per model, one line per (content label, dataset version) within it, CER vs.
+    EPOCH COUNT (skipping rows with no computable CER, e.g. a run where every validation row
+    failed to parse). Split into per-model panels rather than one shared axis for two reasons:
+    (1) a single Qwen outlier (Page-Furniture CER 5.18 on v5-run1) would otherwise compress
+    every other, more relevant point into an unreadable cluster near zero on a shared y-axis;
+    (2) each model's own panel keeps its own epoch range legible.
+
+    x = epoch count, not run order: the earlier run-order x-axis meant equal-epoch points from
+    different dataset versions or step counts weren't visually aligned, obscuring exactly the
+    comparison this chart exists to support. Dataset version (v2 vs. v5) is now carried by
+    linestyle instead (solid v5, dashed v2 -- see _report_style.dataset_linestyle); a same-label
+    point that collides on epoch count (a same-config rerun, or a different-batch-size run at
+    the same epoch count) is jittered apart via _jitter_duplicate_epochs and annotated with the
+    disambiguating detail (steps, or a date) rather than silently overlapping.
+    """
+    labeled = df.dropna(subset=["label_cer"]).copy()
+    labeled["dataset_short"] = labeled["dataset_version"].apply(dataset_short_label)
     label_lookup = _run_label_lookup(df)
     models = sorted(df["model"].unique())
     fig, axes = plt.subplots(1, len(models), figsize=(6.5 * len(models), 5.5), squeeze=False)
@@ -116,49 +154,40 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
             # on hue, which a true grayscale/luminance-only rendering collapses entirely. Shape
             # carries the same distinction redundantly so the chart survives desaturation too.
             marker_by_label = {lbl: MARKERS[i % len(MARKERS)] for i, lbl in enumerate(labels_present)}
-            # Order runs by DATASET VERSION first, then epoch count within it -- not epoch
-            # count alone across both versions. v2 and v5 are different datasets (different
-            # size/split logic), so interleaving e.g. v2/2ep, v5/3ep, v2/5ep would make it look
-            # like a single controlled epoch sweep when two things are actually changing at
-            # once between adjacent points.
-            run_meta = model_data[["run_id", "dataset_version", "epochs"]].drop_duplicates()
-            run_meta = run_meta.sort_values(["dataset_version", "epochs"])
-            run_order = run_meta["run_id"].tolist()
-            x_pos = {r: i for i, r in enumerate(run_order)}
-            for label_idx, (label, group) in enumerate(model_data.groupby("label")):
-                group = group.set_index("run_id").reindex(run_order).dropna(subset=["label_cer"]).reset_index()
-                xs = [x_pos[r] for r in group["run_id"]]
+            for label_idx, ((label, ds), group) in enumerate(model_data.groupby(["label", "dataset_short"])):
+                group = group.sort_values("epochs")
+                xs = _jitter_duplicate_epochs(group)
                 # markeredgecolor: the Okabe-Ito palette's yellow is colorblind-safe but has
                 # very high luminance -- confirmed via an actual grayscale conversion that it
                 # nearly vanishes against a white background without a dark edge. A dark edge
                 # keeps every marker visible regardless of which color in the cycle it lands on.
-                line, = ax.plot(xs, group["label_cer"], marker=marker_by_label[label],
-                                 color=color_by_label[label], label=label,
-                                 markeredgecolor="0.15", markeredgewidth=0.6)
+                line, = ax.plot(xs.values, group["label_cer"], marker=marker_by_label[label],
+                                 color=color_by_label[label], linestyle=dataset_linestyle(ds),
+                                 label=label, markeredgecolor="0.15", markeredgewidth=0.6)
                 handles_by_label.setdefault(label, line)
                 # Sample-size annotation on every point: a single-sample point (e.g. Gemma's
                 # v5/5ep run, where 8/9 rows failed to parse and the one that did was missing
                 # most of its regions) looks identical to a well-sampled point otherwise --
-                # nothing on the line itself signals "this is one row, not sixteen." Offset
-                # varies by label's position among this panel's labels, not a fixed (6, 6) --
-                # near-tied CER values (e.g. Gemma's Table/Text both sitting near 0 on the same
-                # run) would otherwise stack their annotations illegibly on top of each other.
-                y_offset = 6 + 13 * (label_idx % 3)
+                # nothing on the line itself signals "this is one row, not sixteen." Offset is a
+                # distinct tier per (label, dataset-version) line -- not `% 3` -- because up to 7
+                # such lines can share a panel (Gemma has 4 labels x up to 2 dataset versions),
+                # and two DIFFERENT lines' points can land at nearly the same (epoch, CER) by
+                # coincidence (e.g. Page-Furniture/v5 and Table/v2 both near CER 0 at 5 epochs);
+                # wrapping the tier index at 3 put exactly that pair on the same offset,
+                # producing genuinely overlapping, unreadable text.
+                y_offset = 6 + 11 * label_idx
                 # Annotation text stays a fixed dark gray rather than the series color -- a
                 # light palette color (e.g. Okabe-Ito's yellow) reads fine as a marker fill but
                 # is low-contrast as small text against a white background.
-                for x, y, n in zip(xs, group["label_cer"], group["label_n_matched"]):
+                for run_id, x, y, n in zip(group["run_id"], xs.values, group["label_cer"], group["label_n_matched"]):
                     if pd.notna(n):
-                        ax.annotate(f"n={int(n)}", (x, y), textcoords="offset points",
+                        disamb = _epoch_disambiguator(run_id, label_lookup)
+                        ax.annotate(f"n={int(n)} ({disamb})", (x, y), textcoords="offset points",
                                     xytext=(6, y_offset), fontsize=6.5, color="0.25")
-            ax.set_xticks(range(len(run_order)))
-            ax.set_xticklabels([label_lookup.get(r, r) for r in run_order])
-            prev_ds = None
-            for i, run_id in enumerate(run_order):
-                ds = run_meta.set_index("run_id").loc[run_id, "dataset_version"]
-                if prev_ds is not None and ds != prev_ds:
-                    ax.axvline(i - 0.5, color="0.75", linestyle=":", linewidth=1, zorder=0)
-                prev_ds = ds
+            ax.set_xlabel("epochs")
+            epochs_present = sorted(model_data["epochs"].dropna().unique())
+            ax.set_xticks(epochs_present)
+            ax.set_xlim(min(epochs_present) - 0.6, max(epochs_present) + 0.6)
         ax.set_ylabel("CER (lower is better)")
         ax.set_title(model_display_name(model))
         ax.margins(y=0.18)
@@ -167,12 +196,7 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
         # for a metric that's bounded at zero. Keep the auto top, clamp the bottom explicitly.
         ax.set_ylim(bottom=0)
 
-    # Auto-detected caption for same-model, same-epoch-count, different-step-count runs (e.g.
-    # Qwen v5-run1 vs v5-run2: both "3 epochs", but GRAD_ACCUM=4 vs 2 gives 39 vs 78 steps --
-    # a real different-config comparison, not a duplicate run). Labels already show step count,
-    # but two points both reading "3ep" first is an easy thing to misread as redundant --
-    # spell out the reason in words rather than relying on the reader to notice the step delta.
-    notes = []
+    notes = ["line style shows dataset version (solid = v5, dashed = v2; Qwen has only v5 data)"]
     for model, mgroup in df.groupby("model"):
         meta = mgroup[["run_id", "dataset_version", "epochs", "steps"]].drop_duplicates()
         for (ds, ep), sub in meta.groupby(["dataset_version", "epochs"]):
@@ -182,10 +206,9 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
                 notes.append(f"{model_display_name(model)}'s {dataset_short_label(ds)}, "
                               f"{int(ep)}-epoch runs differ in step count ({steps_str} steps = "
                               f"different effective batch size), not duplicate configs")
-    if notes:
-        fig.text(0.5, -0.05, "Note: " + "; ".join(notes) + ".", ha="center", fontsize=8, style="italic")
+    fig.text(0.5, -0.05, "Note: " + "; ".join(notes) + ".", ha="center", fontsize=8, style="italic")
 
-    fig.suptitle("Per-label CER across fine-tune runs (one panel per model, own y-scale)", y=1.14)
+    fig.suptitle("Per-label CER vs. epoch count (one panel per model, own y-scale)", y=1.14)
     if handles_by_label:
         ordered_labels = sorted(handles_by_label)
         fig.legend([handles_by_label[l] for l in ordered_labels], ordered_labels,
@@ -196,102 +219,126 @@ def plot_cer_by_run(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
-    """One point per run (deduplicated by run_id -- json_parse_failures/n_validation_rows is
-    a run-level number, repeated across that run's per-label rows in the flat CSV), one line
-    per model so a Gemma/Qwen comparison stays visually separable. Runs are ordered by epoch
-    count within each model (not alphabetically by run_id), and each dataset-version segment
-    is separated by a vertical divider -- v2 and v5 are different datasets (different size,
-    different split logic), not consecutive points on the same sweep, and a reader shouldn't
-    be able to mistake the v2-run3 -> v5-run4 jump for a training-duration effect."""
+    """One point per run (deduplicated by run_id -- json_parse_failures/n_validation_rows is a
+    run-level number, repeated across that run's per-label rows in the flat CSV). x = EPOCH
+    COUNT, the actual sweep variable -- not run order. This is the single most load-bearing
+    chart in the project for showing that 3 epochs is a non-monotonic optimum for BOTH models
+    independently: with epoch count on the x-axis, both models' V-shapes land at the same x
+    position and the pattern is visible at a glance, instead of requiring a reader to read every
+    x-tick label to notice it (the earlier run-order x-axis put Gemma's 3-epoch point and Qwen's
+    3-epoch point several slots apart for no reason other than list order).
+
+    Color = model (see _report_style.MODEL_COLOR, consistent with real_doc_comparison.png).
+    Linestyle = dataset version (solid v5, dashed v2 -- Qwen has only v5 data, so its line is
+    always solid). A same-model/same-epoch pair that used a different effective batch size
+    (Qwen's two 3-epoch runs, 39 vs. 78 steps) or is a same-config rerun (Gemma's v2-run2/run3)
+    would otherwise land on the exact same point -- jittered apart via _jitter_duplicate_epochs
+    and annotated with the disambiguating detail instead of silently overlapping."""
     per_run = df.drop_duplicates(subset=["run_id"]).copy()
     label_lookup = _run_label_lookup(df)
-    # Wide figure + rotated labels: up to 10 runs share this one axis (unlike the per-model-
-    # panel CER chart), and each label now carries dataset+epochs+steps -- too much text to
-    # fit horizontally at this density without either.
-    fig, ax = plt.subplots(figsize=(max(10, 1.35 * len(per_run)), 6))
+    fig, ax = plt.subplots(figsize=(9, 6.5))
     if per_run.empty or per_run["n_validation_rows"].isna().all():
         ax.text(0.5, 0.5, "no run data yet", ha="center", va="center", transform=ax.transAxes)
     else:
         per_run["failure_rate"] = per_run["json_parse_failures"] / per_run["n_validation_rows"]
-        models = sorted(per_run["model"].unique())
-        marker_by_model = {m: _MARKERS[i % len(_MARKERS)] for i, m in enumerate(models)}
+        per_run["dataset_short"] = per_run["dataset_version"].apply(dataset_short_label)
 
-        # Global x-order: group by model, then by dataset version, then by epoch count, so
-        # each model's sweep reads left-to-right and version segments stay contiguous.
-        per_run["dataset_short"] = per_run["dataset_version"].astype(str)
-        ordered = per_run.sort_values(["model", "dataset_short", "epochs"])
-        x_order = ordered["run_id"].tolist()
-        x_pos = {r: i for i, r in enumerate(x_order)}
+        legend_handles: dict[str, object] = {}
+        # Two different (model, dataset) lines can land on the exact same point -- e.g. Gemma's
+        # v2 5-epoch run and Qwen's v5 5-epoch run both sit at (5, 1.0), both being 100%
+        # failures. A fixed xytext offset put both lines' annotation text on top of each other,
+        # unreadable. Each of the (at most 3) lines gets its own vertical tier instead.
+        for line_idx, ((model, ds), group) in enumerate(per_run.groupby(["model", "dataset_short"])):
+            group = group.sort_values("epochs")
+            xs = _jitter_duplicate_epochs(group)
+            line, = ax.plot(xs.values, group["failure_rate"], marker=model_marker(model),
+                             color=model_color(model), linestyle=dataset_linestyle(ds),
+                             markeredgecolor="0.15", markeredgewidth=0.6)
+            legend_handles[f"{model_display_name(model)} — {ds}"] = line
+            y_offset = 8 + 14 * line_idx
+            for run_id, x, y in zip(group["run_id"], xs.values, group["failure_rate"]):
+                disamb = _epoch_disambiguator(run_id, label_lookup)
+                ax.annotate(disamb, (x, y), textcoords="offset points", xytext=(0, y_offset),
+                            ha="center", fontsize=6.5, color="0.3")
 
-        for model, group in per_run.groupby("model"):
-            group = group.set_index("run_id").reindex([r for r in x_order if r in group["run_id"].values])
-            xs = [x_pos[r] for r in group.index]
-            ax.plot(xs, group["failure_rate"], marker=marker_by_model[model], label=model_display_name(model),
-                    markeredgecolor="0.15", markeredgewidth=0.6)
-
-        # Vertical dividers between dataset-version segments (any model).
-        prev_ds = None
-        for i, run_id in enumerate(x_order):
-            ds = ordered.iloc[i]["dataset_short"]
-            if prev_ds is not None and ds != prev_ds:
-                ax.axvline(i - 0.5, color="0.75", linestyle=":", linewidth=1, zorder=0)
-            prev_ds = ds
-
-        ax.set_xticks(range(len(x_order)))
-        ax.set_xticklabels([label_lookup.get(r, r) for r in x_order], rotation=35, ha="right")
-        if len(models) > 1:
-            # Outside the axes (to the right) rather than "best" inside -- keeps the legend from
-            # ever landing on top of a data point regardless of how the curves happen to shape up.
-            ax.legend(fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        ordered_keys = sorted(legend_handles)
+        ax.legend([legend_handles[k] for k in ordered_keys], ordered_keys,
+                   fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        epochs_present = sorted(per_run["epochs"].dropna().unique())
+        ax.set_xticks(epochs_present)
+        ax.set_xlim(min(epochs_present) - 0.75, max(epochs_present) + 0.75)
     ax.set_ylabel("JSON parse-failure rate")
-    ax.set_xlabel(None)
-    ax.set_title("JSON parse-failure rate across fine-tune runs")
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_xlabel("epochs")
+    ax.set_title("JSON parse-failure rate vs. epoch count")
+    # Top clamp well above 1.0 (not 1.05): with up to 3 stacked annotation tiers on points
+    # that sit at failure_rate=1.0 (a common value -- several runs are 100% failures), the
+    # highest tier's point-offset text needs real data-space headroom below the title, or it
+    # renders on top of the title text (annotate() isn't clipped to the axes by default).
+    ax.set_ylim(-0.05, 1.35)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)
 
 
-def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, label_lookup: dict[str, str] | None = None) -> None:
-    """One line per (model, run) from eval/loss_history.csv's long-format {model, run, step,
-    loss} rows -- the actual per-step training-loss curve, not just the start/end summary
-    logged in the narrative run logs. This is a convergence sanity check, not a quality signal:
-    a clean drop here does not imply good generalization (Gemma v2-run3's loss dropped just as
-    cleanly as every other run despite 9/9 eval JSON-parse failures -- see
-    eval/gemma_finetune_runs.md). Use alongside plot_cer_by_run/plot_parse_failure_rate_by_run,
-    never in place of them."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path, run_meta: pd.DataFrame,
+                      label_lookup: dict[str, str] | None = None) -> None:
+    """One panel per model (Gemma left, Qwen right), one line per run within it, from
+    eval/loss_history.csv's long-format {model, run, step, loss} rows -- the actual per-step
+    training-loss curve, not just the start/end summary logged in the narrative run logs.
+    Faceting by model halves the line count each panel has to hold (6 -> up to 6 total but
+    split, 4 for Qwen) and matches plot_cer_by_run's existing per-model-panel layout so the
+    figure set reads as one consistent design instead of a one-off layout per chart. Linestyle
+    within a panel still encodes dataset version (solid v5, dashed v2), the same convention used
+    in the other two trend charts.
+
+    This is a convergence sanity check, not a quality signal: a clean drop here does not imply
+    good generalization (Gemma v2-run3's loss dropped just as cleanly as every other run despite
+    9/9 eval JSON-parse failures -- see eval/gemma_finetune_runs.md). Use alongside
+    plot_cer_by_run/plot_parse_failure_rate_by_run, never in place of them."""
+    label_lookup = label_lookup or {}
     if loss_df.empty:
+        fig, ax = plt.subplots(figsize=(10, 6))
         ax.text(0.5, 0.5, "no loss history yet", ha="center", va="center", transform=ax.transAxes)
-    else:
-        label_lookup = label_lookup or {}
-        run_ids = sorted(loss_df["run_id"].unique())
+        ax.set_ylabel("training loss (log scale)")
+        ax.set_xlabel("training step")
+        ax.set_title("Training loss by step, across fine-tune runs")
+        fig.tight_layout()
+        save_all_formats(fig, out_path)
+        plt.close(fig)
+        return
+
+    loss_df = loss_df.merge(run_meta[["run_id", "dataset_version"]], on="run_id", how="left")
+    loss_df["dataset_short"] = loss_df["dataset_version"].apply(dataset_short_label)
+    models = sorted(loss_df["run_id"].str.split("/").str[0].unique())
+    fig, axes = plt.subplots(1, len(models), figsize=(7 * len(models), 5.5), squeeze=False, sharey=True)
+    axes = axes[0]
+
+    for ax, model in zip(axes, models):
+        model_loss = loss_df[loss_df["run_id"].str.startswith(model + "/")]
+        run_ids = sorted(model_loss["run_id"].unique())
         color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        linestyle_by_model = {}
         color_by_run = {r: color_cycle[i % len(color_cycle)] for i, r in enumerate(run_ids)}
         # Sparse markers with a dark edge, not just a colored line -- confirmed via an actual
-        # grayscale conversion that a high-luminance palette color (Okabe-Ito's yellow, which
-        # this 6-run cycle does reach) nearly disappears as a plain line against white. A
-        # marker every ~10 steps, per-run shape, gives the same color+shape redundancy the
-        # other three charts already have.
+        # grayscale conversion that a high-luminance palette color (Okabe-Ito's yellow) nearly
+        # disappears as a plain line against white. A marker every ~10 steps, per-run shape,
+        # gives the same color+shape redundancy the other two trend charts already have.
         marker_by_run = {r: MARKERS[i % len(MARKERS)] for i, r in enumerate(run_ids)}
-        for run_id, group in loss_df.groupby("run_id"):
-            model = run_id.split("/")[0]
-            linestyle_by_model.setdefault(model, _LINESTYLES[len(linestyle_by_model) % len(_LINESTYLES)])
+        for run_id, group in model_loss.groupby("run_id"):
             group = group.sort_values("step")
+            ds = group["dataset_short"].iloc[0]
             display = label_lookup.get(run_id, run_id).replace("\n", ", ")
             ax.plot(group["step"], group["loss"], color=color_by_run[run_id],
-                    linestyle=linestyle_by_model[model], label=f"{model_display_name(model)} — {display}",
+                    linestyle=dataset_linestyle(ds), label=display,
                     marker=marker_by_run[run_id], markevery=10, markersize=5,
                     markeredgecolor="0.15", markeredgewidth=0.5)
-        # Outside the axes (right side) rather than "upper right" inside -- with 6 runs the
-        # legend box was starting to sit over the same region several curves converge into.
-        ax.legend(fontsize=8.5, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        ax.legend(fontsize=8, loc="upper right")
         ax.set_yscale("log")
-    ax.set_ylabel("training loss (log scale)")
-    ax.set_xlabel("training step")
-    ax.set_title("Training loss by step, across fine-tune runs")
-    ax.grid(True, alpha=0.3, which="both")
+        ax.set_title(model_display_name(model))
+        ax.set_xlabel("training step")
+        ax.grid(True, alpha=0.3, which="both")
+
+    axes[0].set_ylabel("training loss (log scale)")
+    fig.suptitle("Training loss by step (one panel per model, solid = v5 / dashed = v2)", y=1.02)
     fig.tight_layout()
     save_all_formats(fig, out_path)
     plt.close(fig)
@@ -323,7 +370,9 @@ def main() -> None:
     if args.loss_csv.is_file():
         loss_df = pd.read_csv(args.loss_csv)
         loss_df["run_id"] = loss_df["model"] + "/" + loss_df["run"].astype(str)
-        plot_loss_by_run(loss_df, args.out_dir / "loss_by_run.png", label_lookup=_run_label_lookup(df))
+        run_meta = df.drop_duplicates(subset=["run_id"])[["run_id", "dataset_version"]]
+        plot_loss_by_run(loss_df, args.out_dir / "loss_by_run.png", run_meta=run_meta,
+                          label_lookup=_run_label_lookup(df))
         written += [args.out_dir / "loss_by_run.png", args.out_dir / "loss_by_run.pdf"]
 
     print(f"Wrote {', '.join(str(p) for p in written)}")

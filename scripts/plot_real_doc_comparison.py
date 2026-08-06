@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from _report_style import apply_report_style, save_all_formats
+from _report_style import apply_report_style, model_color, save_all_formats
 
 # (csv column, display label)
 _HIGHER_IS_BETTER = [
@@ -57,7 +57,6 @@ def _panel(ax, df: pd.DataFrame, metrics: list[tuple[str, str]], title: str, yli
     n_approaches = len(approaches)
     bar_width = 0.8 / n_approaches
     x = np.arange(n_metrics)
-    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     for i, approach in enumerate(approaches):
         row = df[df["model"] == approach].iloc[0]
@@ -71,10 +70,10 @@ def _panel(ax, df: pd.DataFrame, metrics: list[tuple[str, str]], title: str, yli
             else:
                 heights.append(float(val))
         bars = ax.bar(offsets, heights, width=bar_width, label=_APPROACH_LABEL.get(approach, approach),
-                       color=color_cycle[i % len(color_cycle)])
+                       color=model_color(approach))
         for j in failed_positions:
             ax.annotate("no\noutput", (offsets[j], 0.015), ha="center", va="bottom",
-                        fontsize=7, color=color_cycle[i % len(color_cycle)], fontweight="bold")
+                        fontsize=7, color=model_color(approach), fontweight="bold")
         for bar, h, j in zip(bars, heights, range(n_metrics)):
             if j not in failed_positions:
                 ax.annotate(f"{h:.2f}", (bar.get_x() + bar.get_width() / 2, h),

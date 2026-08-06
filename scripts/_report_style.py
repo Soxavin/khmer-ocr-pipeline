@@ -41,6 +41,29 @@ _PALETTE = [
 # information redundantly.
 MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
+# Fixed color/marker per approach or model, used consistently across every chart in the
+# fine-tune-eval set (real_doc_comparison.png, parse_failure_rate_by_run.png) -- so "blue"
+# always means Gemma and "green" always means Qwen regardless of which figure a reader is
+# looking at, instead of each script picking colors independently by cycle position.
+MODEL_COLOR = {
+    "ocr_pipeline_surya": _PALETTE[0],
+    "gemma": _PALETTE[1],
+    "qwen": _PALETTE[2],
+}
+MODEL_MARKER = {
+    "ocr_pipeline_surya": "D",
+    "gemma": "o",
+    "qwen": "s",
+}
+
+
+def model_color(model: str) -> str:
+    return MODEL_COLOR.get(model, _PALETTE[-1])
+
+
+def model_marker(model: str) -> str:
+    return MODEL_MARKER.get(model, "o")
+
 
 def apply_report_style() -> None:
     plt.rcParams.update({
@@ -82,6 +105,17 @@ def dataset_short_label(dataset_version: str) -> str:
     """'Soxavin/ardb-sft-v5' -> 'v5', 'Soxavin/ardb-gemma-sft-v2' -> 'v2'."""
     m = _DATASET_VERSION_RE.search(str(dataset_version))
     return f"v{m.group(1)}" if m else str(dataset_version)
+
+
+# Dataset-version encoding shared across the epoch-sweep charts (parse_failure_rate_by_run,
+# cer_by_run, loss_by_run) -- linestyle rather than color, since color in those charts is
+# already spoken for (model, content-label, or per-run identity) and a reader only ever needs
+# to tell "v2 vs v5" apart, not rank them on a scale.
+DATASET_LINESTYLE = {"v2": "--", "v5": "-"}
+
+
+def dataset_linestyle(dataset_version: str) -> str:
+    return DATASET_LINESTYLE.get(dataset_short_label(dataset_version), "-")
 
 
 def run_display_label(dataset_version: str, epochs, steps=None) -> str:
