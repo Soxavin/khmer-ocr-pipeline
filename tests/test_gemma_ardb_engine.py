@@ -28,7 +28,7 @@ def _install_fake(monkeypatch, outputs):
     """outputs: list of str (stdout) or Exception, one per page call."""
     calls = {"n": 0}
 
-    def fake_run(page_image, config):
+    def fake_run(page_image, config, **kwargs):
         out = outputs[calls["n"]]
         calls["n"] += 1
         if isinstance(out, Exception):
@@ -104,6 +104,32 @@ def test_accepts_on_page_and_on_step(monkeypatch):
     seen = []
     ge.run_gemma_ardb(_pre(1), on_page=lambda i, t: seen.append((i, t)), on_step=lambda s: None)
     assert seen == [(0, 1)]
+
+
+def test_forwards_is_cancelled_to_the_subprocess_runner(monkeypatch):
+    captured = {}
+
+    def fake_run(page_image, config, is_cancelled=None):
+        captured["is_cancelled"] = is_cancelled
+        return "[]"
+
+    monkeypatch.setattr(ge, "run_isolated_inference", fake_run)
+    sentinel = lambda: False
+    ge.run_gemma_ardb(_pre(1), is_cancelled=sentinel)
+    assert captured["is_cancelled"] is sentinel
+
+
+def test_inference_cancelled_propagates_uncaught_not_failed_soft(monkeypatch):
+    """A user Stop mid-subprocess must abort the whole run, not be treated as a
+    per-page failure that leaves the page empty and continues to the next one."""
+    from khmer_pipeline.engines.finetune_ardb.subprocess_runner import InferenceCancelled
+
+    def fake_run(page_image, config, is_cancelled=None):
+        raise InferenceCancelled("cancelled by user")
+
+    monkeypatch.setattr(ge, "run_isolated_inference", fake_run)
+    with pytest.raises(InferenceCancelled):
+        ge.run_gemma_ardb(_pre(2), is_cancelled=lambda: True)
 
 
 # --- registry + API wiring ---

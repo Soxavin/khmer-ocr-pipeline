@@ -19,6 +19,7 @@ from nicegui import run
 from khmer_pipeline.ingest import ingest, resolve_auto_dpi
 from khmer_pipeline.preprocess import preprocess, suggest_preprocess_settings, PreprocessConfig
 from khmer_pipeline.engines.engine_registry import get_ocr_engine, ACTIVE_CORRECTION_ENGINE
+from khmer_pipeline.engines.finetune_ardb.subprocess_runner import InferenceCancelled
 from khmer_pipeline.export import export
 from khmer_pipeline.utils.memory import clear_device_cache
 
@@ -101,13 +102,24 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
             # Same worker-thread contract as _on_page: one scalar write.
             state.progress.step = step
 
+        def _is_cancelled() -> bool:
+            # Polled from inside an engine's blocking subprocess wait (the
+            # finetune_ardb engines) so Stop can kill that subprocess mid-page,
+            # not just at the next page boundary — same worker-thread contract
+            # as _on_page/_on_step: one scalar read.
+            return state.progress.cancel_requested
+
         engine = get_ocr_engine(s.ocr_engine_key)
-        # Sub-stage telemetry is opt-in per engine: only pass `on_step` to engines
-        # whose signature accepts it, so older engines keep working untouched.
+        # Sub-stage telemetry / mid-page cancellation are opt-in per engine: only
+        # pass these to engines whose signature accepts them, so older engines
+        # keep working untouched.
         extra = {}
         try:
-            if "on_step" in signature(engine).parameters:
+            params = signature(engine).parameters
+            if "on_step" in params:
                 extra["on_step"] = _on_step
+            if "is_cancelled" in params:
+                extra["is_cancelled"] = _is_cancelled
         except (TypeError, ValueError):
             pass  # builtin/C callable with no introspectable signature
         state.surya_result = await _stage(
@@ -149,7 +161,7 @@ async def run_pipeline(doc: Document, s: Settings, on_stage: Callable[[str], Non
             convert_numerals=s.convert_numerals, repair_tables=s.repair_tables,
             stitch_pages=s.stitch_pages, provenance=provenance,
         )
-    except _RunCancelled:
+    except (_RunCancelled, InferenceCancelled):
         # No half-populated document: clear partial stage results (reset_run also
         # replaces `progress`, resetting active + cancel_requested for the next run),
         # then record why there are no results.

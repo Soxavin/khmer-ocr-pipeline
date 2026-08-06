@@ -158,3 +158,54 @@ def test_engine_without_on_step_is_called_unchanged():
     }, doc)
 
     assert ok is True
+
+
+def test_engine_receives_is_cancelled_when_it_accepts_one():
+    """Engines that can kill their own in-flight work (the isolated-subprocess
+    fine-tune engines) get a live cancel-flag reader wired in, so Stop can
+    interrupt them mid-page, not just at the next page boundary."""
+    doc = _doc()
+    seen: list[bool] = []
+
+    def engine_with_cancel(result, on_page=None, is_cancelled=None):
+        assert is_cancelled is not None, "runner must pass is_cancelled to a willing engine"
+        seen.append(is_cancelled())
+        doc.progress.cancel_requested = True
+        seen.append(is_cancelled())
+        return "OCR"
+
+    ok = _run_with({
+        "ingest": _flat_ingest(),
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: engine_with_cancel,
+        "ACTIVE_CORRECTION_ENGINE": lambda *a, **kw: "POST",
+        "export": lambda *a, **kw: "EXPORT",
+    }, doc)
+
+    # cancel_requested was set from inside the "engine" itself (simulating a mid-
+    # subprocess kill), so the stage-boundary check after OCR aborts the run.
+    assert ok is False
+    assert seen == [False, True]
+
+
+def test_inference_cancelled_from_engine_is_treated_as_cancellation_not_failure():
+    """A finetune_ardb engine that kills its subprocess mid-page raises
+    InferenceCancelled straight out of the OCR stage — the run must report
+    'cancelled', the same as a between-page cancel, not a stage failure."""
+    from khmer_pipeline.engines.finetune_ardb.subprocess_runner import InferenceCancelled
+
+    doc = _doc()
+
+    def engine_that_gets_cancelled(result, on_page=None, is_cancelled=None):
+        raise InferenceCancelled("gemma_ardb_infer.py cancelled by user")
+
+    ok = _run_with({
+        "ingest": _flat_ingest(),
+        "preprocess": lambda *a, **kw: "PRE",
+        "get_ocr_engine": lambda key: engine_that_gets_cancelled,
+    }, doc)
+
+    assert ok is False
+    assert "cancelled" in (doc.run_error or "").lower()
+    assert doc.surya_result is None and doc.ingest_result is None
+    assert doc.progress.active is False

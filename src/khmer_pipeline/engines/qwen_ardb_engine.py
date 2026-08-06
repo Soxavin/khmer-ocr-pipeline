@@ -33,7 +33,7 @@ import warnings
 from typing import Callable, Optional
 
 from ..models import PreprocessResult, SuryaResult, SuryaPageResult
-from .finetune_ardb.subprocess_runner import FineTuneConfig, run_isolated_inference
+from .finetune_ardb.subprocess_runner import FineTuneConfig, InferenceCancelled, run_isolated_inference
 from .finetune_ardb.parsing import parse_regions
 from .finetune_ardb.transform import regions_to_page
 
@@ -72,12 +72,17 @@ def run_qwen_ardb(
     result: PreprocessResult,
     on_page: Optional[Callable[[int, int], None]] = None,
     on_step: Optional[Callable[[str], None]] = None,
+    is_cancelled: Optional[Callable[[], bool]] = None,
 ) -> SuryaResult:
     """Run the Qwen3.5-0.8B ARDB fine-tune over every page image, returning the
     standard SuryaResult. Fails soft on a per-page subprocess or parse error;
     never raises mid-run. Unlike gemma_ardb_engine.py, an unparseable-JSON page
     preserves the raw model text in `ocr_text` (see module docstring) instead
-    of discarding it — the expected, not exceptional, outcome for this engine."""
+    of discarding it — the expected, not exceptional, outcome for this engine.
+    `is_cancelled`, if given, is polled while a page's (possibly many-minute)
+    subprocess is running — on True the subprocess is killed and
+    InferenceCancelled propagates out uncaught, since a user Stop is not a
+    per-page failure to fail soft on."""
     total = len(result.page_images)
     warns: list[str] = [
         f"[Trial] {total} page(s) run through the Qwen3.5 ARDB fine-tune "
@@ -91,7 +96,9 @@ def run_qwen_ardb(
         if on_step is not None:
             on_step(_STEP_SLOW_FINETUNE)
         try:
-            raw = run_isolated_inference(img, _CONFIG)
+            raw = run_isolated_inference(img, _CONFIG, is_cancelled=is_cancelled)
+        except InferenceCancelled:
+            raise
         except Exception as exc:  # noqa: BLE001 — fail soft: one page can't kill the run
             warns.append(f"Qwen ARDB fine-tune failed on page {idx + 1}: {exc!r} — page left empty")
             pages.append(SuryaPageResult(page_index=idx, text_blocks=[], tables=[], ocr_text=""))

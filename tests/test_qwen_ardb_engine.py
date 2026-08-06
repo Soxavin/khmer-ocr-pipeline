@@ -31,7 +31,7 @@ def _install_fake(monkeypatch, outputs):
     """outputs: list of str (stdout) or Exception, one per page call."""
     calls = {"n": 0}
 
-    def fake_run(page_image, config):
+    def fake_run(page_image, config, **kwargs):
         out = outputs[calls["n"]]
         calls["n"] += 1
         if isinstance(out, Exception):
@@ -132,6 +132,35 @@ def test_on_step_emits_a_distinct_slow_finetune_marker(monkeypatch):
     steps = []
     qe.run_qwen_ardb(_pre(1), on_step=steps.append)
     assert "finetune_slow" in steps
+
+
+def test_forwards_is_cancelled_to_the_subprocess_runner(monkeypatch):
+    # Qwen's generations run up to 1200s — mid-subprocess cancellation matters
+    # here even more than for Gemma's shorter, faster subprocess calls.
+    captured = {}
+
+    def fake_run(page_image, config, is_cancelled=None):
+        captured["is_cancelled"] = is_cancelled
+        return "[]"
+
+    monkeypatch.setattr(qe, "run_isolated_inference", fake_run)
+    sentinel = lambda: False
+    qe.run_qwen_ardb(_pre(1), is_cancelled=sentinel)
+    assert captured["is_cancelled"] is sentinel
+
+
+def test_inference_cancelled_propagates_uncaught_not_failed_soft(monkeypatch):
+    """A user Stop mid-subprocess must abort the whole run — unlike a normal
+    unparseable-output page (Qwen's expected failure mode), this is not
+    something to fail soft on and continue past."""
+    from khmer_pipeline.engines.finetune_ardb.subprocess_runner import InferenceCancelled
+
+    def fake_run(page_image, config, is_cancelled=None):
+        raise InferenceCancelled("cancelled by user")
+
+    monkeypatch.setattr(qe, "run_isolated_inference", fake_run)
+    with pytest.raises(InferenceCancelled):
+        qe.run_qwen_ardb(_pre(2), is_cancelled=lambda: True)
 
 
 # --- registry + API wiring ---
