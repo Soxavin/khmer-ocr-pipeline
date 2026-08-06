@@ -107,6 +107,35 @@ def plot_parse_failure_rate_by_run(df: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
+def plot_loss_by_run(loss_df: pd.DataFrame, out_path: Path) -> None:
+    """One line per (model, run) from eval/loss_history.csv's long-format {model, run, step,
+    loss} rows -- the actual per-step training-loss curve, not just the start/end summary
+    logged in the narrative run logs. This is a convergence sanity check, not a quality signal:
+    a clean drop here does not imply good generalization (Gemma v2-run3's loss dropped just as
+    cleanly as every other run despite 9/9 eval JSON-parse failures -- see
+    eval/gemma_finetune_runs.md). Use alongside plot_cer_by_run/plot_parse_failure_rate_by_run,
+    never in place of them."""
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    if loss_df.empty:
+        ax.text(0.5, 0.5, "no loss history yet", ha="center", va="center", transform=ax.transAxes)
+    else:
+        run_ids = sorted(loss_df["run_id"].unique())
+        color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        color_by_run = {r: color_cycle[i % len(color_cycle)] for i, r in enumerate(run_ids)}
+        for run_id, group in loss_df.groupby("run_id"):
+            group = group.sort_values("step")
+            ax.plot(group["step"], group["loss"], color=color_by_run[run_id], label=run_id)
+        ax.legend(fontsize=8, loc="best")
+        ax.set_yscale("log")
+    ax.set_ylabel("training loss (log scale)")
+    ax.set_xlabel("step")
+    ax.set_title("Training loss by step, across fine-tune runs")
+    ax.grid(True, alpha=0.3, which="both")
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot fine-tune run-log trends from one or more CSVs.")
     parser.add_argument("csvs", type=Path, nargs="+",
@@ -115,6 +144,9 @@ def main() -> None:
     parser.add_argument("--labels", nargs="+", default=None,
                         help="Model name per CSV, same order as csvs (default: inferred from "
                              "filename, stripping a trailing '_finetune_runs')")
+    parser.add_argument("--loss-csv", type=Path, default=Path("eval/loss_history.csv"),
+                        help="Long-format {model,run,step,loss} CSV (default eval/loss_history.csv); "
+                             "skipped if the file doesn't exist")
     parser.add_argument("--out-dir", type=Path, default=Path("docs/figures"),
                         help="Folder to write PNG charts into (default docs/figures)")
     args = parser.parse_args()
@@ -123,7 +155,15 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     plot_cer_by_run(df, args.out_dir / "cer_by_run.png")
     plot_parse_failure_rate_by_run(df, args.out_dir / "parse_failure_rate_by_run.png")
-    print(f"Wrote {args.out_dir / 'cer_by_run.png'} and {args.out_dir / 'parse_failure_rate_by_run.png'}")
+    written = [args.out_dir / "cer_by_run.png", args.out_dir / "parse_failure_rate_by_run.png"]
+
+    if args.loss_csv.is_file():
+        loss_df = pd.read_csv(args.loss_csv)
+        loss_df["run_id"] = loss_df["model"] + "/" + loss_df["run"].astype(str)
+        plot_loss_by_run(loss_df, args.out_dir / "loss_by_run.png")
+        written.append(args.out_dir / "loss_by_run.png")
+
+    print(f"Wrote {', '.join(str(p) for p in written)}")
 
 
 if __name__ == "__main__":

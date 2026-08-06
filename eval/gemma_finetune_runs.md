@@ -83,6 +83,17 @@ one place (e.g. for a mentor question) without re-reading every cell.
   that layout detection and transcription must happen in one forward pass, not two. Full
   rationale lives in the "v2 — unified page understanding" section below and in the plan file
   referenced from `project_gemma4_ardb_finetune` memory.
+- **Train-only image augmentation (v5 onward)**: brightness jitter ±10%, contrast jitter ±10%,
+  and a 20%-chance light Gaussian blur (radius 0.1-0.3) — applied only to `converted_dataset`
+  (the training split, via `convert_to_conversation(sample, train=True, rng=_aug_rng)`);
+  `val_dataset` is read directly by the eval cells and never routed through it. Deliberately
+  **no geometric augmentation** (rotation/crop/scale/affine) — every training row's `box_2d`
+  targets are ground-truth coordinates that would need re-projecting to match any geometric
+  transform, which this pass doesn't do, and table row/column alignment is exactly what the
+  model needs to learn, so an unprojected transform would just make the label wrong rather than
+  help. Identical implementation in `colab_qwen35_finetune.ipynb` (same parameters, same
+  train/val split point), so it isn't a confound between the two models' results — see
+  `docs/PROJECT_LOG.md` §2.106 for the original decision record.
 
 ## v1 — split configs (transcription + layout), superseded 2026-07-28
 
@@ -217,3 +228,137 @@ epochs-dialed-back-to-3 decision made after Run 3's v2 finding above, now agains
   substitution pattern above is exactly the kind of systematic error the plan's
   correction-lexicon step targets, but per that plan's own rule a pair only qualifies once it
   recurs across ≥2 distinct documents — this is one document's worth of examples so far.
+
+**Real-doc eval, same adapter (`Soxavin/gemma4-e2b-ardb-lora-v5-e3`)** (2026-08-05) — scored via
+`scripts/colab_eval_real.ipynb` (generation) + `scripts/eval_finetune_real.py` (scoring) against
+`eval/datasets/real`'s 15 real, hand-verified ARDB pages — a genuinely out-of-distribution test
+set (not template-substituted synthetic data the model's own training distribution resembles more
+closely), tracked separately in `eval/real_doc_eval.csv` since its metric shape (whole-page
+`table_cer`/`cell_accuracy`/`text_cer`/`document_cer`) doesn't match the per-label CER schema the
+synthetic-val CSVs use.
+
+**Update (2026-08-05, same predictions, rescored)**: `eval_finetune_real.py`'s `_try_repair_json`
+was generalized after a Qwen run revealed a second failure mode (missing *both* the opening `[`
+and closing `]`, not just the closing one — see `docs/PROJECT_LOG.md` and
+`eval/qwen_finetune_runs.md`'s Run 2). Rescoring the *same* `real_predictions.json` (no
+regeneration) with the fixed parser recovers all 7 previously-unparseable pages — **0/15 parse
+failures now, down from 7/15**. The aggregate numbers get *worse*, not better, as a result: mean
+`table_cer` 0.611 (was 0.270), mean `cell_accuracy` 0.348 (was 0.653). This is not a regression —
+it's the previously-hidden failures finally being counted instead of excluded. All 7 newly-
+recovered pages score exactly `table_cer=1.000, cell_accuracy=0.000` — not a partial improvement,
+the worst possible score — meaning these pages' generations were comprehensively broken, both
+structurally (missing brackets) *and* substantively (empty/unusable table content), not two
+independent defects. The original 8 pages that already parsed keep their original scores
+unchanged. See `eval/real_doc_eval.csv` for the corrected row (old numbers kept in its own note
+for traceability, not silently overwritten).
+
+- **The "page 2" pattern holds, and is now sharper**: the 7 comprehensively-broken pages are
+  *exactly* the same 7 that failed to parse before the fix — 4 of 5 documents' 2nd page (typically
+  a table continuation, longer/denser content), plus one document's 1st and 3rd pages instead.
+  This reframes the earlier hypothesis: it's not "these pages have a JSON formatting quirk," it's
+  "generation comprehensively breaks down on these specific pages" — the bracket omission is a
+  symptom of the same failure, not a separate, milder bug.
+- **Where generation actually succeeded** (the original 8 pages, scores unchanged): mean
+  `table_cer` 0.270, mean `cell_accuracy` 0.653 (vs. mean `numeric_cell_accuracy` 0.742 — numeric
+  content held up better than full-cell accuracy, the same "numbers survive better than labels"
+  pattern seen in Qwen's runs). Mean `text_cer` (prose regions, all 15 pages) 1.099 — over 1.0,
+  meaning prose predictions are on average longer than and substantially diverge from the
+  reference.
+- **Read**: real ARDB documents are meaningfully harder than the synthetic val split — but not
+  because they use a different template. The entire corpus (2022-2026) reduces to only 2
+  structural templates, and every real-doc-eval page uses one of the same 2 templates train/val
+  does (verified: `_DEFAULT_EXCLUDE_STEMS` in `harvest_table_gt.py` excludes all 5 real-doc-eval
+  source documents, including both template anchors, from train/val entirely — so these are
+  unseen *pages*, not an unseen template family). The real difference is GT construction: train/
+  val's fixed labels (column headers, commodity names, section headers) are copied verbatim from
+  the template regardless of what's on the page, so those cells are correct by construction and
+  don't actually test whether the model read them off the image; only the per-document numbers/
+  dates are genuinely page-specific there. Real-doc GT is fully hand-verified per page, everything
+  included, on pages the model never saw. So real-doc eval tests "can it read the fixed template
+  content off real pixels, on unseen pages" — narrower than "generalizes to new structure," but
+  still the harder and more meaningful test. The headline is now **generation comprehensively
+  fails on roughly half the real pages** (7/15), not "half the pages have a parsing quirk." That's
+  a starker, more accurate picture of current real-doc readiness than the pre-fix numbers
+  suggested, and the p2/continuation-page pattern is the strongest lead so far for *why*.
+
+**Run 5: 52 steps, 2 epochs, clean rerun** (2026-08-06) — a first attempt at this same config was
+run and *withheld* from this log: step-1 loss (0.136) and LoRA-only peak memory (0.189 GB) were
+both far below what a fresh run should show, strong evidence the Colab runtime had silently kept
+the already-fine-tuned model loaded from a prior session (uploading a new notebook file does not
+guarantee a new kernel/VM). User did `Runtime → Restart session` and reran; this entry is that
+clean rerun.
+
+- **Freshness confirmed, not just asserted**: step-1 loss 0.326041 and step-2 loss 0.340867 are
+  *identical* to Run 4's (same values to 6 decimal places — expected, since both runs share the
+  same seed, data order, and step-vs-epoch ratio of 26 steps/epoch, so the first couple of steps
+  before the LR schedules diverge are fully deterministic); LoRA-only peak memory 3.446 GB is
+  within noise of Run 4's 3.465 GB. Both numbers now land where a genuine fresh 2-epoch run
+  should, resolving the contamination concern — this run's numbers are trustworthy.
+- `Num examples = 101 | Num Epochs = 2 | Total steps = 52` (L4, `per_device=1, GRAD_ACCUM=4`,
+  same effective batch 4 as every other v5 run); training: 592.8s, peak reserved memory 11.311 GB
+  / 22.034 GB (LoRA-only: 3.446 GB); loss 0.326 → ~0.005-0.06 (noisier tail than Run 4 — two
+  spikes back up to ~0.058 at steps 26 and 52, i.e. the last step of each epoch).
+- Adapter pushed to `Soxavin/gemma4-e2b-ardb-lora-v5-e2` — **this overwrites the earlier
+  contaminated attempt's push to the same adapter name**; nothing from that withheld run survives
+  on the Hub.
+- Eval (synthetic val, 9 rows): **9/9 JSON parse failures, 0 recovered via bracket-repair** —
+  worse than Run 4's 3/9 at 3 epochs on the identical dataset/split. Generation was also far
+  slower: 908.9s total, mean 101.0s/row (vs. no per-row timing captured for Run 4). Diagnostic
+  sample (`doc_010` page 0): expected 2856 chars, generated only 1095 chars, and *every* region
+  (Picture, both Page-Furniture lines, Section-Header, Table) came back `<region missing from
+  prediction>` — not a bracket/formatting slip, the generated JSON simply didn't contain any
+  region matching the expected labels.
+- **Read — this changes the epoch-direction conclusion, not just adds a data point**: on the same
+  `ardb-sft-v5` dataset and split, 3 epochs (Run 4) → 3/9 failures, 2 epochs (this run) → 9/9.
+  Pulling epochs back made Gemma's structural reliability *worse*, the opposite of what the v2-era
+  reasoning (66-row dataset, epochs pulled back 5→3 to fight overfitting) predicted. This mirrors
+  Qwen's own finding on the same dataset (`eval/qwen_finetune_runs.md` Run 3: pulling Qwen back to
+  2 epochs also made things worse, not better). Taken together, the two models now agree in
+  direction: on `ardb-sft-v5`, less training hurts, not helps. That reopens the mentor's ~10-epoch
+  suggestion as worth testing directly rather than dismissing it on the strength of the old v2
+  overfitting evidence, which was measured on a much smaller dataset.
+- Real-doc eval not run for this adapter (not requested this round — the synthetic-val result
+  alone was clear enough not to justify the ~15-minute real-doc generation cost on a config
+  already trending worse).
+
+**Run 6: 130 steps, 5 epochs** (2026-08-06) — the upward half of the epoch sweep the Run 5 "Read"
+proposed, testing whether more training (toward the mentor's ~10-epoch suggestion) reverses the
+2-epoch regression.
+
+- `Num examples = 101 | Num Epochs = 5 | Total steps = 130`; training: 1480.9s, peak reserved
+  memory 11.33 GB / 22.034 GB (LoRA-only: 3.465 GB) — memory figures match Run 4's almost to the
+  decimal (same batch shape), and step-1/step-2 loss (0.326041 / 0.340867) again match Runs 4 and
+  5 exactly, confirming a fresh run, no contamination concern this time. Loss dropped to
+  ~0.0015-0.006 by the end — lower than either Run 4's (~0.003-0.01) or Run 5's (~0.005-0.06)
+  tail, i.e. the deepest fit of the three.
+- Adapter pushed to `Soxavin/gemma4-e2b-ardb-lora-v5-e5`.
+- Eval (synthetic val, 9 rows): **8/9 JSON parse failures, 1 recovered via bracket-repair** — worse
+  than Run 4's 3/9, though marginally less bad than Run 5's 9/9. The one row that did parse
+  (`doc_035` p2) still dropped 4 of its expected regions (Picture, one of two Page-Furniture
+  lines, the entire Table, Text) — only `Page-Furniture` produced a scorable CER, and only 1
+  matched row (CER 0.000, not statistically meaningful at n=1). No other label has any CER signal
+  this run.
+- Inference-check sample (`val_dataset[0]`, `doc_010` page 0) shows a qualitatively different, more
+  severe failure mode than Runs 4/5: not just missing brackets, but per-region key corruption
+  throughout (`"box_2x"`, `"box2d"` with no underscore, `"label"]=`, `=` used in place of `:`,
+  mismatched quote styles within the same object) and the Table region's HTML degrades mid-
+  generation into fabricated pseudo-XML tags (`<record>`, `<type>`, `<price>`) mixed with what
+  reads as Vietnamese tokens (`"thuộc"`) — content that appears nowhere in this Khmer-only
+  corpus. This looks like a genuine overfitting signature at the output-format level: extremely
+  low training loss, but held-out generation doesn't degrade gracefully, it degrades into
+  syntactically incoherent, cross-lingual noise.
+- Generation was also slower and more variable: 1111.0s total, mean 123.4s/row (range 35.6s-451.0s
+  per row — the widest spread seen in any Gemma run so far).
+- **Read — this walks back Run 5's "reopens the ~10-epoch idea" conclusion, doesn't confirm it**:
+  three points now exist on the v5 epoch sweep — 2 epochs → 9/9 failures, 3 epochs → 3/9, 5 epochs
+  → 8/9. The relationship is **not monotonic**: 3 epochs is uniquely good, and both fewer *and*
+  more epochs regress from it. Extending further toward the mentor's ~10 is not a natural next
+  step on this evidence — 5 epochs already regressed sharply, so there's no basis yet to expect 10
+  would reverse that rather than regress further. **3 epochs (`Soxavin/gemma4-e2b-ardb-lora-v5-e3`,
+  Run 4) remains the strongest Gemma config found in this sweep** and the one to carry forward
+  unless something else about the setup changes (more data, regularization, etc.) — not worth
+  spending further Colab budget chasing higher epoch counts on the current data/config as-is.
+- Real-doc eval not run for this adapter, same reasoning as Run 5: the synthetic-val result is
+  unambiguous enough (worse than the current best on every axis, plus a new and more severe
+  qualitative failure mode) that the ~15-18 minute real-doc generation cost isn't justified for a
+  config that's already been superseded by Run 4's result.
