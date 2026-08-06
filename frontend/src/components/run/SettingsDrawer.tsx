@@ -207,8 +207,14 @@ export function SettingsDrawer(props: {
     if (bucket) bucket[1].push(e2)
     else engineGroups.push([e2.group, [e2]])
   }
+  // Below a small engine count, tabs cost more chrome (a toggle row + segmented
+  // control + tabpanel wrapper) than they save — the whole set fits as one flat,
+  // scannable list. Tabs earn their keep only once a group would overflow that list.
+  const totalEngineCount = engines.length
+  const useTabs = totalEngineCount > 6
   // The picker is tabbed by group: open on the selected engine's tab, but treat the
   // active tab as a pure VIEW filter — switching tabs never changes the selection.
+  // Only meaningful in the `useTabs` path — the flat-list path shows every group at once.
   const selectedGroup = engines.find((e2) => e2.key === engine)?.group
   const [activeGroup, setActiveGroup] = useState<string>(selectedGroup ?? engineGroups[0]?.[0] ?? 'local')
   // Follow the selected engine ONLY when it actually changes (e.g. selected from
@@ -216,12 +222,13 @@ export function SettingsDrawer(props: {
   // yank the tab back while the user is exploring the other group.
   const prevEngineRef = useRef(engine)
   useEffect(() => {
+    if (!useTabs) return
     if (engine !== prevEngineRef.current) {
       prevEngineRef.current = engine
       const g = engines.find((e2) => e2.key === engine)?.group
       if (g) setActiveGroup(g)
     }
-  }, [engine, engines])
+  }, [engine, engines, useTabs])
   // Roving-focus refs for the tablist: ArrowLeft/Right/Home/End move the active tab.
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const onTabKeyDown = (e: ReactKeyboardEvent) => {
@@ -332,70 +339,110 @@ export function SettingsDrawer(props: {
               <Switch checked={labsMode} disabled={disabled} onChange={onLabsModeChange} label={t('labs_mode')} />
             </div>
           )}
-          {/* Group SWITCHER — the house segmented control (§DESIGN Inputs): a bordered
-              joined row, active option takes primary-soft fill + primary-strong text,
-              matching the DPI toggle right below. Tab semantics + roving keys are kept
-              on top of that look; data-driven from `engineGroups`. */}
-          <div
-            role="tablist"
-            aria-label={t('engine_section')}
-            onKeyDown={onTabKeyDown}
-            className="mb-3 flex w-full overflow-hidden rounded-md border border-line-strong"
-          >
-            {engineGroups.map(([groupName], gi) => {
-              const GroupIcon = ENGINE_GROUP_ICONS[groupName]
-              const active = groupName === activeGroup
-              const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
-              const shortLabel = ENGINE_GROUP_LABELS_SHORT[groupName] ? t(ENGINE_GROUP_LABELS_SHORT[groupName]) : fullLabel
-              // The selected engine lives on this tab but it isn't showing: a marker dot
-              // (plus an SR-only note) keeps "which engine is active" from hiding.
-              const holdsHiddenSelection = !active && selectedGroup === groupName
-              return (
-                <button
-                  key={groupName}
-                  ref={(el) => { if (el) tabRefs.current.set(groupName, el); else tabRefs.current.delete(groupName) }}
-                  type="button"
-                  role="tab"
-                  id={`engine-tab-${groupName}`}
-                  aria-controls={`engine-panel-${groupName}`}
-                  aria-selected={active}
-                  tabIndex={active ? 0 : -1}
-                  title={fullLabel}
-                  aria-label={holdsHiddenSelection
-                    ? `${fullLabel} (${t('contains_selected_engine')})`
-                    : fullLabel}
-                  onClick={() => setActiveGroup(groupName)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 h-7 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
-                    gi > 0 ? 'border-l border-line-strong' : ''
-                  } ${active ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'}`}
+          {useTabs ? (
+            <>
+              {/* Group SWITCHER — the house segmented control (§DESIGN Inputs): a bordered
+                  joined row, active option takes primary-soft fill + primary-strong text,
+                  matching the DPI toggle right below. Tab semantics + roving keys are kept
+                  on top of that look; data-driven from `engineGroups`. Only worth the extra
+                  chrome once a group's list would otherwise overflow (see `useTabs`). */}
+              <div
+                role="tablist"
+                aria-label={t('engine_section')}
+                onKeyDown={onTabKeyDown}
+                className="mb-3 flex w-full overflow-hidden rounded-md border border-line-strong"
+              >
+                {engineGroups.map(([groupName], gi) => {
+                  const GroupIcon = ENGINE_GROUP_ICONS[groupName]
+                  const active = groupName === activeGroup
+                  const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
+                  const shortLabel = ENGINE_GROUP_LABELS_SHORT[groupName] ? t(ENGINE_GROUP_LABELS_SHORT[groupName]) : fullLabel
+                  // The selected engine lives on this tab but it isn't showing: a marker dot
+                  // (plus an SR-only note) keeps "which engine is active" from hiding.
+                  const holdsHiddenSelection = !active && selectedGroup === groupName
+                  return (
+                    <button
+                      key={groupName}
+                      ref={(el) => { if (el) tabRefs.current.set(groupName, el); else tabRefs.current.delete(groupName) }}
+                      type="button"
+                      role="tab"
+                      id={`engine-tab-${groupName}`}
+                      aria-controls={`engine-panel-${groupName}`}
+                      aria-selected={active}
+                      tabIndex={active ? 0 : -1}
+                      title={fullLabel}
+                      aria-label={holdsHiddenSelection
+                        ? `${fullLabel} (${t('contains_selected_engine')})`
+                        : fullLabel}
+                      onClick={() => setActiveGroup(groupName)}
+                      className={`flex flex-1 items-center justify-center gap-1.5 h-7 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${
+                        gi > 0 ? 'border-l border-line-strong' : ''
+                      } ${active ? 'bg-primary-soft text-primary-strong' : 'bg-surface text-ink-2 hover:bg-rail'}`}
+                    >
+                      {GroupIcon && <GroupIcon size={12} aria-hidden />}
+                      {shortLabel}
+                      {holdsHiddenSelection && <span aria-hidden className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Only the active group's cards render. ONE outer perimeter + hairline
+                  dividers; a SINGLE radiogroup wraps the cards. When Labs is on, the local
+                  group splits into production + an "Experimental" subsection (fine-tunes are
+                  local; the subheader stays inside the radiogroup so arrows span both). */}
+              <div
+                role="tabpanel"
+                id={`engine-panel-${activeGroup}`}
+                aria-labelledby={`engine-tab-${activeGroup}`}
+              >
+                <div
+                  className="divide-y divide-line-strong/40 overflow-hidden rounded-lg border border-line-strong/60"
+                  role="radiogroup"
+                  aria-label={t('engine_section')}
                 >
-                  {GroupIcon && <GroupIcon size={12} aria-hidden />}
-                  {shortLabel}
-                  {holdsHiddenSelection && <span aria-hidden className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
-                </button>
-              )
-            })}
-          </div>
-          {/* Only the active group's cards render. ONE outer perimeter + hairline
-              dividers; a SINGLE radiogroup wraps the cards. When Labs is on, the local
-              group splits into production + an "Experimental" subsection (fine-tunes are
-              local; the subheader stays inside the radiogroup so arrows span both). */}
-          <div
-            role="tabpanel"
-            id={`engine-panel-${activeGroup}`}
-            aria-labelledby={`engine-tab-${activeGroup}`}
-          >
+                  {(() => {
+                    const activeEngines = engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []
+                    const production = activeEngines.filter((e2) => !e2.experimental)
+                    const experimental = activeEngines.filter((e2) => e2.experimental)
+                    return (
+                      <>
+                        {production.map(engineCard)}
+                        {labsMode && experimental.length > 0 && (
+                          <>
+                            <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                              <FlaskConical size={12} aria-hidden />
+                              {t('engine_group_experimental')}
+                            </p>
+                            {experimental.map(engineCard)}
+                          </>
+                        )}
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Flat list: with few engines, a Local/Cloud tab switch just hides one
+               group behind a click for no scanability gain — everything fits as one
+               radiogroup with inline subheaders (same visual as "Experimental" below).
+               ONE outer perimeter + hairline dividers, matching SettingList elsewhere. */
             <div
               className="divide-y divide-line-strong/40 overflow-hidden rounded-lg border border-line-strong/60"
               role="radiogroup"
               aria-label={t('engine_section')}
             >
-              {(() => {
-                const activeEngines = engineGroups.find(([n]) => n === activeGroup)?.[1] ?? []
-                const production = activeEngines.filter((e2) => !e2.experimental)
-                const experimental = activeEngines.filter((e2) => e2.experimental)
+              {engineGroups.map(([groupName, groupEngines]) => {
+                const GroupIcon = ENGINE_GROUP_ICONS[groupName]
+                const fullLabel = ENGINE_GROUP_LABELS[groupName] ? t(ENGINE_GROUP_LABELS[groupName]) : groupName
+                const production = groupEngines.filter((e2) => !e2.experimental)
+                const experimental = groupEngines.filter((e2) => e2.experimental)
                 return (
-                  <>
+                  <div key={groupName} className="contents">
+                    <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                      {GroupIcon && <GroupIcon size={12} aria-hidden />}
+                      {fullLabel}
+                    </p>
                     {production.map(engineCard)}
                     {labsMode && experimental.length > 0 && (
                       <>
@@ -406,11 +453,11 @@ export function SettingsDrawer(props: {
                         {experimental.map(engineCard)}
                       </>
                     )}
-                  </>
+                  </div>
                 )
-              })()}
+              })}
             </div>
-          </div>
+          )}
         </section>
 
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
