@@ -8,6 +8,8 @@ from .surya_kiri_engine import run_surya_kiri
 from .surya_kiri_vlm_engine import run_surya_kiri_vlm
 from .auto_engine import run_auto
 from .gemini_engine import run_gemini
+from .gemma_ardb_engine import run_gemma_ardb
+from .qwen_ardb_engine import run_qwen_ardb
 from ..postprocess import postprocess
 
 _OCR_ENGINES: dict[str, OCREngine] = {
@@ -18,6 +20,12 @@ _OCR_ENGINES: dict[str, OCREngine] = {
     "surya_kiri_vlm": run_surya_kiri_vlm,
     "auto": run_auto,
     "gemini": run_gemini,  # cloud (opt-in); never selected by `auto`
+    # Both fine-tune engines are always registered (reachable via get_ocr_engine
+    # for CLI/direct/test use) regardless of whether the UI can select them —
+    # see webapp/api.py's _ENGINES for the actual UI-visibility gate. Neither is
+    # ever selected by `auto`.
+    "gemma_ardb": run_gemma_ardb,
+    "qwen_ardb": run_qwen_ardb,  # not in webapp _ENGINES yet — no config has passed real-doc eval
 }
 
 

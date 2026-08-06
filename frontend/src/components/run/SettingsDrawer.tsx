@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { Check, Cloud, Eraser, FileOutput, Files, FlaskConical, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { Check, ChevronDown, Cloud, Eraser, FileOutput, Files, FlaskConical, Laptop, ScanSearch, Sparkles, TriangleAlert, X } from 'lucide-react'
 import type { EngineInfo, RunSettings, SuggestCheck, Suggestion } from '../../api/types'
 import { useT, type Key } from '../../i18n.tsx'
 import { SegmentedToggle } from '../viewer/PageGrid'
@@ -172,6 +172,16 @@ export function SettingsDrawer(props: {
   const { t } = useT()
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const [pulsing, setPulsing] = useState<string | null>(null)
+  // Closed by default: the engine list has grown (Labs fine-tunes, more groups) to
+  // where it dominates the panel on open. Persisted like labsMode/lang/theme so the
+  // choice sticks across sessions; a summary line keeps the current pick visible
+  // even collapsed — the fold hides the PICKER, never *what's* selected.
+  const [engineSectionOpen, setEngineSectionOpen] = useState(
+    () => localStorage.getItem('engineSectionOpen') === 'true',
+  )
+  useEffect(() => {
+    localStorage.setItem('engineSectionOpen', String(engineSectionOpen))
+  }, [engineSectionOpen])
   useEffect(() => {
     if (!highlight) return
     const el = rowRefs.current.get(highlight.k)
@@ -198,6 +208,14 @@ export function SettingsDrawer(props: {
     effectiveEngine && effectiveEngine !== 'auto'
       ? (resolvedEngine ? engineLabel(resolvedEngine) : effectiveEngine)
       : null
+  // One-line receipt shown while the section is collapsed — the fold hides the
+  // PICKER, never what's actually selected (see engineSectionOpen above).
+  const selectedEngineInfo = engines.find((e2) => e2.key === engine)
+  const engineSummary = selectedEngineInfo
+    ? `${engineLabel(selectedEngineInfo)}${
+        resolvedEngineLabel ? ` → ${resolvedEngineLabel}` : ''
+      } · ${engines.length}`
+    : String(engines.length)
   const dpiIsAuto = String(settings.dpi ?? 'auto') === 'auto'
   // Bucket engines by `group`, preserving first-encounter order (local before cloud,
   // as the API returns them). Driven entirely by the data — no hardcoded engine keys.
@@ -352,11 +370,37 @@ export function SettingsDrawer(props: {
       {/* Solid, continuous scroll surface: every section carries its own explicit
           spacing block (no parent-selector magic), last one pads the bottom radius. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface px-4 pb-8 pt-5 text-sm">
-        {/* The engine is a run-setup decision, not an every-minute control. */}
+        {/* The engine is a run-setup decision, not an every-minute control — and the
+            list has grown enough (Labs fine-tunes, more groups) to dominate the panel
+            on open, so it folds closed by default. A one-line receipt (current pick +
+            option count) keeps the SELECTION visible even collapsed; only the picker
+            chrome hides. */}
         <section className="mt-5 border-t border-line-strong/30 pt-5 first:mt-0 first:border-0 first:pt-0">
-          <SectionTitle icon={Sparkles} label={t('engine_section')} />
+          <button
+            type="button"
+            onClick={() => setEngineSectionOpen((o) => !o)}
+            aria-expanded={engineSectionOpen}
+            className="mb-2.5 flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span className="flex items-center gap-1.5 text-title font-semibold text-ink">
+              <Sparkles size={13} className="text-ink-3" aria-hidden />
+              {t('engine_section')}
+            </span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              {!engineSectionOpen && (
+                <span className="truncate text-xs font-normal text-ink-2">{engineSummary}</span>
+              )}
+              <ChevronDown
+                size={14}
+                className={`shrink-0 text-ink-3 transition-transform duration-150 ${engineSectionOpen ? '' : '-rotate-90'}`}
+                aria-hidden
+              />
+            </span>
+          </button>
           {/* Labs gate — light row (no box), shown only when the API returns a fine-tune.
               Off → production-clean engine list; on → the Experimental subsection appears. */}
+          {engineSectionOpen && (
+            <>
           {hasExperimental && onLabsModeChange && (
             <div className="mb-2.5 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-xs text-ink-2" title={t('labs_mode_tip')}>
@@ -497,6 +541,8 @@ export function SettingsDrawer(props: {
                 })
               })()}
             </div>
+          )}
+            </>
           )}
         </section>
 

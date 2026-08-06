@@ -71,6 +71,14 @@ _ENGINES = [
      "guidance": "Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower."},
     {"key": "surya_kiri_vlm", "label": "Best structure (slow)", "group": "local", "experimental": True,
      "guidance": "Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest."},
+    # gemma_ardb: the ARDB LoRA fine-tune (Gemma 4 E2B) — the one adapter that has
+    # cleared real-document eval (eval/gemma_finetune_runs.md). A sibling Qwen3.5
+    # engine exists (qwen_ardb_engine.py, registered in engine_registry.py) but is
+    # deliberately NOT listed here: no Qwen config has passed real-doc eval yet, and
+    # this list is what makes an engine selectable in the UI — being registered
+    # elsewhere does not.
+    {"key": "gemma_ardb", "label": "Gemma 4 E2B (ARDB fine-tune)", "group": "local", "experimental": True,
+     "guidance": "Custom fine-tune, under active evaluation. May produce incomplete or malformed output."},
     {"key": "gemini", "label": "Cloud (Gemini)", "group": "cloud",
      "guidance": "Sends the page image to Google. Do not use for confidential documents."},
 ]
