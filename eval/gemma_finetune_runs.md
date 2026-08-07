@@ -362,3 +362,67 @@ proposed, testing whether more training (toward the mentor's ~10-epoch suggestio
   unambiguous enough (worse than the current best on every axis, plus a new and more severe
   qualitative failure mode) that the ~15-18 minute real-doc generation cost isn't justified for a
   config that's already been superseded by Run 4's result.
+
+**Local deployment investigation, `Soxavin/gemma4-e2b-ardb-lora-v5-e3`, webapp's `gemma_ardb`
+engine** (2026-08-07) — first time this adapter was run through the actual local production
+pipeline (`src/khmer_pipeline/engines/gemma_ardb_engine.py`, an isolated `uv run --no-project`
+subprocess, distinct from the Colab-based real-doc eval above), rather than via Colab generation
+scripts. Surfaced one real infra bug (now fixed) and, once fixed, reproduced the same
+comprehensive-failure signature the Colab real-doc eval already found — narrowing the cause from
+"maybe deployment" to "the adapter itself."
+
+- **Bug found and fixed: LoRA attach crash outside Unsloth.** `gemma_ardb_infer.py` originally
+  loaded `unsloth/gemma-4-E2B-it` + this adapter via plain
+  `transformers.AutoModelForImageTextToText` and `peft.PeftModel.from_pretrained` (no Unsloth).
+  This crashed every time: `ValueError: Target
+  module Gemma4ClippableLinear(...) is not supported. Currently, only the following modules are
+  supported: torch.nn.Linear, ...` — `unsloth/gemma-4-E2B-it` uses Unsloth's own layer classes,
+  which stock `peft` doesn't recognize as LoRA-injectable outside an Unsloth environment. Not a
+  training-run problem (Unsloth's own `FastVisionModel.get_peft_model` handled this fine during
+  training) — purely a local-inference deployment gap.
+- **Fix: merge once, in Colab, deploy the merged checkpoint.** Added a "Merge for local inference"
+  section to `scripts/colab_gemma4_e2b_finetune.ipynb` that loads the adapter via
+  `FastVisionModel.from_pretrained` (Unsloth, where LoRA attachment works) and calls
+  `push_to_hub_merged(..., save_method="merged_16bit")`, producing a plain, non-PEFT checkpoint at
+  `Soxavin/gemma4-e2b-ardb-merged-v5-e3`. `gemma_ardb_engine.py`'s `base_model_id` now points there;
+  `gemma_ardb_infer.py` loads it directly with `AutoModelForImageTextToText.from_pretrained`, no
+  PEFT step, no Unsloth dependency at inference time.
+- **First real run through the fixed pipeline**: no crash, ~80s end-to-end on one page
+  (`eval/datasets/real/…_០៣_០៤_សីហា_ឆ្នាំ២០២២…_p1.png` — one of the real-doc-eval corpus's 15
+  pages), confirming the deployment path itself works mechanically. Output, however, was
+  malformed JSON: hallucinated/wrong field names throughout (`box_2D` instead of `box_2d`,
+  `label_2d_text`, a stray `-text` key, mismatched brackets), and the Table region's HTML degraded
+  into broken/invented tags mid-generation — not a clean parse failure, a structurally incoherent
+  one.
+- **Root-cause investigation — two hypotheses raised, both disproven with direct evidence:**
+  1. *Chat-template mismatch* (training used Unsloth's `get_chat_template(processor, "gemma-4")`;
+     the merge step's `FastVisionModel.from_pretrained` silently reloaded the base model's default
+     template instead — confirmed via file hash: merged repo's `chat_template.jinja` matched the
+     *base* model's (18,810 bytes, sha256 `241c50d8…`), not the adapter's actual trained-with
+     template (2,375 bytes, `b728115a…`) it should have carried over). **Fixed** (re-uploaded the
+     adapter's actual `chat_template.jinja` + `tokenizer_config.json` onto the merged repo,
+     verified hashes now match) — but re-running produced **byte-identical** output to before the
+     fix. Confirmed the rendered prompt text itself (`processor.apply_chat_template(...)`, both
+     template revisions, same input messages) was already identical, 385 characters, both before
+     and after — the two templates happen to collapse to the same rendered string for this single-
+     turn, one-image, no-system-prompt message shape. Hypothesis disproven by direct text diff, not
+     inference.
+  2. *Merge/dequantization precision loss* (4-bit QLoRA base dequantized + LoRA delta baked in
+     during the merge — could a small model's fragile schema-following degrade from that numerical
+     roundtrip?). Tested by loading the adapter the *unmerged* way, exactly as training did
+     (`FastVisionModel.from_pretrained(adapter_repo, load_in_4bit=True)`, no merge step at all,
+     via a new standalone Colab cell), on the identical page. Result: **the same failure family** —
+     hallucinated field names (`box_2D`, `label_2d_text`, `text_content`), broken/mismatched HTML
+     table tags, even a stray `model_` token leaking into the output. Two independent loading paths
+     (Unsloth-native unmerged vs. our merged checkpoint) fail the same way. Hypothesis disproven.
+- **Read**: neither infra hypothesis holds — the deployment pipeline (subprocess isolation, merge
+  step, chat template) is confirmed correct and introduces no additional degradation beyond
+  whatever the adapter itself already does. This corroborates and sharpens the Real-doc eval
+  section above's "generation comprehensively fails on roughly half the real pages" finding: it's
+  not a page-2/continuation-page-specific issue as that section's original hypothesis suggested —
+  this test page is `p1` (a document's *first* page, not a continuation page) and still failed
+  comprehensively, which is a genuine counter-example to that pattern, not a confirmation of it.
+  The practical upshot for the local UI: `gemma_ardb` is wired, documented, and fails soft with the
+  garbled output visibly surfaced (not silently blank) when this happens — the same
+  "labeled trial, not production" posture already used for `qwen_ardb`, now confirmed warranted
+  for Gemma too rather than being unnecessarily cautious phrasing.

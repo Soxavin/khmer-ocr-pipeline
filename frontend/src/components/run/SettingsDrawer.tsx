@@ -356,9 +356,12 @@ export function SettingsDrawer(props: {
             )}
           </span>
           {/* Cloud guidance is a privacy caution — same integrated line as local
-              captions, distinguished only by warn color + a small icon. */}
+              captions, distinguished only by warn color + a small icon. Same
+              header/description contract as SettingRow's hint and the Scan-check
+              checklist: title stays text-sm, guidance drops a full step to text-2xs
+              (was text-xs, too close to the title to read as lower-emphasis). */}
           {caption && (
-            <span className={`mt-0.5 flex items-start gap-1 text-xs leading-4 ${isCloud ? 'text-warn-ink' : 'text-ink-2'}`}>
+            <span className={`mt-0.5 flex items-start gap-1 text-2xs ${isCloud ? 'text-warn-ink' : 'text-ink-3'}`}>
               {isCloud && <TriangleAlert size={11} className="mt-px shrink-0" aria-hidden />}
               <span className="min-w-0">{caption}</span>
             </span>
@@ -500,7 +503,10 @@ export function SettingsDrawer(props: {
                         {production.map((e2) => engineCard(e2, visible))}
                         {labsMode && experimental.length > 0 && (
                           <>
-                            <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                            {/* A stronger zone tint than the plain group headers (bg-rail/30) —
+                                this is a sub-divider inside an already-labeled group, so it needs
+                                its own visual weight to read as a break, not just more text. */}
+                            <p className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
                               <FlaskConical size={12} aria-hidden />
                               {t('engine_group_experimental')}
                             </p>
@@ -546,7 +552,10 @@ export function SettingsDrawer(props: {
                       {production.map((e2) => engineCard(e2, visible))}
                       {labsMode && experimental.length > 0 && (
                         <>
-                          <p className="flex items-center gap-1.5 bg-rail/30 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
+                          {/* Stronger zone tint than the plain group headers above
+                              (bg-rail/30) — a sub-divider inside an already-labeled
+                              group needs its own visual weight to read as a break. */}
+                          <p className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-3">
                             <FlaskConical size={12} aria-hidden />
                             {t('engine_group_experimental')}
                           </p>
@@ -643,7 +652,11 @@ export function SettingsDrawer(props: {
               </p>
               {/* Items in the SAME order as the switches below, so each finding sits
                   directly above the toggle it explains. */}
-              <ul className="space-y-0.5">
+              {/* Each item is two lines (finding + detail) since the header/description
+                  hierarchy fix — 2px (space-y-0.5) let adjacent items' lines crowd
+                  together. sm-token gap (8px) gives each item room to read as its own
+                  group instead of a dense run-on list. */}
+              <ul className="space-y-2">
                 {[...checks]
                   .sort((a, b) =>
                     PREPROCESS_FLAGS.findIndex(([k]) => k === a.field) -
