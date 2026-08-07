@@ -12,7 +12,7 @@ from ..ingest import ingest
 from ..models import PreprocessResult
 from ..preprocess import preprocess, PreprocessConfig
 from ..engines.engine_registry import ACTIVE_OCR_ENGINE, ACTIVE_CORRECTION_ENGINE
-from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document, pool_gt_text, pool_pred_text
+from .evaluate_structure import gt_table_grid, evaluate_table, evaluate_text, evaluate_document, pool_gt_text, pool_pred_text, has_text_gt
 from ..utils.memory import clear_device_cache
 from .analyze_benchmark import summarize
 
@@ -236,8 +236,19 @@ def run_benchmark(
                         ocr_text = "\n".join(p.ocr_text for p in ocr_result.pages)
 
                     table_metrics = evaluate_table(pred_tables, gt_table_grid(gt))
-                    text_metrics = evaluate_text(ocr_text, pred_tables, gt)
-                    doc_metrics = evaluate_document(ocr_text, pred_tables, gt)
+                    # Score text only when the page actually has text GT. A page
+                    # with no (or deliberately withheld) prose GT — e.g. moc_gas,
+                    # a table-only eval — otherwise scores cer("", pred)==1.0, a
+                    # total failure that never happened. Those columns stay blank.
+                    if has_text_gt(gt):
+                        text_metrics = evaluate_text(ocr_text, pred_tables, gt)
+                        doc_metrics = evaluate_document(ocr_text, pred_tables, gt)
+                        text_cer = _fmt(text_metrics["text_cer"])
+                        doc_cer = _fmt(doc_metrics["document_cer"])
+                        para_recall = _fmt(text_metrics["paragraph_recall"])
+                        para_leak = _fmt(text_metrics["paragraph_leak"])
+                    else:
+                        text_cer = doc_cer = para_recall = para_leak = ""
 
                     row = {
                         "Engine": engine,
@@ -258,10 +269,10 @@ def run_benchmark(
                         "Numeric_Cell_Accuracy": _fmt(table_metrics["numeric_cell_accuracy"]),
                         "Numeric_Khmer_Digit_Slips": _fmt(table_metrics["numeric_cells_khmer_digit_slips"]),
                         "Empty_Cell_Precision": _fmt(table_metrics.get("empty_cell_precision")),
-                        "Text_CER": _fmt(text_metrics["text_cer"]),
-                        "Document_CER": _fmt(doc_metrics["document_cer"]),
-                        "Paragraph_Recall": _fmt(text_metrics["paragraph_recall"]),
-                        "Paragraph_Leak": _fmt(text_metrics["paragraph_leak"]),
+                        "Text_CER": text_cer,
+                        "Document_CER": doc_cer,
+                        "Paragraph_Recall": para_recall,
+                        "Paragraph_Leak": para_leak,
                         "Error": "",
                     }
                     print(f"[OK] {img_path.name}  cell_acc={row['Cell_Accuracy']}")

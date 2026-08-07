@@ -154,11 +154,14 @@ def test_end_to_end_run_benchmark(tmp_path, monkeypatch):
     data_dir = tmp_path / "synthetic_data"
     data_dir.mkdir()
 
-    # minimal ground truth (isolated table schema)
+    # minimal ground truth (docs schema, with prose) — needs a paragraph so
+    # has_text_gt() is True and the Text_CER/Document_CER columns are populated;
+    # a table-only GT now correctly leaves those blank (moc_gas case).
     gt = {
         "font_family": "Battambang",
         "template": "test_template",
-        "data": [["header"], ["row1"]],
+        "tables": [{"data": [["header"], ["row1"]]}],
+        "paragraphs": ["a prose line"],
     }
     gt_path = data_dir / "table_0_Battambang_ground_truth.json"
     gt_path.write_text(json.dumps(gt), encoding="utf-8")
