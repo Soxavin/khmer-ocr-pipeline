@@ -134,14 +134,17 @@ def content_label_marker(label: str, fallback_index: int = 0) -> str:
     return CONTENT_LABEL_MARKER.get(label, MARKERS[fallback_index % len(MARKERS)])
 
 
-# Epoch count is ORDINAL, not categorical, so the epoch-keyed loss chart uses a sequential
-# light->dark ramp (single hue) rather than three unrelated categorical hues: "more epochs =
-# darker" is readable without consulting the legend, and lightness order survives grayscale
-# printing on its own. Deliberately a different hue family from MODEL_COLOR so a reader moving
-# between slides never reads "orange" as meaning a model on one chart and an epoch count on the
-# next. Marker shape (see MARKERS usage in the loss chart) carries the same distinction
-# redundantly.
-_EPOCH_RAMP = ["#6BAED6", "#3182BD", "#08519C"]
+# Epoch count is ORDINAL, so this was originally a single-hue light->dark blue ramp -- in
+# practice, on loss_by_run's busy, jaggy, heavily-overlapping curves (confirmed directly against
+# the rendered chart, not just in theory), three shades of the same hue read as "all blue" and
+# the lines became genuinely hard to tell apart exactly where it mattered most (the noisy region
+# past step ~30). Traded the ordinal "darker = more epochs" cleverness for three Okabe-Ito hues
+# with real separation, still deliberately disjoint from MODEL_COLOR/CONTENT_LABEL_COLOR's
+# palette slots (0=orange, 1=sky blue, 2=green, 6=reddish purple already mean model/label
+# identity elsewhere in the same dashboard poster) so "blue" or "orange" don't silently mean two
+# different things across adjacent quadrants. Marker shape (see MARKERS usage in the loss chart)
+# still carries the same distinction redundantly for grayscale.
+_EPOCH_RAMP = [_PALETTE[4], _PALETTE[5], _PALETTE[7]]  # dark blue, vermilion, black
 
 
 def epoch_color(epochs, all_epochs: list) -> str:
