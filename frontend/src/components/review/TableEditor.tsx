@@ -197,14 +197,19 @@ export function TableEditor(props: {
   }, [findQuery, activeMatch, focusCell, hoverCell, showConf, rawView])
 
   // autoHeight rows are absolutely positioned and cache their measured height by
-  // row id; a structural change (insert/delete) or a raw⇄edited content swap can
-  // leave that cache stale, so a tall wrapped row overlaps its neighbour and cells
-  // read as blank. Re-measure on those two triggers (not per keystroke — a plain
-  // edit re-measures its own row) to keep the layout honest.
+  // row id; a structural change (insert/delete), a raw⇄edited content swap, or the
+  // force-refresh above (findQuery/activeMatch/focusCell/hoverCell/showConf/rawView
+  // all re-render every visible cell in one pass) can leave that cache stale, so a
+  // tall wrapped row overlaps its neighbour and cells read as blank. showConf was
+  // the one bulk-refresh trigger missing here — toggling it force-refreshed every
+  // cellClassRules-evaluated cell without ever re-measuring row heights afterward,
+  // so a Khmer-wrapped row's cached height went stale and clipped its own text.
+  // Re-measure on every trigger that can invalidate the cache (not per keystroke —
+  // a plain edit re-measures its own row) to keep the layout honest.
   useEffect(() => {
     const id = requestAnimationFrame(() => gridApi.current?.resetRowHeights())
     return () => cancelAnimationFrame(id)
-  }, [grid.length, rawView])
+  }, [grid.length, rawView, showConf])
 
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
