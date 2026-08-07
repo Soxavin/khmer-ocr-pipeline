@@ -304,7 +304,9 @@ pipeline this report's own architecture (§2) uses. This distinction matters for
 future work below: this section's negative result rules out one specific fine-tuning strategy, not
 fine-tuning in general.
 
-**Setup.** Both models were fine-tuned via LoRA/QLoRA (Unsloth, free/low-cost Colab T4/L4 GPUs) on
+**Setup.** Both models were fine-tuned via LoRA/QLoRA (Unsloth, Colab GPUs — T4/L4 for nearly
+every run, with one Qwen run landing on an A100 after its L4 session was abandoned mid-training;
+noted where it affects timing comparisons below) on
 `Soxavin/ardb-sft-v5` — an era-stratified, 101-document ARDB market-bulletin training split (both
 of the corpus's structural table layouts represented in every split). **Gemma 4 E2B** (5.2B
 params; 4-bit QLoRA base + 16-bit LoRA, r=32; 73.85M / 1.42% trainable) and **Qwen3.5-0.8B** (866M
@@ -367,8 +369,12 @@ to recover some of Gemma's malformed JSON) can fix. See
 `docs/figures/finetune_eval/real_doc_comparison.png`.
 
 **Cost.** Neither model is expensive to iterate on: Gemma's 3-epoch run took 884.2s (~15 min) on an
-L4; Qwen's comparable run took well under 400s. The result is a genuine capability gap at this data
-scale, not a resource-constrained shortcut that more budget would trivially fix.
+L4; Qwen's comparable run took 271.8s, but on an A100 (a faster tier — its L4 attempt was abandoned
+mid-session and this was a fresh retrain), so the two numbers aren't a strictly like-for-like speed
+comparison. Qwen's own L4 runs at other epoch counts (260–467s) suggest its 3-epoch run would still
+land well under Gemma's time even on matching hardware. Either way, the result is a genuine
+capability gap at this data scale, not a resource-constrained shortcut that more budget would
+trivially fix.
 
 **Read.** Two findings point the same direction. First, both models independently peak at the same
 epoch count on the same dataset, and both degrade in kind (not just degree) past it — the
