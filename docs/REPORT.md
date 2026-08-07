@@ -54,6 +54,10 @@ mildly misspelled word. The success metric is therefore *structural*, not just c
    row-strip hybrid lifts dense-table `Cell_Accuracy` ~16× (0.024→0.393).
 5. **Document-level table stitching** that turns a multi-page report into one structured table per
    logical section (one CSV each) — the analyst-facing output the project targets.
+6. **A fine-tuning experiment (§4.10)** testing whether a fine-tuned vision-language model could
+   replace the pipeline outright — it could not, on real documents, for either model tested — a
+   negative result that rules out one specific design rather than fine-tuning in general, and
+   narrows what a future fine-tuning attempt should look like (§7).
 
 ---
 
@@ -352,8 +356,11 @@ run on the order of 50–100+ epochs with validation tracked continuously throug
 separate experiment (§7), not a natural extension of this sweep.
 
 **Finding 2 — on real, out-of-distribution documents, the existing pipeline wins outright.** Each
-model's best-tested adapter (3 epochs) was scored against the same 15 hand-verified, held-out ARDB
-pages used as the real-document baseline (§4.2–§4.3) — pages neither model saw during training:
+model's best-tested adapter (3 epochs) was scored against 15 hand-verified, held-out ARDB
+market-price-bulletin pages — a dedicated real-document test set built for this comparison, larger
+than and distinct from §4.2–§4.3's original 3-page baseline (that ran on `eval/datasets/real`; this
+ran on a separate `ardb_real_ocr_bench` set — see `eval/runs/ardb_real_ocr_baseline/`) — pages
+neither model saw during training:
 
 | Approach | Cell_Acc | Numeric_Cell_Acc | Table_CER | Document_CER | Grid shape match | Parse failures |
 |---|---|---|---|---|---|---|
@@ -439,9 +446,10 @@ behaviour on no-table pages.
   are no confidence intervals on any fine-tuning number. Trends are corroborated across two
   independent model families reaching the same epoch-count optimum, which is stronger evidence
   than either model alone, but individual point estimates should be read as directional, not
-  statistically tested. The real-document fine-tuning comparison also rests on the same 15-page
-  evaluation set as §4.9's `n=2` layout generalisation caveat above — real-world numbers there are
-  indicative, not statistically robust, for the same underlying data-scarcity reason.
+  statistically tested. The real-document fine-tuning comparison rests on its own 15-page
+  evaluation set (§4.10, a separate, larger set than §4.9's 2-document/6-page layout-
+  generalisation set above) — but shares the same underlying limitation: real-world numbers there
+  are indicative, not statistically robust, for the same reason of limited hand-verified data.
 
 ---
 
