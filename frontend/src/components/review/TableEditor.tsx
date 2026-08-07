@@ -211,6 +211,24 @@ export function TableEditor(props: {
     return () => cancelAnimationFrame(id)
   }, [grid.length, rawView, showConf])
 
+  // A DIFFERENT trigger for the same stale-cache failure above, caught live: index.css
+  // loads Noto Sans Khmer with font-display: swap, so the grid's first paint can happen
+  // in the fallback font, get its autoHeight rows measured against that font's shorter
+  // line box, then swap to Khmer (1.9 line-height, taller — stacked subscripts need the
+  // room) without ever re-measuring. One row's cached height silently goes stale on
+  // first load, before any of grid.length/rawView/showConf have even had a chance to
+  // change — reproduced on a fresh, untouched page load. document.fonts.ready resolves
+  // once every requested face (including the swap) has actually loaded; re-measure then.
+  useEffect(() => {
+    let cancelled = false
+    // Optional chaining: the CSS Font Loading API (and jsdom, in tests) doesn't
+    // universally define document.fonts — skip the re-measure there rather than throw.
+    document.fonts?.ready.then(() => {
+      if (!cancelled) gridApi.current?.resetRowHeights()
+    })
+    return () => { cancelled = true }
+  }, [])
+
   useEffect(() => {
     if (flash > 0 && wrapRef.current) {
       // scrollIntoViewWithin, not el.scrollIntoView: a table-box click on the image
