@@ -2,7 +2,9 @@
 
 *How analyst corrections become training data, and the procedure for retraining on
 them safely. Companion to `PROJECT_LOG.md` (decisions) and
-`experiments/layout_yolo/README.md` (the layout track).*
+`experiments/layout_yolo/README.md` (the layout track). For a short, non-technical
+explanation of the concept and why this approach — e.g. for a mentor conversation —
+see `CONTINUAL_LEARNING_MEMO.md` instead of this runbook.*
 
 ---
 
