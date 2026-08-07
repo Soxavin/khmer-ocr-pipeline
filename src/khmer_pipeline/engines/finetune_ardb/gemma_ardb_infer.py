@@ -1,11 +1,23 @@
-"""Isolated-subprocess inference for the Gemma 4 E2B ARDB LoRA fine-tune.
+"""Isolated-subprocess inference for the Gemma 4 E2B ARDB fine-tune.
 
 Run OUTSIDE the project's main venv (Gemma 4 needs transformers>=5.5, which
 conflicts with Surya's pin) via `subprocess_runner.run_isolated_inference`,
 which invokes this script as:
 
-    uv run --no-project --with "transformers>=5.5,<6" --with "peft>=0.13,<1" ... \\
+    uv run --no-project --with "transformers>=5.5,<6" ... \\
         python gemma_ardb_infer.py --base-model <id> --adapter <id> --image <path>
+
+`--base-model` points at a PRE-MERGED checkpoint (`Soxavin/gemma4-e2b-ardb-merged-v5-e3`,
+produced by the "Merge for local inference" cell in
+scripts/colab_gemma4_e2b_finetune.ipynb), not the bare `unsloth/gemma-4-E2B-it` base + a
+separate LoRA adapter. `--adapter` is still accepted (subprocess_runner always passes it —
+shared contract with qwen_ardb_infer.py) but unused: loading the original LoRA adapter here
+via plain `transformers` + `peft` fails, because `unsloth/gemma-4-E2B-it` uses Unsloth's own
+layer classes (e.g. `Gemma4ClippableLinear`) instead of stock `torch.nn.Linear`, which stock
+`peft` doesn't recognize as LoRA-injectable (`ValueError: Target module
+Gemma4ClippableLinear(...) is not supported`). Merging once, in an Unsloth environment
+(Colab), sidesteps that entirely — the merged repo loads with plain `from_pretrained`, no
+PEFT, no Unsloth-compatibility issue.
 
 Prints the model's raw generation (the fine-tune's JSON region list, possibly
 truncated/malformed — parsing/repair happens back in the main process via
@@ -35,20 +47,23 @@ _MAX_NEW_TOKENS = 4096
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", required=True)
-    parser.add_argument("--adapter", required=True)
+    parser.add_argument("--adapter", required=True)  # unused — see module docstring
     parser.add_argument("--image", required=True)
     args = parser.parse_args()
 
     import torch
     from PIL import Image
     from transformers import AutoModelForImageTextToText, AutoProcessor
-    from peft import PeftModel
 
+    # device_map="auto" lets accelerate decide placement across GPU/CPU/disk; on
+    # this single-GPU Mac it can choose disk offload. Not needed for correctness
+    # now that there's no PEFT injection step, but loading straight onto the one
+    # real device is still simpler/faster than letting accelerate guess.
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
     processor = AutoProcessor.from_pretrained(args.base_model)
-    base = AutoModelForImageTextToText.from_pretrained(
-        args.base_model, torch_dtype=torch.bfloat16, device_map="auto",
-    )
-    model = PeftModel.from_pretrained(base, args.adapter)
+    model = AutoModelForImageTextToText.from_pretrained(
+        args.base_model, torch_dtype=torch.bfloat16,
+    ).to(device)
     model.eval()
 
     image = Image.open(args.image).convert("RGB")

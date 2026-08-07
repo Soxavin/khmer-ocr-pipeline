@@ -97,7 +97,7 @@ function SettingRow(props: {
           {label}
           {badge}
         </span>
-        {hint && <span className="mt-1 block text-xs leading-4 text-ink-2">{hint}</span>}
+        {hint && <span className="mt-1 block text-2xs text-ink-3">{hint}</span>}
       </span>
       <Switch id={id} checked={checked} disabled={disabled} onChange={onChange} label={label} />
     </div>
@@ -649,7 +649,7 @@ export function SettingsDrawer(props: {
                     PREPROCESS_FLAGS.findIndex(([k]) => k === a.field) -
                     PREPROCESS_FLAGS.findIndex(([k]) => k === b.field))
                   .map((c) => (
-                  <li key={c.field} className="flex items-start gap-1.5 text-xs text-ink-2">
+                  <li key={c.field} className="flex items-start gap-1.5 text-xs font-medium text-ink">
                     {c.active ? (
                       <Check size={12} className="mt-0.5 shrink-0 text-ok" aria-hidden />
                     ) : (
@@ -664,7 +664,7 @@ export function SettingsDrawer(props: {
                           path). Render it as visible secondary text instead, same
                           pattern as SettingRow's `hint` line. */}
                       {scores && c.detail && (
-                        <span className="mt-0.5 block text-2xs leading-4 text-ink-3">{c.detail}</span>
+                        <span className="mt-0.5 block text-2xs text-ink-3">{c.detail}</span>
                       )}
                     </span>
                   </li>

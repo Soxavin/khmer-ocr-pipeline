@@ -72,7 +72,7 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 | `raw_output_fallback_note` | Model output — could not be read as text or tables. Shown as produced. | លទ្ធផលម៉ូដែល — មិនអាចអានជាអត្ថបទ ឬតារាងបានទេ។ បង្ហាញតាមដែលបានផលិត។ |
 | `step_finetune_slow` | running the fine-tune (may take several minutes) | កំពុងដំណើរការម៉ូដែលដែលបានបង្វឹក (អាចចំណាយពេលច្រើននាទី) |
 | `engine_label_gemma_ardb` | ARDB specialist (trial) | ជំនាញ ARDB (សាកល្បង) |
-| `engine_guidance_gemma_ardb` | Tuned on ARDB bulletins. Under evaluation — may return incomplete rows. | បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។ |
+| `engine_guidance_gemma_ardb` | Tuned on ARDB bulletins. Under evaluation — may return incomplete or malformed output. | បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ ឬលទ្ធផលមិនត្រឹមត្រូវ។ |
 | `engine_trial` | Trial | សាកល្បង |
 | `engine_group_local` | Local (on this device) | ក្នុងម៉ាស៊ីន (លើឧបករណ៍នេះ) |
 | `engine_group_cloud` | Cloud | ពពក (Cloud) |

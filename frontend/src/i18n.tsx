@@ -317,7 +317,7 @@ const en = {
   engine_label_surya_kiri_vlm: 'Best structure (slow)',
   engine_guidance_surya_kiri_vlm: 'Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest.',
   engine_label_gemma_ardb: 'ARDB specialist (trial)',
-  engine_guidance_gemma_ardb: 'Tuned on ARDB bulletins. Under evaluation — may return incomplete rows.',
+  engine_guidance_gemma_ardb: 'Tuned on ARDB bulletins. Under evaluation — may return incomplete or malformed output.',
   engine_label_qwen_ardb: 'Qwen ARDB (unreliable, trial)',
   engine_guidance_qwen_ardb: 'Frequently fails to produce valid output. Shown for comparison, not real extraction.',
   engine_label_gemini: 'Cloud (Gemini)',
@@ -727,7 +727,10 @@ const km: Record<Key, string> = {
   engine_label_surya_kiri_vlm: 'រចនាសម្ព័ន្ធល្អបំផុត (យឺត)',
   engine_guidance_surya_kiri_vlm: 'រក្សាក្បាលតារាងលាតសន្ធឹងឲ្យនៅដដែល ហើយកែលម្អក្រឡាខ្មែរពេលមានសុវត្ថិភាព។ យឺតបំផុត។',
   engine_label_gemma_ardb: 'ជំនាញ ARDB (សាកល្បង)',
-  engine_guidance_gemma_ardb: 'បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ។',
+  // PROVISIONAL — flag for native review: composed from already-verified sibling
+  // vocabulary (ជួរដេកមិនពេញលេញ from this same key's earlier form; លទ្ធផល/ត្រឹមត្រូវ
+  // from qwen_ardb's guidance), never invented ground truth.
+  engine_guidance_gemma_ardb: 'បានបង្វឹកលើព្រឹត្តិប័ត្រ ARDB។ កំពុងវាយតម្លៃ — អាចត្រឡប់ជួរដេកមិនពេញលេញ ឬលទ្ធផលមិនត្រឹមត្រូវ។',
   engine_label_qwen_ardb: 'Qwen ARDB (មិនទាន់ជឿទុកចិត្ត សាកល្បង)',
   engine_guidance_qwen_ardb: 'ភាគច្រើនបរាជ័យក្នុងការផលិតលទ្ធផលត្រឹមត្រូវ។ បង្ហាញសម្រាប់ប្រៀបធៀប មិនមែនសម្រាប់ការស្រង់ទិន្នន័យពិតប្រាកដទេ។',
   engine_label_gemini: 'ពពក (Gemini)',

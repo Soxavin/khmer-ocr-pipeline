@@ -2,15 +2,34 @@
 to the local Surya-based engines.
 
 Runs the LoRA fine-tune `Soxavin/gemma4-e2b-ardb-lora-v5-e3` (the one adapter
-that has cleared real-document evaluation; see eval/gemma_finetune_runs.md) on
-top of `unsloth/gemma-4-E2B-it`, in an isolated subprocess (Gemma 4 needs
-transformers>=5.5, which conflicts with Surya's <5.0 pin — see
-finetune_ardb/subprocess_runner.py). Registered as ``gemma_ardb`` and surfaced
-in the UI's Labs/Experimental subsection, never selected by `auto`.
+that has cleared real-document evaluation; see eval/gemma_finetune_runs.md),
+in an isolated subprocess (Gemma 4 needs transformers>=5.5, which conflicts
+with Surya's <5.0 pin — see finetune_ardb/subprocess_runner.py). Registered
+as ``gemma_ardb`` and surfaced in the UI's Labs/Experimental subsection,
+never selected by `auto`.
 
-Behaviour contract (mirrors gemini_engine.py):
-  - FAIL SOFT per page: a subprocess error or unparseable output leaves that
-    page empty and the run continues — one bad page never discards the others.
+`base_model_id` below points at a PRE-MERGED checkpoint
+(`Soxavin/gemma4-e2b-ardb-merged-v5-e3`), not the bare `unsloth/gemma-4-E2B-it`
++ this adapter loaded separately — loading the adapter via plain
+`transformers`+`peft` outside an Unsloth environment fails, since
+`unsloth/gemma-4-E2B-it` uses Unsloth's own layer classes that stock `peft`
+doesn't recognize as LoRA-injectable. See gemma_ardb_infer.py's docstring and
+the "Merge for local inference" cell in
+scripts/colab_gemma4_e2b_finetune.ipynb, which produced the merged repo.
+`adapter_repo_id` is kept as the original LoRA repo purely for provenance in
+warning messages — it identifies which fine-tune this is, even though the
+merged checkpoint is what's actually loaded.
+
+Behaviour contract (mirrors qwen_ardb_engine.py — updated after the merged
+checkpoint fixed the load-time crash but exposed a real quality problem: the
+model's output frequently doesn't follow its trained schema):
+  - FAIL SOFT per page: a subprocess error leaves that page empty (no model
+    output exists to show); the run continues either way — one bad page never
+    discards the others.
+  - An UNPARSEABLE-JSON page preserves the raw model text in `ocr_text`
+    rather than discarding it, same as qwen_ardb_engine.py — flows through
+    postprocess.py's `raw_ocr_text` to the review UI's raw-output fallback
+    (PageTextPanel.tsx), so a bad generation is visible, not blank.
   - Always emits an audit warning naming the model, so a run's provenance is
     traceable even when it succeeds.
 """
@@ -25,10 +44,12 @@ from .finetune_ardb.parsing import parse_regions
 from .finetune_ardb.transform import regions_to_page
 
 _CONFIG = FineTuneConfig(
-    base_model_id="unsloth/gemma-4-E2B-it",
+    base_model_id="Soxavin/gemma4-e2b-ardb-merged-v5-e3",
     adapter_repo_id="Soxavin/gemma4-e2b-ardb-lora-v5-e3",
     infer_script="src/khmer_pipeline/engines/finetune_ardb/gemma_ardb_infer.py",
-    extra_pins=["transformers>=5.5,<6", "peft>=0.13,<1", "torch"],
+    # peft dropped: base_model_id is a pre-merged checkpoint, no adapter attachment
+    # step needed at inference time (see module docstring).
+    extra_pins=["transformers>=5.5,<6", "torch"],
     table_text_format="html",
 )
 
@@ -67,8 +88,11 @@ def run_gemma_ardb(
             continue
         regions = parse_regions(raw)
         if regions is None:
-            warns.append(f"Gemma ARDB output for page {idx + 1} was not parseable JSON — page left empty")
-            pages.append(SuryaPageResult(page_index=idx, text_blocks=[], tables=[], ocr_text=""))
+            warns.append(f"Gemma ARDB output for page {idx + 1} was not parseable JSON — showing raw model output")
+            # ocr_text=raw (not ""): preserve what the model actually produced —
+            # flows through to the review UI's raw-output fallback (see
+            # qwen_ardb_engine.py, which established this pattern).
+            pages.append(SuryaPageResult(page_index=idx, text_blocks=[], tables=[], ocr_text=raw))
             continue
         h, w = img.shape[0], img.shape[1]
         pages.append(regions_to_page(

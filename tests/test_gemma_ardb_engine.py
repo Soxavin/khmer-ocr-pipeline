@@ -81,6 +81,14 @@ def test_unparseable_output_is_soft(monkeypatch):
     assert any("pars" in w.lower() for w in result.warnings)
 
 
+def test_unparseable_output_preserves_raw_text_in_ocr_text(monkeypatch):
+    garbled = '{"box_2D": [1,2,3,4], "label_2d_text": "Picture", "-text": "oops"'
+    _install_fake(monkeypatch, [garbled])
+    result = ge.run_gemma_ardb(_pre(1))
+    assert result.pages[0].ocr_text == garbled
+    assert any("raw model output" in w.lower() for w in result.warnings)
+
+
 def test_repairable_truncated_json_recovers(monkeypatch):
     # missing closing ']' — the shared repair path should recover it.
     truncated = '[{"box_2d": [0,0,10,10], "label": "Text", "text": "recovered"}'

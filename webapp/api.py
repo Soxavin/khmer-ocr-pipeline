@@ -79,7 +79,7 @@ _ENGINES = [
     # its risk is unreliable OUTPUT (may return incomplete rows), not latency.
     {"key": "gemma_ardb", "label": "ARDB specialist (trial)", "group": "local", "experimental": True,
      "trial": True,
-     "guidance": "Tuned on ARDB bulletins. Under evaluation — may return incomplete rows."},
+     "guidance": "Tuned on ARDB bulletins. Under evaluation — may return incomplete or malformed output."},
     # qwen_ardb: the ARDB LoRA fine-tune (Qwen3.5-0.8B) — included DESPITE (in
     # fact because of) its unreliability: every tested config fails to produce
     # valid structured output on most real documents. The point is to show that
