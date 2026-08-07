@@ -1,13 +1,18 @@
-"""Package a corrected Roboflow YOLOv8 export as a COCO dataset, optionally source-filtered.
+"""Package a corrected Roboflow export (YOLOv8 or COCO) as a COCO dataset, optionally
+source-filtered.
 
-Converts YOLO txt labels back to COCO JSON per split (mentor's training format), keeping
-Roboflow's split assignment. --sources filters documents by their corpus subfolder using the
-pseudo-labeler's manifest.json (doc_id prefixes survive Roboflow's filename mangling).
+Converts Roboflow's per-split labels back to our COCO JSON shape (mentor's training format),
+keeping Roboflow's split assignment. --sources filters documents by their corpus subfolder
+using the pseudo-labeler's manifest.json (doc_id prefixes survive Roboflow's filename
+mangling).
 
 Usage:
     uv run python scripts/package_layout_dataset.py eval/datasets/layout_v1_corrected \
         --manifest eval/datasets/layout_v1/manifest.json \
         --out eval/datasets/ardb_layout_coco_v1 --sources ardb_daily
+
+    uv run python scripts/package_layout_dataset.py "~/Downloads/ARDB Document Layout" \
+        --format coco --out eval/datasets/ardb_layout_coco_v3
 """
 
 from __future__ import annotations
@@ -124,10 +129,36 @@ def _yolo_to_boxes(label_file: Path, names: list[str],
     return boxes
 
 
+def _load_roboflow_coco(coco_json: Path) -> tuple[dict[int, str], dict[int, dict], dict[int, list]]:
+    """Load one split's Roboflow COCO export: category_id→name (dropping Roboflow's
+    auto-added superclass, which has no annotations of its own), image_id→image dict, and
+    image_id→list of that image's annotations."""
+    d = json.loads(coco_json.read_text())
+    ann_cat_ids = {a["category_id"] for a in d["annotations"]}
+    cat_names = {c["id"]: c["name"] for c in d["categories"] if c["id"] in ann_cat_ids}
+    images = {im["id"]: im for im in d["images"]}
+    anns_by_image: dict[int, list] = {im_id: [] for im_id in images}
+    for a in d["annotations"]:
+        anns_by_image[a["image_id"]].append(a)
+    return cat_names, images, anns_by_image
+
+
+def _coco_to_boxes(anns: list[dict], cat_names: dict[int, str]
+                   ) -> list[tuple[str, tuple[float, float, float, float], float]]:
+    """Convert one image's Roboflow COCO annotations ([x, y, w, h]) to (class, xyxy, conf)."""
+    boxes = []
+    for a in anns:
+        x0, y0, w, h = a["bbox"]
+        boxes.append((cat_names[a["category_id"]], (x0, y0, x0 + w, y0 + h), 1.0))
+    return boxes
+
+
 def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
-            sources: list[str] | None, hf_dir: Path | None = None) -> dict[str, int]:
-    """Convert the YOLOv8 export to per-split COCO folders under out_dir; returns page counts."""
-    names = _class_names(export_dir / "data.yaml")
+            sources: list[str] | None, hf_dir: Path | None = None,
+            fmt: str = "yolo") -> dict[str, int]:
+    """Convert a Roboflow export (YOLOv8 or COCO, per fmt) to per-split COCO folders under
+    out_dir; returns page counts."""
+    names = _class_names(export_dir / "data.yaml") if fmt == "yolo" else None
     keep_doc_ids: set[str] | None = None
     doc_source: dict[str, str] = {}
     if manifest_path is not None:
@@ -141,24 +172,42 @@ def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
     counts: dict[str, int] = {}
     pages_by_split: dict[str, list[PageBoxes]] = {}
     for split in _SPLITS:
-        images_dir = export_dir / split / "images"
-        labels_dir = export_dir / split / "labels"
-        if not images_dir.is_dir():
-            continue
         split_out = out_dir / split
-        split_out.mkdir(parents=True, exist_ok=True)
         pages: list[PageBoxes] = []
-        for img_path in sorted(images_dir.iterdir()):
-            doc_match = _DOC_ID_RE.match(img_path.name)
-            if keep_doc_ids is not None and (
-                    doc_match is None or doc_match.group(1) not in keep_doc_ids):
+
+        if fmt == "coco":
+            coco_json = export_dir / split / "_annotations.coco.json"
+            if not coco_json.is_file():
                 continue
-            with Image.open(img_path) as im:
-                width, height = im.size
-            label_file = labels_dir / (img_path.stem + ".txt")
-            boxes = _yolo_to_boxes(label_file, names, width, height) if label_file.exists() else []
-            shutil.copy2(img_path, split_out / img_path.name)
-            pages.append(PageBoxes(img_path.name, width, height, boxes))
+            split_out.mkdir(parents=True, exist_ok=True)
+            cat_names, images, anns_by_image = _load_roboflow_coco(coco_json)
+            for image_id, img in sorted(images.items()):
+                src_path = export_dir / split / img["file_name"]
+                doc_match = _DOC_ID_RE.match(img["file_name"])
+                if keep_doc_ids is not None and (
+                        doc_match is None or doc_match.group(1) not in keep_doc_ids):
+                    continue
+                boxes = _coco_to_boxes(anns_by_image[image_id], cat_names)
+                shutil.copy2(src_path, split_out / img["file_name"])
+                pages.append(PageBoxes(img["file_name"], img["width"], img["height"], boxes))
+        else:
+            images_dir = export_dir / split / "images"
+            labels_dir = export_dir / split / "labels"
+            if not images_dir.is_dir():
+                continue
+            split_out.mkdir(parents=True, exist_ok=True)
+            for img_path in sorted(images_dir.iterdir()):
+                doc_match = _DOC_ID_RE.match(img_path.name)
+                if keep_doc_ids is not None and (
+                        doc_match is None or doc_match.group(1) not in keep_doc_ids):
+                    continue
+                with Image.open(img_path) as im:
+                    width, height = im.size
+                label_file = labels_dir / (img_path.stem + ".txt")
+                boxes = _yolo_to_boxes(label_file, names, width, height) if label_file.exists() else []
+                shutil.copy2(img_path, split_out / img_path.name)
+                pages.append(PageBoxes(img_path.name, width, height, boxes))
+
         write_coco(pages, split_out / "_annotations.coco.json")
         # remove any stale imagefolder metadata: parquet is the sole viewer/loader source
         (split_out / "metadata.jsonl").unlink(missing_ok=True)
@@ -171,8 +220,12 @@ def package(export_dir: Path, out_dir: Path, manifest_path: Path | None,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Roboflow YOLOv8 export → filtered COCO dataset.")
-    parser.add_argument("export_dir", type=Path, help="Roboflow YOLOv8 export folder (has data.yaml)")
+    parser = argparse.ArgumentParser(description="Roboflow export → filtered COCO dataset.")
+    parser.add_argument("export_dir", type=Path,
+                        help="Roboflow export folder (data.yaml for --format yolo; "
+                             "<split>/_annotations.coco.json for --format coco)")
+    parser.add_argument("--format", choices=("yolo", "coco"), default="yolo",
+                        help="Roboflow export format downloaded (default: yolo)")
     parser.add_argument("--out", type=Path, required=True, help="Output COCO dataset folder")
     parser.add_argument("--manifest", type=Path, default=None,
                         help="pseudo_label_layout manifest.json (needed for --sources)")
@@ -181,7 +234,8 @@ def main() -> None:
     parser.add_argument("--hf-dir", type=Path, default=None,
                         help="HF upload folder for data/*.parquet (default: <out>_hf)")
     args = parser.parse_args()
-    package(args.export_dir, args.out, args.manifest, args.sources, hf_dir=args.hf_dir)
+    package(args.export_dir, args.out, args.manifest, args.sources, hf_dir=args.hf_dir,
+            fmt=args.format)
 
 
 if __name__ == "__main__":

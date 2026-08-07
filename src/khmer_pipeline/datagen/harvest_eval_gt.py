@@ -23,6 +23,10 @@ the rule that Khmer GT only ever comes from human-verified text).
 Scope, stated honestly: extra pages add NUMERIC samples only. The labels and
 layout are identical across dates, so they are not independent samples of Khmer
 recognition or table structure — see the `gt_source` tag each page carries.
+
+See scripts/generate_ardb_eval_gt.py's docstring for a 2026-07-27 reservation on
+which corpus/ardb_daily/ documents this must not be promoted for (they're training
+data for a different track).
 """
 from __future__ import annotations
 

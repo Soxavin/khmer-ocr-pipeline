@@ -13,6 +13,13 @@ eval/datasets/real_draft/ and never written into the scored set directly.
 Honest scope: these pages add NUMERIC samples only. Layout and Khmer labels are
 identical across dates, so they are not independent samples of table structure or
 Khmer recognition — each page records `gt_source` so the report can say so.
+
+**2026-07-27 reservation**: every corpus/ardb_daily/ document EXCEPT the frozen
+09.06.26/15.06.26 stems is now training data for the Gemma 4 E2B SFT dataset
+(khmer_pipeline.datagen.build_ardb_template_sft -> eval/datasets/ardb_table_sft_v1/).
+Before promoting any real_draft/ output for those documents into eval/datasets/real/,
+re-check that reservation — promoting them would let a track's eval score benefit
+from pages the model already trained on.
 """
 from __future__ import annotations
 

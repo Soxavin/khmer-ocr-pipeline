@@ -345,11 +345,33 @@ uv run python -m khmer_pipeline.evaluation.run_benchmark --data-dir eval/dataset
 
 ---
 
-## 9. Conventions
+## 9. Dataset Factory (training-data generation)
+
+Separate from the eval-GT modules above (§8), these `khmer_pipeline.datagen` modules produce
+**training** data for other tracks (layout detection, recognition/SFT fine-tuning), not
+evaluation ground truth. Most are driven by a `scripts/*.py` or `scripts/*.ipynb` wrapper —
+see `scripts/README.md` for the full script index.
+
+| Module | Purpose |
+|--------|---------|
+| `pseudo_label_layout.py` | Corpus PDFs → COCO detection dataset (Surya layout pseudo-labels), for Roboflow correction → YOLO training (Track A). |
+| `harvest_table_gt.py` | Born-digital PDF text layers → per-cell recognition pairs + per-table markdown SFT pairs (general corpus, all subfolders). |
+| `build_ardb_template_sft.py` | ARDB-only table/title/letterhead transcription SFT pairs by **template substitution**: verifies each of the three layouts once from already-verified sources, then only extracts each document's own varying content (table dates/numbers, title day/month) — avoids `harvest_table_gt.py`'s phantom-column and Khmer-scramble issues for this single-template document series. Month names (beyond June, which the existing GT covers) and the static letterhead text were user-verified against the rendered page image, not taken from the scrambled text layer. Crops use `ardb-layout-coco-v2`'s human-verified `Table`/`Section-Header`/`Page-Furniture` boxes (not PyMuPDF's own bbox, which can be inflated by spurious rows) via `--coco-hf-dir`. **Superseded for Gemma fine-tuning by `build_ardb_unified_sft.py` below** (still used as an importable library of reusable logic — `build_page`, `build_title_text`, etc. — not run standalone anymore). **Reserves the documents it trains on — see its docstring before touching `harvest_eval_gt.py`'s scope.** |
+| `build_layout_detection_sft.py` | Converts `ardb-layout-coco-v2`'s existing human-corrected boxes into Gemma's native detection format (`{"box_2d": [y1,x1,y2,x2], "label": ...}`, 0-1000 normalized) — no new annotation, just a reshape. **Superseded for Gemma fine-tuning by `build_ardb_unified_sft.py` below** (still used as an importable library — `coco_box_to_gemma` — not run standalone anymore). |
+| `build_ardb_unified_sft.py` | ARDB unified page-understanding SFT pairs: one full page image → one JSON list of `{"box_2d", "label", "text"}` per region, in a single forward pass. Combines `build_ardb_template_sft.py`'s table/title text generation and `build_layout_detection_sft.py`'s box conversion — previously two separate tasks/datasets, unified per the mentor's feedback that layout detection and transcription must happen together in one call, not as a 2-stage detect-then-crop-then-transcribe pipeline. Splits/doc_ids are taken directly from the already-packaged `ardb-layout-coco-v2` dataset (not recomputed), so held-out documents stay identical to the superseded layout config's. Ships as `Soxavin/ardb-gemma-sft-v2` (single flat schema, no multi-config needed); `Soxavin/ardb-gemma-sft-v1` is deprecated. |
+| `harvest_eval_gt.py` | The **evaluation-GT** counterpart to the two rows above: same "single-template, numbers vary" insight, but expands `eval/datasets/real/` instead of producing training pairs. See its docstring for the training/eval overlap reservation with `build_ardb_template_sft.py`. |
+| `generate_degraded.py` | Synthetic scan-like degradation (blur/noise/rotation) of clean page renders, to A/B-test preprocessing against existing GT without new labeling. |
+
+---
+
+## 10. Conventions
 
 - **Never edit `results.csv` in place.** If a run is wrong, create a new one.
 - **New model = new run folder.** Register it via `engines/engine_registry.py` and run normally.
 - **Cite results by `run_id`** (folder name) — it encodes the timestamp and engine so references are unambiguous.
 - `eval/datasets/` contents are gitignored — regenerate from the generators above.
 - `eval/runs/` are gitignored — reproduce from the same code + datasets.
-- This `eval/README.md` is the only committed artifact in `eval/` — it documents the contract.
+- This `eval/README.md` documents the contract; `eval/gemma_finetune_runs.md` is the other
+  intentionally-committed file in `eval/` — a durable log of Gemma fine-tune training runs
+  (config + results + findings per run), since Colab training isn't reproducible from code
+  alone the way `eval/runs/` is.
