@@ -13,7 +13,12 @@
 // distinct caution from `experimental`'s "slower" siblings, badged separately so
 // the two risks aren't visually conflated. Cloud engines use their own
 // warn-styled caption instead (a data-privacy caution, a different risk class).
-export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean; recommended?: boolean; trial?: boolean }
+// `model` (backend-authoritative, plain string — proper nouns render the same in
+// both languages, so it skips the i18n lookup other engine fields go through)
+// names the actual underlying model(s), always visible on the card now instead of
+// only reachable via the `title` tooltip (which still carries the engine `key`
+// for support/troubleshooting).
+export type EngineInfo = { key: string; label: string; guidance: string; group: 'local' | 'cloud'; experimental?: boolean; recommended?: boolean; trial?: boolean; model: string }
 
 export type Meta = {
   engines: EngineInfo[]

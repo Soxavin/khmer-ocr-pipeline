@@ -355,6 +355,11 @@ export function SettingsDrawer(props: {
               </span>
             )}
           </span>
+          {/* The actual model(s) behind this engine — previously only reachable via
+              the title tooltip (which shows the engine key, not this). Mono/muted:
+              identity, not the tradeoff description below it, so it reads as a
+              distinct fact rather than more prose competing with the guidance line. */}
+          <span className="mt-0.5 block font-mono text-2xs text-ink-3">{e2.model}</span>
           {/* Cloud guidance is a privacy caution — same integrated line as local
               captions, distinguished only by warn color + a small icon. Same
               header/description contract as SettingRow's hint and the Scan-check

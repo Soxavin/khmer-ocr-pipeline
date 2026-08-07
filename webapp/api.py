@@ -62,23 +62,32 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
 # `recommended` (optional) flags the one engine the picker should badge as the
 # default steer — an explicit field so the frontend never has to regex it out of
 # `guidance` (a copy change there must not silently delete the badge).
+# `model` names the actual underlying model(s) — always shown on the card now
+# (was previously only reachable via the `title` tooltip, which shows the engine
+# `key` instead, for support/troubleshooting). `auto` has no fixed model since it
+# resolves to one of the others per document; the frontend shows the resolved
+# choice separately once a run completes (`ResolvedBadge`).
 _ENGINES = [
     {"key": "auto", "label": "Automatic", "group": "local", "recommended": True,
+     "model": "Picks per document",
      "guidance": "Picks the best engine for each document."},
     {"key": "surya", "label": "Standard", "group": "local",
+     "model": "Surya OCR",
      "guidance": "Best all-round, fastest. Use for number-heavy or wide tables."},
     {"key": "surya_kiri", "label": "Khmer-text specialist", "group": "local", "experimental": True,
+     "model": "Surya OCR + Kiri recognizer",
      "guidance": "Strongest on Khmer-text-heavy narrow tables (ARDB bulletins). Slower."},
     {"key": "surya_kiri_vlm", "label": "Best structure (slow)", "group": "local", "experimental": True,
+     "model": "Surya OCR + Kiri recognizer",
      "guidance": "Keeps spanning headers intact and upgrades Khmer cells when safe. Slowest."},
     # gemma_ardb: the ARDB LoRA fine-tune (Gemma 4 E2B) — the one adapter that has
-    # cleared real-document eval (eval/gemma_finetune_runs.md).
-    # Label/guidance follow the sibling pattern (named by tradeoff, not model
-    # identity — the model name lives in the card's `title` tooltip, same as every
-    # engine key). `trial: true` badges it distinctly from "just slower" engines:
-    # its risk is unreliable OUTPUT (may return incomplete rows), not latency.
+    # cleared real-document eval (eval/gemma_finetune_runs.md). Deployed as a
+    # pre-merged checkpoint (Soxavin/gemma4-e2b-ardb-merged-v5-e3), see
+    # gemma_ardb_engine.py's module docstring. `trial: true` badges it distinctly
+    # from "just slower" engines: its risk is unreliable OUTPUT (may return
+    # incomplete/malformed rows), not latency.
     {"key": "gemma_ardb", "label": "ARDB specialist (trial)", "group": "local", "experimental": True,
-     "trial": True,
+     "trial": True, "model": "Gemma 4 E2B (fine-tuned)",
      "guidance": "Tuned on ARDB bulletins. Under evaluation — may return incomplete or malformed output."},
     # qwen_ardb: the ARDB LoRA fine-tune (Qwen3.5-0.8B) — included DESPITE (in
     # fact because of) its unreliability: every tested config fails to produce
@@ -87,9 +96,13 @@ _ENGINES = [
     # PageTextPanel.tsx's raw-output fallback), not hide a broken option. Guidance
     # is honest about the failure rate rather than framed as a capability.
     {"key": "qwen_ardb", "label": "Qwen ARDB (unreliable, trial)", "group": "local", "experimental": True,
-     "trial": True,
+     "trial": True, "model": "Qwen3.5 0.8B (fine-tuned)",
      "guidance": "Frequently fails to produce valid output. Shown for comparison, not real extraction."},
     {"key": "gemini", "label": "Cloud (Gemini)", "group": "cloud",
+     # Matches gemini_engine.py's GEMINI_MODEL default; a GEMINI_MODEL env override
+     # changes the actual model without this string following along automatically —
+     # acceptable, this is a rare ops-level tweak, not worth a live import here.
+     "model": "Google Gemini (gemini-flash-latest)",
      "guidance": "Sends the page image to Google. Do not use for confidential documents."},
 ]
 
