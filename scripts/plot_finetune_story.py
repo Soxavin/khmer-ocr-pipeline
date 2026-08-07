@@ -49,7 +49,7 @@ _PRIMARY_DATASET = "v5"
 _VERDICT_METRIC = ("mean_table_cer", "Table CER on 15 real pages (lower is better)")
 _APPROACH_ORDER = ["ocr_pipeline_surya", "gemma", "qwen"]
 _APPROACH_SHORT = {
-    "ocr_pipeline_surya": "OCR pipeline\n(already shipped,\nno fine-tuning)",
+    "ocr_pipeline_surya": "OCR pipeline (Surya)\n(already shipped,\nno fine-tuning)",
     "gemma": "Gemma 4 E2B\n(best adapter:\n3 epochs)",
     "qwen": "Qwen3.5-0.8B\n(best adapter:\n3 epochs)",
 }
