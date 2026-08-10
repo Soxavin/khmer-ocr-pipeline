@@ -44,6 +44,19 @@ _INSTRUCTION = (
 _MAX_NEW_TOKENS = 4096
 
 
+def _load_cached_first(fn, *args, **kwargs):
+    """Try the local HF cache first (local_files_only=True skips the network
+    round-trip entirely — including the HEAD request from_pretrained normally
+    makes to revalidate the cache, which has been observed to fail on this
+    machine with an intermittent DNS error even though the model and adapter
+    are already fully downloaded). Falls back to a normal, network-enabled
+    call on a cache miss (first-ever run, or a repo that genuinely changed)."""
+    try:
+        return fn(*args, local_files_only=True, **kwargs)
+    except OSError:
+        return fn(*args, **kwargs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", required=True)
@@ -60,9 +73,9 @@ def main() -> int:
     # now that there's no PEFT injection step, but loading straight onto the one
     # real device is still simpler/faster than letting accelerate guess.
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    processor = AutoProcessor.from_pretrained(args.base_model)
-    model = AutoModelForImageTextToText.from_pretrained(
-        args.base_model, torch_dtype=torch.bfloat16,
+    processor = _load_cached_first(AutoProcessor.from_pretrained, args.base_model)
+    model = _load_cached_first(
+        AutoModelForImageTextToText.from_pretrained, args.base_model, torch_dtype=torch.bfloat16,
     ).to(device)
     model.eval()
 

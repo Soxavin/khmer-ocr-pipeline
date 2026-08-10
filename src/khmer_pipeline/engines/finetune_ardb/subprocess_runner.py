@@ -64,8 +64,17 @@ def run_isolated_inference(
     """Run one page image through the isolated subprocess, returning its raw
     stdout text (the model's raw generation — parsing happens in the caller via
     finetune_ardb.parsing.parse_regions). Raises RuntimeError with the
-    subprocess's stderr on a non-zero exit or timeout; never returns garbage
-    silently — the engine layer is what fails soft per page, not this runner.
+    subprocess's stderr on a non-zero exit that produced NO stdout — a real
+    failure, nothing to salvage. A non-zero exit that DID produce stdout is
+    still returned rather than discarded: observed live, the infer scripts can
+    finish generating (weights loaded, output already written) and then die
+    with SIGABRT (multiprocessing's resource_tracker crashing during interpreter
+    shutdown, exit 134) — a cleanup-time crash, not a generation failure.
+    Discarding a real generation because Python's own teardown code crashed
+    afterward would silently turn a working run into an empty page; the
+    caller's JSON-parse fallback already handles a malformed/truncated result
+    correctly (parse_regions returning None -> raw text preserved), so handing
+    it whatever stdout exists is strictly more informative than raising.
     If `is_cancelled` starts returning True while the subprocess is still
     running, it (and its whole process group — `uv run`'s actual model child,
     not just the wrapper) is killed and InferenceCancelled is raised."""
@@ -119,7 +128,7 @@ def run_isolated_inference(
                 _kill_process_group(proc)
                 raise RuntimeError(f"{config.infer_script} timed out after {config.timeout_s}s")
 
-        if proc.returncode != 0:
+        if proc.returncode != 0 and not stdout.strip():
             raise RuntimeError(
                 f"{config.infer_script} exited {proc.returncode}: {stderr.strip()}"
             )

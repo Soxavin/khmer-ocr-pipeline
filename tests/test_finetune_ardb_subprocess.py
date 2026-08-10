@@ -140,6 +140,37 @@ def test_nonzero_exit_raises_runtimeerror(monkeypatch):
         run_isolated_inference(_img(), _config())
 
 
+def test_nonzero_exit_with_real_stdout_is_returned_not_discarded(monkeypatch):
+    """Observed live: the infer scripts can finish generating and writing stdout,
+    then die with SIGABRT during interpreter shutdown (multiprocessing's
+    resource_tracker crashing on cleanup, exit 134) — a teardown crash, not a
+    generation failure. Discarding real output because Python's own cleanup code
+    crashed afterward would silently turn a working run into an empty page."""
+    _patch_process_control(monkeypatch)
+    generated = '[{"box_2d": [0, 0, 10, 10], "label": "Text", "text": "ok"}]'
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda cmd, **kwargs: FakeProc(
+            cmd, returncode=134, stdout=generated,
+            stderr="resource_tracker: There appear to be 1 leaked semaphore objects",
+        ),
+    )
+    out = run_isolated_inference(_img(), _config())
+    assert out == generated
+
+
+def test_nonzero_exit_with_only_whitespace_stdout_still_raises(monkeypatch):
+    """Whitespace-only stdout is not a salvageable generation — must not be
+    treated as real output just because it's technically non-empty."""
+    _patch_process_control(monkeypatch)
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda cmd, **kwargs: FakeProc(cmd, returncode=134, stdout="   \n", stderr="crashed"),
+    )
+    with pytest.raises(RuntimeError, match="crashed"):
+        run_isolated_inference(_img(), _config())
+
+
 def test_timeout_raises_runtimeerror_with_configured_value(monkeypatch):
     _patch_process_control(monkeypatch)
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: FakeProc(cmd, hangs=True))
