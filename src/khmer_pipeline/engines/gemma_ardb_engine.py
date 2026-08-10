@@ -49,7 +49,12 @@ _CONFIG = FineTuneConfig(
     infer_script="src/khmer_pipeline/engines/finetune_ardb/gemma_ardb_infer.py",
     # peft dropped: base_model_id is a pre-merged checkpoint, no adapter attachment
     # step needed at inference time (see module docstring).
-    extra_pins=["transformers>=5.5,<6", "torch"],
+    # pillow/torchvision are NOT optional extras: the infer script imports PIL, and
+    # transformers imports torchvision while building a vision AutoProcessor. Both
+    # used to leak in from the project venv, which is exactly the mixed-install bug
+    # `uv run --isolated` now prevents (see subprocess_runner.py) — a sealed env has
+    # to declare everything it actually uses.
+    extra_pins=["transformers>=5.5,<6", "torch", "torchvision", "pillow"],
     table_text_format="html",
 )
 

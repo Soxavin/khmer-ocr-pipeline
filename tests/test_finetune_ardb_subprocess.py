@@ -74,7 +74,7 @@ def _patch_process_control(monkeypatch):
     return killpg_calls
 
 
-def test_invokes_uv_run_no_project_with_pins(monkeypatch):
+def test_invokes_uv_run_isolated_no_project_with_pins(monkeypatch):
     _patch_process_control(monkeypatch)
     captured = {}
 
@@ -85,11 +85,36 @@ def test_invokes_uv_run_no_project_with_pins(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     out = run_isolated_inference(_img(), _config())
     cmd = captured["cmd"]
-    assert cmd[:3] == ["uv", "run", "--no-project"]
+    assert cmd[:4] == ["uv", "run", "--isolated", "--no-project"]
     assert "--with" in cmd and "transformers>=5.5,<6" in cmd
     assert "--with" in cmd and "peft>=0.13,<1" in cmd
     assert "src/khmer_pipeline/engines/finetune_ardb/gemma_ardb_infer.py" in cmd
     assert "ok" in out
+
+
+def test_subprocess_env_drops_the_parents_venv_pointers(monkeypatch):
+    """Without this the child inherits VIRTUAL_ENV/PYTHONPATH and can put the
+    project venv's site-packages back on sys.path — the exact leak that mixed two
+    torch builds and killed every Qwen run with 'operator torchvision::nms does
+    not exist'."""
+    _patch_process_control(monkeypatch)
+    monkeypatch.setenv("VIRTUAL_ENV", "/some/project/.venv")
+    monkeypatch.setenv("PYTHONPATH", "/some/project/src")
+    monkeypatch.setenv("PATH", "/usr/bin")  # unrelated vars must still pass through
+    captured = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return FakeProc(cmd, stdout="[]")
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    run_isolated_inference(_img(), _config())
+    env = captured["env"]
+    assert env is not None, "must pass an explicit env, not inherit the parent's"
+    assert "VIRTUAL_ENV" not in env
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+    assert env.get("PATH") == "/usr/bin"
 
 
 def test_passes_adapter_repo_id_as_argument(monkeypatch):

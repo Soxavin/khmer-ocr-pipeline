@@ -73,7 +73,19 @@ def run_isolated_inference(
         img_path = Path(tmpdir) / "page.png"
         Image.fromarray(page_image).save(img_path)
 
-        cmd = ["uv", "run", "--no-project"]
+        # --isolated is load-bearing, not belt-and-braces: without it `uv run
+        # --no-project` REUSES whatever environment it discovers (the project's
+        # .venv via an inherited VIRTUAL_ENV, or a conda base) and layers --with
+        # packages on top as an overlay. That mixes two torch builds in one
+        # process: the overlay's torch plus the project venv's torchvision, which
+        # registers C++ ops against the torch it was compiled for and dies with
+        # "operator torchvision::nms does not exist" the moment transformers
+        # imports it. Qwen hit this on every run (torch==2.10.0 pin, guaranteed
+        # mismatch); Gemma only escaped because its unpinned `torch` happened to
+        # resolve close enough to the leaked torchvision. --isolated builds a
+        # genuinely standalone env, so the pins in extra_pins are the whole
+        # dependency picture.
+        cmd = ["uv", "run", "--isolated", "--no-project"]
         for pin in config.extra_pins:
             cmd += ["--with", pin]
         cmd += [
@@ -82,11 +94,16 @@ def run_isolated_inference(
             "--adapter", config.adapter_repo_id,
             "--image", str(img_path),
         ]
+        # Scrub the venv pointers too: --isolated governs what uv builds, but a
+        # leftover VIRTUAL_ENV/PYTHONPATH can still put the parent's site-packages
+        # on the child's sys.path once python starts.
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME")}
         # New session -> own process group, so killing it also kills `uv run`'s
         # child interpreter (the actual model process), not just the wrapper.
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            start_new_session=True,
+            start_new_session=True, env=env,
         )
         start = time.monotonic()
         while True:

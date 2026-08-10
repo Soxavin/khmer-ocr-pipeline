@@ -57,7 +57,14 @@ _CONFIG = FineTuneConfig(
     # for this model's Gated DeltaNet kernels (transformers itself stays at the
     # official 5.2.0 pin, confirmed unnecessary to bump once the real cause —
     # a mismatched prebuilt causal_conv1d wheel — was found).
-    extra_pins=["transformers>=5.0,<6", "peft>=0.13,<1", "torch==2.10.0"],
+    # pillow/torchvision are NOT optional extras: the infer script imports PIL, and
+    # transformers imports torchvision while building a vision AutoProcessor. Both
+    # used to leak in from the project venv — and the leaked torchvision, compiled
+    # against a DIFFERENT torch than this pin, is what made every local Qwen run die
+    # with "operator torchvision::nms does not exist". Declared here so the sealed
+    # env (uv run --isolated, see subprocess_runner.py) resolves one coherent set.
+    extra_pins=["transformers>=5.0,<6", "peft>=0.13,<1", "torch==2.10.0",
+                "torchvision", "pillow"],
     table_text_format="markdown",
     # Generation here is known-slow and may hit its token cap without ever
     # producing a clean stop — well beyond Gemma's 600s default (per the user:
