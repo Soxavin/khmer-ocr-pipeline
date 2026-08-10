@@ -18,9 +18,10 @@ const TablesPanel = lazy(() => import('./components/review/TablesPanel').then((m
 import { IssuesDrawer } from './components/review/IssuesDrawer'
 import { useFocusTrap } from './hooks/useFocusTrap'
 import { useRunStatus } from './hooks/useRunStatus'
-import { encodePages, gridPages, pagesFromSettings, processedIndex, withoutPageScope, PAGE_SCOPE_DEFAULTS } from './lib/pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex, scopeInvalid as isScopeInvalid, withoutPageScope } from './lib/pages'
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
+import { readPerDocSettings, resolveInitialSettings, writePerDocSettings, type PerDocDraft } from './lib/perDocSettings'
 import { useT } from './i18n.tsx'
 import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
 
@@ -138,14 +139,19 @@ export default function App() {
   }, [])
   const canvasPickBlock = useMemo(() => pickBlock('canvas'), [pickBlock])
   const textPickBlock = useMemo(() => pickBlock('text'), [pickBlock])
-  // Silently remember the analyst's last-used engine/settings (no presets UI).
-  const [engine, setEngine] = useState(() => localStorage.getItem('engine') ?? 'surya')
-  // Labs mode gates the custom ARDB fine-tunes (experimental engines). Off by default so
+  // Engine/preprocessing/export-join are PER-DOCUMENT (lib/perDocSettings.ts) — the
+  // seeding effect below is the sole owner of their initial value per document, so
+  // these initializers are just safe placeholders for the render before it runs.
+  const [engine, setEngine] = useState('surya')
+  // Labs mode gates the custom ARDB fine-tunes (experimental engines). It stays
+  // GLOBAL, not per-document: it's never part of the run payload, only controls
+  // which engines the picker shows, so making it per-doc would just flicker the
+  // engine list across documents for no run-affecting reason. Off by default so
   // the drawer shows a production-clean engine list; persisted per machine.
   const [labsMode, setLabsMode] = useState(() => localStorage.getItem('labsMode') === 'true')
   // Joining continuation tables is an EXPORT choice; extraction always stays
   // per-page so every row keeps a page image to verify against.
-  const [combineExport, setCombineExport] = useState(() => localStorage.getItem('combineExport') !== 'false')
+  const [combineExport, setCombineExport] = useState(true)
   const [batchRunning, setBatchRunning] = useState(false)
   const [drawer, setDrawer] = useState<'issues' | 'settings' | null>(null)
   const [showFind, setShowFind] = useState(false)
@@ -158,6 +164,17 @@ export default function App() {
   const [canvasView, setCanvasView] = useState<'single' | 'grid'>('single')
   const split = useSplit()
   const [runSettings, setRunSettings] = useState<RunSettings>({})
+  // Tracks which document id the state above (runSettings/engine/combineExport)
+  // currently belongs to. Set by the restore effect AFTER it applies a document's
+  // settings; the write-through effect below only persists when this matches the
+  // active document, so a render that still holds the OUTGOING document's state
+  // (mid doc-switch, or before an async last_run_settings fetch resolves) can
+  // never be mistaken for the new document's draft and clobber its localStorage key.
+  const activeDocIdRef = useRef<string | null>(null)
+  // What was actually sent for the run currently in flight, captured at the moment
+  // `api.run` is called — not re-read from state on success, which could by then
+  // belong to a document the operator has since switched away from.
+  const lastRunDraftRef = useRef<{ id: string; draft: PerDocDraft } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
 
@@ -260,6 +277,19 @@ export default function App() {
   // still need current values (the seen-doc badge filter read a stale closure before).
   const runSettingsRef = useRef(runSettings)
   runSettingsRef.current = runSettings
+  // Keys the operator changed by hand, PER DOCUMENT (mirrors suggestSeenRef's own
+  // per-id Map just above) — a hand override on one document must never suppress
+  // the Auto suggestion on another. The advisory suggestion merges around these:
+  // automation never overrules a person.
+  const touchedByDocRef = useRef<Map<string, Set<string>>>(new Map())
+  const touched = useCallback((id: string): Set<string> => {
+    let s = touchedByDocRef.current.get(id)
+    if (!s) {
+      s = new Set()
+      touchedByDocRef.current.set(id, s)
+    }
+    return s
+  }, [])
   useEffect(() => {
     const s = suggestion.data
     if (!active || !s) {
@@ -290,42 +320,79 @@ export default function App() {
     const keys = Object.keys(s.suggested)
     setAutoApplied(keys.length ? { ...s.rationale } : {})
     if (keys.length) {
-      setRunSettings((prev) => mergeSuggestion(prev, s.suggested, touchedRef.current))
+      setRunSettings((prev) => mergeSuggestion(prev, s.suggested, touched(active.id)))
       setSettingsPulse(true)
     }
     // runSettings intentionally omitted: this effect must run on doc/suggestion
     // changes only, not on every settings keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, suggestion.data])
-  // Keys the operator changed by hand for the active document. The advisory
-  // suggestion merges around these — automation never overrules a person.
-  const touchedRef = useRef<Set<string>>(new Set())
   // The user touched a toggle: their choice wins — drop its Auto badge.
   const clearAuto = useCallback((k: string) => {
-    touchedRef.current.add(k)
+    if (!active) return
+    touched(active.id).add(k)
     setAutoApplied((prev) => {
       if (!(k in prev)) return prev
       const { [k]: _dropped, ...rest } = prev
       return rest
     })
-  }, [])
+  }, [active, touched])
 
-  // Seed the Advanced drawer from server defaults, overlaid with last-used values.
+  // The operator's global last-used preferences (tier 3) — the sensible starting
+  // point for a document neither configured nor run yet.
+  const readGlobalPrefs = useCallback((): PerDocDraft => ({
+    runSettings: (() => {
+      try {
+        return JSON.parse(localStorage.getItem('runSettings') ?? '{}') as RunSettings
+      } catch {
+        return {} // stale/corrupt entry: fall back to defaults
+      }
+    })(),
+    engine: localStorage.getItem('engine') ?? 'surya',
+    combineExport: localStorage.getItem('combineExport') !== 'false',
+  }), [])
+
+  // Seed engine/runSettings/combineExport for the active document — the SOLE owner
+  // of these three pieces of state (activeDocIdRef, declared above, records which
+  // document they currently belong to). Resolves per the three-tier restore in
+  // lib/perDocSettings.ts: this document's own draft, then what actually produced
+  // its visible results, then the operator's global last-used preferences.
   const defaults = meta.data?.defaults
   useEffect(() => {
     if (!defaults) return
-    let last: RunSettings = {}
-    try {
-      last = JSON.parse(localStorage.getItem('runSettings') ?? '{}') as RunSettings
-    } catch { /* stale/corrupt entry: fall back to defaults */ }
-    // Drop persisted keys the backend no longer knows (e.g. a setting removed in a
-    // later version): the run POST validates against the current field set and 400s
-    // on any extra key, so a stale localStorage blob would otherwise block every run.
-    const pruned = Object.fromEntries(
-      Object.entries(last).filter(([k]) => k in defaults),
-    ) as RunSettings
-    setRunSettings((s) => ({ ...defaults, ...pruned, ...s }))
-  }, [defaults])
+    const id = active?.id ?? null
+    // Tier 2 (last_run_settings) loads asynchronously per document. Resolving
+    // early to tier 3 while it's still in flight, and letting the write-through
+    // effect persist that guess as this document's tier-1 draft, would permanently
+    // shadow tier 2 once the real fetch lands (tier 1 now "exists"). Wait for the
+    // fetch to settle rather than guess — only matters while a document is active;
+    // the no-active-document reset below has no tier 2 to wait for.
+    if (id && !status.isFetched) return
+    const globalPrefs = readGlobalPrefs()
+    const resolved = id
+      ? resolveInitialSettings(defaults, readPerDocSettings(id), status.data?.last_run_settings ?? null, globalPrefs)
+      : resolveInitialSettings(defaults, null, null, globalPrefs)
+    // Page scope restores with everything else: it is this document's own choice,
+    // and reopening the document should show what was left there. A range never
+    // reaches a DIFFERENT document, because the global prefs that seed a
+    // never-configured document are stored with page scope stripped
+    // (withoutPageScope in rememberSettings), leaving the "all pages" default.
+    setRunSettings(resolved.runSettings)
+    setEngine(resolved.engine)
+    setCombineExport(resolved.combineExport)
+    // Set AFTER the setters above: this is what makes the write-through effect's
+    // active-id check meaningful (it only sees "safe to write" once this render's
+    // state genuinely belongs to this id).
+    activeDocIdRef.current = id
+  }, [active?.id, defaults, status.data?.last_run_settings, status.isFetched, readGlobalPrefs])
+
+  // Write-through: persist this document's own draft on every edit, so reopening
+  // it (even after tier 2 has moved on, e.g. a later run) restores exactly this.
+  useEffect(() => {
+    const id = active?.id
+    if (!id || activeDocIdRef.current !== id) return
+    writePerDocSettings(id, { runSettings, engine, combineExport })
+  }, [active?.id, runSettings, engine, combineExport])
 
   const jumpToIssue = useCallback(
     (idx: number) => {
@@ -393,10 +460,10 @@ export default function App() {
     onSuccess: (res, _files, ctx) => {
       qc.invalidateQueries({ queryKey: ['documents'] })
       if (res.documents.length) {
+        // A fresh document has no per-doc draft or last_run_settings, so the
+        // seeding effect (keyed on active?.id) correctly falls to tier 3 (global
+        // last-used prefs) with page scope reset to "all" — no manual reset here.
         setActiveId(res.documents[res.documents.length - 1].id)
-        // A freshly uploaded document opens on "all pages", even if a range was set
-        // on the previous one this session (that scope only lived in memory).
-        setRunSettings((s) => ({ ...s, ...PAGE_SCOPE_DEFAULTS }))
       }
       setError(null)
       const dup = res.documents.find((d) => ctx?.before.has(d.id))
@@ -421,7 +488,7 @@ export default function App() {
       setDismissedIssues(new Set())
       setDrawer(null)
       suggestSeenRef.current.clear()
-      touchedRef.current = new Set()
+      touchedByDocRef.current.clear()
     },
     onError: (e) => setError(friendlyError(e, t('err_unreachable'))),
   })
@@ -441,13 +508,10 @@ export default function App() {
   // The server extracts one document at a time; this gate keeps every launch
   // control in the workspace honest instead of letting the API 409 explain it.
   const pipelineBusy = isBusy(documents, batchRunning) || (status.data?.active ?? false)
-  // A page scope the backend would reject (mirrors the drawer's inline range/single
-  // errors). Block the launch controls rather than fire a run the API only 400s.
-  const scopeInvalid =
-    (runSettings.page_scope === 'range'
-      && Number(runSettings.page_end ?? 5) < Number(runSettings.page_start ?? 1))
-    || (runSettings.page_scope === 'single'
-      && pageCount > 0 && Number(runSettings.page_num ?? 1) > pageCount)
+  // A page scope the backend would reject: block the launch controls rather than
+  // fire a run the API only 400s. Shared with the batch path, which checks each
+  // document's own scope (lib/pages.ts).
+  const scopeInvalid = isScopeInvalid(runSettings, pageCount)
 
   // Persist Labs mode, and guard the selection: if labs is off but the selected engine
   // is experimental (toggled off just now, OR a stale value hydrated from a prior labs
@@ -461,28 +525,41 @@ export default function App() {
     if (engines.find((e2) => e2.key === engine)?.experimental) setEngine('auto')
   }, [labsMode, meta.data?.engines, engine])
 
-  const rememberSettings = useCallback(() => {
-    localStorage.setItem('engine', engine)
+  // Persists BOTH this document's own draft (tier 1, restores exactly what ran)
+  // AND the global last-used prefs (tier 3, seeds a document never configured).
+  // Takes explicit id + draft rather than reading current state, so a caller can
+  // record what was ACTUALLY sent for a specific document — not whatever happens
+  // to be live in the drawer when this is called, which may by then belong to a
+  // document the operator has since switched away from (see lastRunDraftRef).
+  const rememberSettings = useCallback((id: string, draft: PerDocDraft) => {
+    localStorage.setItem('engine', draft.engine)
     // Page scope is per-document (a range means nothing on a different document),
     // so it is stripped before persisting — otherwise it rides onto the next one.
-    localStorage.setItem('runSettings', JSON.stringify(withoutPageScope(runSettings)))
-    localStorage.setItem('combineExport', String(combineExport))
-  }, [engine, runSettings, combineExport])
+    localStorage.setItem('runSettings', JSON.stringify(withoutPageScope(draft.runSettings)))
+    localStorage.setItem('combineExport', String(draft.combineExport))
+    writePerDocSettings(id, draft)
+  }, [])
 
   const run = useMutation({
     // Guarded so a double-click or a stale button never races the single-run
     // server: a collision is caught here (or swallowed from a 409) rather than
     // surfacing "Another extraction is already running." as a red banner.
-    mutationFn: (id: string) => guardedRun(pipelineBusy || scopeInvalid, () => api.run(id, draftConfiguration)),
-    onSuccess: (outcome) => {
+    mutationFn: (id: string) => {
+      // Snapshot what's actually being sent, at the moment it's sent — onSuccess
+      // fires later and must not assume `active`/`runSettings` still belong to
+      // this same document by then.
+      lastRunDraftRef.current = { id, draft: { runSettings, engine, combineExport } }
+      return guardedRun(pipelineBusy || scopeInvalid, () => api.run(id, draftConfiguration))
+    },
+    onSuccess: (outcome, id) => {
       if (outcome === 'blocked') return
       setError(null)
-      rememberSettings()
+      if (lastRunDraftRef.current?.id === id) rememberSettings(id, lastRunDraftRef.current.draft)
       // A new run invalidates the results on screen: drop the caches for the old
       // ones so nothing from the previous configuration lingers into review.
-      qc.removeQueries({ queryKey: ['overview', active?.id] })
-      qc.removeQueries({ queryKey: ['page', active?.id] })
-      qc.removeQueries({ queryKey: ['lowconf', active?.id] })
+      qc.removeQueries({ queryKey: ['overview', id] })
+      qc.removeQueries({ queryKey: ['page', id] })
+      qc.removeQueries({ queryKey: ['lowconf', id] })
       setSelectedTable(null)
       setFlashToken(null)
       setFocusCell(null)
@@ -490,7 +567,7 @@ export default function App() {
       // A re-run re-derives the issue list, so old dismissals no longer map —
       // clear both memory and the persisted copy for this doc.
       setDismissedIssues(new Set())
-      if (active?.id) try { localStorage.removeItem(`dismissed:${active.id}`) } catch { /* noop */ }
+      try { localStorage.removeItem(`dismissed:${id}`) } catch { /* noop */ }
       qc.invalidateQueries({ queryKey: ['status'] })
       qc.invalidateQueries({ queryKey: ['documents'] })
     },
@@ -502,7 +579,6 @@ export default function App() {
   // Declared before runAll, which both calls it and lists it as a dep.
   const selectDoc = useCallback((id: string) => {
     setActiveId(id)
-    touchedRef.current = new Set()
     setPageIdx(0)
     setSelectedTable(null)
     setFlashToken(null)
@@ -511,15 +587,15 @@ export default function App() {
     setIssueIdx(-1)
     // Dismissals are loaded from storage by the per-doc effect (keyed on active.id);
     // no manual clear here or it would race that load and wipe the restored set.
-    // Page scope belongs to the document you were on, not the one you're opening —
-    // reset to "all" so a new/switched document never inherits a stale range.
-    setRunSettings((s) => ({ ...s, ...PAGE_SCOPE_DEFAULTS }))
+    // engine/runSettings/combineExport are loaded by the seeding effect (keyed on
+    // active?.id) too — no manual reset here, or it would race that restore the
+    // same way a manual dismissals-clear would.
   }, [clearBlockLink])
 
   // "Run all": sequential client-side loop (single GPU — the server 409s overlap).
   const runAll = useCallback(async () => {
+    if (!defaults) return
     setBatchRunning(true)
-    rememberSettings()
     try {
       const targets = documents.filter((d) => d.status === 'queued' || d.status === 'error' || d.status === 'stopped')
       for (const d of targets) {
@@ -530,12 +606,26 @@ export default function App() {
         // Full doc-switch reset (pageIdx, selection, triage): plain setActiveId
         // bled the previous doc's page index into the next one's preview.
         selectDoc(d.id)
+        // Resolve THIS document's own settings independently — reusing the
+        // currently-live drawer state would only reflect whichever document
+        // happened to be active when "Run all" was clicked, applying it to every
+        // document in the batch (the exact per-document leak this whole change
+        // fixes). Page scope comes along with the rest, so each document runs the
+        // pages it was configured for — validated against ITS OWN page count.
+        const st0 = await api.status(d.id)
+        const resolved = resolveInitialSettings(
+          defaults, readPerDocSettings(d.id), st0.last_run_settings ?? null, readGlobalPrefs(),
+        )
+        const draft: RunSettings = {
+          ...resolved.runSettings, ocr_engine_key: resolved.engine, stitch_pages: false,
+        }
         try {
-          await guardedRun(scopeInvalid, () => api.run(d.id, draftConfiguration))
+          await guardedRun(isScopeInvalid(resolved.runSettings, d.pages), () => api.run(d.id, draft))
         } catch (e) {
           setError(friendlyError(e, t('err_unreachable')))
           break
         }
+        rememberSettings(d.id, { runSettings: resolved.runSettings, engine: resolved.engine, combineExport: resolved.combineExport })
         let sawActive = false
         for (let i = 0; i < 7200; i++) {
           await new Promise((r) => setTimeout(r, 1000))
@@ -556,7 +646,7 @@ export default function App() {
       qc.invalidateQueries({ queryKey: ['documents'] })
       qc.invalidateQueries({ queryKey: ['status'] })
     }
-  }, [documents, engine, runSettings, qc, rememberSettings, selectDoc])
+  }, [documents, defaults, qc, rememberSettings, selectDoc, readGlobalPrefs, t])
 
   // Keyboard: r runs, n/p step issues, ←/→ pages, Ctrl/Cmd-F find, Esc closes drawers.
   useEffect(() => {

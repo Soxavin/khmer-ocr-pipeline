@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodePages, gridPages, pagesFromSettings, processedIndex, withoutPageScope, PAGE_SCOPE_DEFAULTS } from './pages'
+import { encodePages, gridPages, pagesFromSettings, processedIndex, scopeInvalid, withoutPageScope, PAGE_SCOPE_DEFAULTS } from './pages'
 
 describe('withoutPageScope', () => {
   it('strips every page-scope field, keeping the rest untouched', () => {
@@ -20,11 +20,44 @@ describe('withoutPageScope', () => {
     expect(s.page_scope).toBe('range')
   })
 
-  it('PAGE_SCOPE_DEFAULTS resets scope to all pages', () => {
-    // The reset applied on a document switch: whatever range was set, the next
-    // document opens on "all".
+  it('PAGE_SCOPE_DEFAULTS means all pages', () => {
+    // What a document with no scope of its own starts on. A configured document
+    // keeps its OWN scope; this is only the starting point.
     expect(PAGE_SCOPE_DEFAULTS.page_scope).toBe('all')
     expect(pagesFromSettings(PAGE_SCOPE_DEFAULTS, 7)).toEqual(new Set([0, 1, 2, 3, 4, 5, 6]))
+  })
+})
+
+describe('scopeInvalid (a scope the backend would reject)', () => {
+  it('an inverted range is invalid', () => {
+    expect(scopeInvalid({ page_scope: 'range', page_start: 4, page_end: 2 }, 10)).toBe(true)
+  })
+
+  it('a well-ordered range is fine, even a single-page one', () => {
+    expect(scopeInvalid({ page_scope: 'range', page_start: 2, page_end: 4 }, 10)).toBe(false)
+    expect(scopeInvalid({ page_scope: 'range', page_start: 3, page_end: 3 }, 10)).toBe(false)
+  })
+
+  it('a single page past the end of the document is invalid', () => {
+    expect(scopeInvalid({ page_scope: 'single', page_num: 11 }, 10)).toBe(true)
+    expect(scopeInvalid({ page_scope: 'single', page_num: 10 }, 10)).toBe(false)
+  })
+
+  it('skips the bound check while the page count is still unknown', () => {
+    expect(scopeInvalid({ page_scope: 'single', page_num: 99 }, 0)).toBe(false)
+  })
+
+  it('"all" and "list" scopes are never invalid', () => {
+    expect(scopeInvalid({ page_scope: 'all' }, 3)).toBe(false)
+    expect(scopeInvalid({ page_scope: 'list', page_list: [1, 99] }, 3)).toBe(false)
+  })
+
+  it('a per-document range is judged against THAT document’s page count', () => {
+    // The batch path validates each document separately: a 2-page scope that is
+    // fine on a 5-page document must not be judged by another document's length.
+    const scope = { page_scope: 'single', page_num: 4 }
+    expect(scopeInvalid(scope, 5)).toBe(false)
+    expect(scopeInvalid(scope, 3)).toBe(true)
   })
 })
 

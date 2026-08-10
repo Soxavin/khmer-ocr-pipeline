@@ -4,12 +4,13 @@ import type { RunSettings } from '../api/types'
     before any run, or the review of a finished analysis. */
 export type CanvasMode = 'pre-upload' | 'post-analysis'
 
-/** The settings that describe WHICH pages to run. They are inherently per-document
-    — a `page_start:2, page_end:4` from a 10-page bulletin is meaningless on a 3-page
-    one — so they must never persist across documents. */
+/** The settings that describe WHICH pages to run. They belong to one document — a
+    `page_start:2, page_end:4` from a 10-page bulletin is meaningless on a 3-page one
+    — so they are stored per document (lib/perDocSettings.ts) and stripped from the
+    GLOBAL last-used prefs, which seed documents that have no settings of their own. */
 export const PAGE_SCOPE_KEYS = ['page_scope', 'page_num', 'page_start', 'page_end', 'page_list'] as const
 
-/** The "all pages" reset, applied when a document is opened or switched to. Field
+/** The "all pages" starting point for a document with no scope of its own. Field
     values mirror the backend Settings defaults (webapp/settings.py). */
 export const PAGE_SCOPE_DEFAULTS: RunSettings = {
   page_scope: 'all',
@@ -19,12 +20,26 @@ export const PAGE_SCOPE_DEFAULTS: RunSettings = {
   page_list: [],
 }
 
-/** `settings` with every page-scope field removed — what gets persisted to
-    localStorage, so a range set on one document never rides onto the next. */
+/** `settings` with every page-scope field removed — what gets persisted as the
+    GLOBAL last-used prefs, so a range set on one document never seeds another. */
 export function withoutPageScope(settings: RunSettings): RunSettings {
   const out = { ...settings }
   for (const k of PAGE_SCOPE_KEYS) delete out[k]
   return out
+}
+
+/** A page scope the backend would reject: an inverted range, or a single page past
+    the end of the document. Mirrors the drawer's inline range/single errors so the
+    launch controls can block rather than fire a run the API only 400s.
+    `pageCount` 0 means "not known yet" and skips the single-page bound check. */
+export function scopeInvalid(settings: RunSettings, pageCount: number): boolean {
+  if (settings.page_scope === 'range') {
+    return Number(settings.page_end ?? 5) < Number(settings.page_start ?? 1)
+  }
+  if (settings.page_scope === 'single') {
+    return pageCount > 0 && Number(settings.page_num ?? 1) > pageCount
+  }
+  return false
 }
 
 /** Grid checkboxes derive from runSettings and encode back to the MINIMAL scope —
