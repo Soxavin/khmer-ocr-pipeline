@@ -359,10 +359,13 @@ separate experiment (§7), not a natural extension of this sweep.
 
 **Finding 2 — on real, out-of-distribution documents, the existing pipeline wins outright.** Each
 model's best-tested adapter (3 epochs) was scored against 15 hand-verified, held-out ARDB
-market-price-bulletin pages — a dedicated real-document test set built for this comparison, larger
-than and distinct from §4.2–§4.3's original 3-page baseline (that ran on `eval/datasets/real`; this
-ran on a separate `ardb_real_ocr_bench` set — see `eval/runs/ardb_real_ocr_baseline/`) — pages
-neither model saw during training:
+market-price-bulletin pages — the ARDB-only subset of `eval/datasets/real`'s current contents (17
+pages total; the other 2 are a non-ARDB government budget document, out of this comparison's
+scope), staged to a dedicated `ardb_real_ocr_bench` run for this comparison (see
+`eval/runs/ardb_real_ocr_baseline/`). That folder has grown considerably since §4.2–§4.3's original
+baseline, which scored an earlier 3-page snapshot of the same directory — the two sections draw
+from the same source folder as it existed at each point in time, not two unrelated datasets, but
+they are not scoring the same fixed page set either. Pages neither model saw during training:
 
 | Approach | Cell_Acc | Numeric_Cell_Acc | Table_CER | Document_CER | Grid shape match | Parse failures |
 |---|---|---|---|---|---|---|
