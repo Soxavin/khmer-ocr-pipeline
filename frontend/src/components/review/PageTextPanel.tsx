@@ -371,6 +371,7 @@ export function PageTextPanel(props: {
                           <span
                             className={`${chipCls} ${BAND_STYLE[band]}`}
                             aria-label={`${t(`band_${band}` as const)} — ${Math.round((block?.confidence ?? 0) * 100)}%`}
+                            title={t('conf_meaning_tip')}
                           >
                             {Math.round((block?.confidence ?? 0) * 100)}%
                           </span>

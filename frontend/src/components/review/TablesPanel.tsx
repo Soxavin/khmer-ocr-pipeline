@@ -207,7 +207,7 @@ export function TablesPanel(props: {
             lists only the tinted tiers. Shown only when this page has tinted cells.
             The show/hide toggle now lives in the View-options popover (§distill). */}
         {bands.check.length + bands.skim.length > 0 && (
-          <span className="flex shrink-0 items-center gap-2.5" aria-label={t('conf_toggle')}>
+          <span className="flex shrink-0 items-center gap-2.5" aria-label={t('conf_toggle')} title={t('conf_meaning_tip')}>
             {TINTED_BANDS.map((b) => {
               const style = BAND_STYLE[b]
               return (

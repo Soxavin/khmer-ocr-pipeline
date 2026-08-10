@@ -98,6 +98,7 @@ Experimental) and Labs-mode strings from the settings-drawer redesign. Look hard
 | `raw_view_tip` | Show the original OCR reading, read-only. Turn off to edit. | បង្ហាញលទ្ធផល OCR ដើម ក្នុងទម្រង់អានតែប៉ុណ្ណោះ។ បិទដើម្បីកែ។ |
 | `conf_toggle` | Confidence | ទំនុកចិត្ត |
 | `conf_toggle_tip` | Show or hide the marks on cells the recogniser was unsure of | បង្ហាញ ឬលាក់សញ្ញាលើក្រឡាដែលកម្មវិធីស្គាល់អក្សរមិនប្រាកដ |
+| `conf_meaning_tip` | How sure the recogniser was, not how correct it is. | កម្រិតដែលប្រព័ន្ធប្រាកដ មិនមែនកម្រិតត្រឹមត្រូវទេ។ |
 | `ocr_original_tt` | OCR: {v} | OCR: {v} |
 | `dismiss_all` | Dismiss all | លុបចេញទាំងអស់ |
 | `dismiss_all_confirm` | Dismiss all {n} issues from this list? The cells stay flagged until fixed. | លុបចេញបញ្ហាទាំង {n} ចេញពីបញ្ជីនេះ? ក្រឡានៅតែត្រូវបានសម្គាល់រហូតដល់កែរួច។ |

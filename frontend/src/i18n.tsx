@@ -409,6 +409,11 @@ const en = {
   raw_view_tip: 'Show the original OCR reading, read-only. Turn off to edit.',
   conf_toggle: 'Confidence',
   conf_toggle_tip: 'Show or hide the marks on cells the recogniser was unsure of',
+  // What the % actually is. A bare "93%" reads as "93% correct", which it is not:
+  // it is the model's own self-report (docs/GLOSSARY.md §5), so the tooltip names
+  // what the number is AND what it isn't. Shared by every surface showing a
+  // confidence figure so they all explain it identically.
+  conf_meaning_tip: 'How sure the recogniser was, not how correct it is.',
   pill_on: 'On',
   pill_off: 'Off',
   pill_toggle_tip: 'Click to flip this for the next run',
@@ -824,6 +829,11 @@ const km: Record<Key, string> = {
   raw_view_tip: 'បង្ហាញលទ្ធផល OCR ដើម ក្នុងទម្រង់អានតែប៉ុណ្ណោះ។ បិទដើម្បីកែ។',
   conf_toggle: 'ទំនុកចិត្ត',
   conf_toggle_tip: 'បង្ហាញ ឬលាក់សញ្ញាលើក្រឡាដែលកម្មវិធីស្គាល់អក្សរមិនប្រាកដ',
+  // PROVISIONAL — flag for native review: composed only from vocabulary already
+  // verified in sibling keys (កម្រិត from overlay_conf/triage_aria_*, ប្រាកដ from
+  // conf_toggle_tip/intro_body, ត្រឹមត្រូវ from band_clean, ប្រព័ន្ធ from intro_body),
+  // mirroring the English key's "what it is, not what it isn't" parallel.
+  conf_meaning_tip: 'កម្រិតដែលប្រព័ន្ធប្រាកដ មិនមែនកម្រិតត្រឹមត្រូវទេ។',
   pill_on: 'បើក',
   pill_off: 'បិទ',
   pill_toggle_tip: 'ចុចដើម្បីបិទបើកសម្រាប់ដំណើរការបន្ទាប់',

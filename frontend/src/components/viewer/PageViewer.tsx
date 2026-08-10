@@ -595,7 +595,7 @@ export function PageViewer(props: {
                 objects, so each names what it measures. */}
             <span className="font-medium text-ink-3">{t('conf_regions_scope')}</span>
             {BANDS.map((b) => (
-              <span key={b} className="inline-flex items-center gap-1 text-ink-2" aria-label={t(`band_aria_${b}` as Parameters<typeof t>[0], { n: confCounts[b] })}>
+              <span key={b} className="inline-flex items-center gap-1 text-ink-2" aria-label={t(`band_aria_${b}` as Parameters<typeof t>[0], { n: confCounts[b] })} title={t('conf_meaning_tip')}>
                 <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: BAND_COLOR[b] }} aria-hidden />
                 <span className="font-semibold text-ink">{confCounts[b]}</span>
                 <span aria-hidden>{t(`band_${b}` as Parameters<typeof t>[0])}</span>
