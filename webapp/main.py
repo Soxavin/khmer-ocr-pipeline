@@ -6,10 +6,8 @@ Supports a batch of uploaded documents, reviewed one at a time.
 """
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
-import fitz
 from PIL import Image
 from nicegui import ui
 
@@ -24,7 +22,11 @@ from khmer_pipeline.export import grid_to_csv, tables_to_xlsx
 
 from .runner import run_pipeline
 from .state import AppState
-from .settings import DPI_OPTIONS, ENGINE_OPTIONS, SCOPE_OPTIONS, with_current
+from .settings import (
+    DPI_OPTIONS, ENGINE_OPTIONS, EXTRACTION_MODE_OPTIONS, OVERLAY_MODE_OPTIONS,
+    SCOPE_OPTIONS, with_current,
+)
+from .uploads import accept_attr, probe_pages, upload_id
 from . import tables, components, downloads, edits
 from . import api  # registers /api routes on nicegui.app (must precede ui.run)
 
@@ -57,25 +59,16 @@ def index() -> None:
     with ui.left_drawer(value=True).classes("bg-gray-50 dark:bg-neutral-900 w-80"):
         ui.label("Settings").classes("text-lg font-semibold")
 
-        def _probe_pages(name: str, data: bytes) -> int:
-            if Path(name).suffix.lower() != ".pdf":
-                return 1
-            try:
-                with fitz.open(stream=data, filetype="pdf") as doc:
-                    return len(doc)
-            except Exception:
-                return 0
-
         def _on_upload(e) -> None:
             data = e.content.read()
-            state.add_document(e.name, data, hashlib.md5(data).hexdigest()[:8], _probe_pages(e.name, data))
+            state.add_document(e.name, data, upload_id(data), probe_pages(e.name, data))
             doc_selector.refresh()
             file_info.refresh()
             stale_banner.refresh()
             results.refresh()
 
         ui.upload(on_upload=_on_upload, auto_upload=True, multiple=True, max_files=20).props(
-            'accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"'
+            f'accept="{accept_attr()}"'
         ).classes("w-full")
         ui.button("Clear all documents", on_click=lambda: (
             state.clear_documents(), doc_selector.refresh(), file_info.refresh(),
@@ -103,13 +96,14 @@ def index() -> None:
 
             ui.label("Extraction").classes("font-medium mt-2")
             ui.select(with_current(_ENGINE_OPTIONS, s.ocr_engine_key), value=s.ocr_engine_key, label="OCR engine").bind_value(s, "ocr_engine_key").classes("w-full")
-            ui.select({False: "Full extraction (text + tables)", True: "Tables only"},
+            ui.select(with_current(EXTRACTION_MODE_OPTIONS, s.tables_only),
                       value=s.tables_only, label="Extraction mode").bind_value(s, "tables_only").classes("w-full")
 
             ui.label("Export & overlay").classes("font-medium mt-2")
             ui.checkbox("Auto-repair inconsistent table grids").bind_value(s, "repair_tables")
             ui.checkbox("Show layout overlay").bind_value(s, "show_layout")
-            ui.radio(["Region type", "Confidence"], value=s.overlay_mode).bind_value(s, "overlay_mode").props("inline")
+            ui.radio(list(with_current(OVERLAY_MODE_OPTIONS, s.overlay_mode)),
+                     value=s.overlay_mode).bind_value(s, "overlay_mode").props("inline")
 
         ui.separator()
         ui.label("🟢 OCR backend ready" if llama_server_running()

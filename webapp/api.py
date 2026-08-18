@@ -29,7 +29,7 @@ from khmer_pipeline.preprocess import suggest_preprocess_settings
 from khmer_pipeline.model_config import CELL_CONF_LOW
 from khmer_pipeline.utils.backend_status import llama_server_running
 
-from . import components, downloads, edits, registry, tables
+from . import components, downloads, edits, registry, tables, uploads
 from .effective import effective_dpi, effective_engine
 from .runner import run_pipeline
 from .settings import Settings
@@ -107,15 +107,10 @@ _ENGINES = [
 ]
 
 
-def _probe_pages(name: str, data: bytes) -> int:
-    """Page count for PDFs (0 = unreadable), 1 for images."""
-    if Path(name).suffix.lower() != ".pdf":
-        return 1
-    try:
-        with fitz.open(stream=data, filetype="pdf") as doc:
-            return len(doc)
-    except Exception:
-        return 0
+# Bound as a module attribute (rather than called through `uploads.`) so the
+# existing patch("webapp.api._probe_pages") calls across tests/test_webapp_api.py
+# keep working.
+_probe_pages = uploads.probe_pages
 
 
 def _doc_or_404(doc_id: str) -> Document:
@@ -185,7 +180,7 @@ async def api_upload(files: list[UploadFile]) -> dict:
         doc = registry.add(Document(
             upload_name=name,
             upload_bytes=data,
-            upload_id=hashlib.md5(data).hexdigest()[:12],
+            upload_id=uploads.upload_id(data),
             doc_page_count=_probe_pages(name, data),
         ))
         added.append(_doc_summary(doc))

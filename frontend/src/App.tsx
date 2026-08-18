@@ -21,6 +21,7 @@ import { useRunStatus } from './hooks/useRunStatus'
 import { encodePages, gridPages, pagesFromSettings, processedIndex, scopeInvalid as isScopeInvalid, withoutPageScope } from './lib/pages'
 import { countOverrides, mergeSuggestion, scanSummary } from './lib/settings'
 import { configDiffers, guardedRun, isBusy } from './lib/run'
+import { ACCEPT_ATTR } from './lib/uploads'
 import { readPerDocSettings, resolveInitialSettings, writePerDocSettings, type PerDocDraft } from './lib/perDocSettings'
 import { useT } from './i18n.tsx'
 import { btnCls, chipCls, ICON, ICON_SM, iconBtnCls, kbdCls, menuItemCls, panelMainCls, primaryBtnCls, withViewTransition } from './ui'
@@ -1021,7 +1022,7 @@ export default function App() {
         ref={uploadRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff"
+        accept={ACCEPT_ATTR}
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) upload.mutate(Array.from(e.target.files))
