@@ -55,3 +55,6 @@ frontend/dist/
 !.env.example
 *.gemini.json
 .venv-challengers/
+
+# uv package cache — never commit
+.uv-cache/
