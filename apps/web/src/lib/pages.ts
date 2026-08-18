@@ -11,7 +11,7 @@ export type CanvasMode = 'pre-upload' | 'post-analysis'
 export const PAGE_SCOPE_KEYS = ['page_scope', 'page_num', 'page_start', 'page_end', 'page_list'] as const
 
 /** The "all pages" starting point for a document with no scope of its own. Field
-    values mirror the backend Settings defaults (webapp/settings.py). */
+    values mirror the backend Settings defaults (apps/api/settings.py). */
 export const PAGE_SCOPE_DEFAULTS: RunSettings = {
   page_scope: 'all',
   page_num: 1,

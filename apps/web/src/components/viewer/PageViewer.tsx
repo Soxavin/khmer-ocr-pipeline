@@ -10,10 +10,10 @@ import { SegmentedToggle, ViewToggle } from './PageGrid'
 // These are SVG stroke colors drawn OVER the page photograph, so they are
 // deliberately theme-independent fixed hex (a dark-mode swap would make the
 // overlay fight the scan, not the UI). They intentionally equal the
-// --color-conf-* / webapp components.py values so the page overlay and the grid
+// --color-conf-* / apps.api components.py values so the page overlay and the grid
 // tints read as one system; keep the two in sync by hand if the tokens change.
 const PALETTE = { high: '#16a34a', mid: '#f59e0b', low: '#dc2626' }
-// Region-type colors, ported 1:1 from webapp/components.py LABEL_COLORS — same
+// Region-type colors, ported 1:1 from apps.api/components.py LABEL_COLORS — same
 // rationale: fixed hex over the photo, matched to the Python side on purpose.
 const LABEL_COLORS: Record<string, string> = {
   Text: '#4A90D9',

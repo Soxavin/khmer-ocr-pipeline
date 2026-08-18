@@ -12,6 +12,8 @@ import pytest
 from apps.api.settings import (
     DPI_OPTIONS,
     ENGINE_OPTIONS,
+    EXTRACTION_MODE_OPTIONS,
+    OVERLAY_MODE_OPTIONS,
     SCOPE_OPTIONS,
     Settings,
     with_current,
@@ -22,9 +24,20 @@ from apps.api.settings import (
     ("dpi", DPI_OPTIONS),
     ("ocr_engine_key", ENGINE_OPTIONS),
     ("page_scope", SCOPE_OPTIONS),
+    ("overlay_mode", OVERLAY_MODE_OPTIONS),
+    ("tables_only", EXTRACTION_MODE_OPTIONS),
 ])
 def test_every_default_is_selectable(field, options):
     assert getattr(Settings(), field) in options
+
+
+def test_overlay_mode_domain_matches_the_renderer():
+    """components.py branches on these exact strings; a rename here is a silent no-op there."""
+    assert set(OVERLAY_MODE_OPTIONS) == {"Region type", "Confidence"}
+
+
+def test_extraction_mode_covers_both_boolean_states():
+    assert set(EXTRACTION_MODE_OPTIONS) == {False, True}
 
 
 def test_engine_options_are_real_registry_engines():

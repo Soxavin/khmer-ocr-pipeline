@@ -1,4 +1,4 @@
-// Shapes returned by webapp/api.py — keep in lockstep with the handlers.
+// Shapes returned by apps/api/api.py — keep in lockstep with the handlers.
 
 // `group` ("local" | "cloud") separates on-device engines from ones that send the
 // page image to a third party (api.py _ENGINES). The picker renders one header per

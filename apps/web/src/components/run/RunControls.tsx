@@ -6,7 +6,7 @@ import { useT, type Key } from '../../i18n.tsx'
 import { ICON, btnCls, dangerBtnCls, menuItemCls, primaryBtnCls } from '../../ui'
 import { AnchoredMenu } from '../AnchoredMenu'
 
-// Server stage labels (webapp/runner.py emits English), mapped to display keys.
+// Server stage labels (apps/api/runner.py emits English), mapped to display keys.
 const STAGES: [string, Key][] = [
   ['Reading the document…', 'stage_read'],
   ['Cleaning the pages…', 'stage_clean'],
@@ -19,7 +19,7 @@ function stageIndex(stage: string): number {
   return STAGES.findIndex(([label]) => label === stage)
 }
 
-// Sub-stages the OCR engine reports inside a single page (webapp/state.py Progress.step).
+// Sub-stages the OCR engine reports inside a single page (apps/api/state.py Progress.step).
 const SUB_STEPS: Record<string, Key> = {
   layout: 'step_layout',
   text: 'step_text',
