@@ -1,5 +1,5 @@
-"""Unit tests for webapp.tables — the pure table-shaping helpers ported from app.py."""
-from webapp import tables
+"""Unit tests for apps.api.tables — the pure table-shaping helpers ported from app.py."""
+from apps.api import tables
 
 
 def _block(table_id, cells):

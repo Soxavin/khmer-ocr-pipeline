@@ -103,7 +103,7 @@ def capture_corrections(
 
     *tables* are the model's tables for one page (cells carrying page-space
     ``bbox``), *edited_grids* maps a table's index (as a string key, matching the
-    webapp's table ids) to the analyst's corrected 2-D grid, and *page_images* is
+    the API layer's table ids) to the analyst's corrected 2-D grid, and *page_images* is
     the frame the recognizer read. Cells whose text is unchanged, only
     cosmetically changed, or lacking usable geometry are skipped. Appends to
     ``<out_dir>/corrections.jsonl`` and writes one crop PNG per pair."""

@@ -1,6 +1,6 @@
 # Gemma 4 E2B / ARDB fine-tune — run log
 
-Durable record of each Colab training run for `scripts/colab_gemma4_e2b_finetune.ipynb`,
+Durable record of each Colab training run for `tools/colab_gemma4_e2b_finetune.ipynb`,
 so results can be cited/compared later without scrolling back through chat history. Append
 a new entry per full run — never edit past entries' results, only add corrections as notes
 if a bug is later found to have affected them (see the "real GT bug found and fixed" note
@@ -8,7 +8,7 @@ under v2 below for an example of this pattern).
 
 ## Training setup decisions — why, not just what
 
-Every non-default choice in `scripts/colab_gemma4_e2b_finetune.ipynb`'s config, with the
+Every non-default choice in `tools/colab_gemma4_e2b_finetune.ipynb`'s config, with the
 reason it was made. Most are also inline code comments in the notebook itself; this section
 exists so the reasoning survives even if a comment gets trimmed, and so it can be cited in
 one place (e.g. for a mentor question) without re-reading every cell.
@@ -93,7 +93,7 @@ one place (e.g. for a mentor question) without re-reading every cell.
   model needs to learn, so an unprojected transform would just make the label wrong rather than
   help. Identical implementation in `colab_qwen35_finetune.ipynb` (same parameters, same
   train/val split point), so it isn't a confound between the two models' results — see
-  `docs/PROJECT_LOG.md` §2.106 for the original decision record.
+  `docs/decisions/PROJECT_LOG.md` §2.106 for the original decision record.
 
 ## v1 — split configs (transcription + layout), superseded 2026-07-28
 
@@ -230,7 +230,7 @@ epochs-dialed-back-to-3 decision made after Run 3's v2 finding above, now agains
   recurs across ≥2 distinct documents — this is one document's worth of examples so far.
 
 **Real-doc eval, same adapter (`Soxavin/gemma4-e2b-ardb-lora-v5-e3`)** (2026-08-05) — scored via
-`scripts/colab_eval_real.ipynb` (generation) + `scripts/eval_finetune_real.py` (scoring) against
+`tools/colab_eval_real.ipynb` (generation) + `tools/eval_finetune_real.py` (scoring) against
 `eval/datasets/real`'s 15 real, hand-verified ARDB pages — a genuinely out-of-distribution test
 set (not template-substituted synthetic data the model's own training distribution resembles more
 closely), tracked separately in `eval/real_doc_eval.csv` since its metric shape (whole-page
@@ -239,7 +239,7 @@ synthetic-val CSVs use.
 
 **Update (2026-08-05, same predictions, rescored)**: `eval_finetune_real.py`'s `_try_repair_json`
 was generalized after a Qwen run revealed a second failure mode (missing *both* the opening `[`
-and closing `]`, not just the closing one — see `docs/PROJECT_LOG.md` and
+and closing `]`, not just the closing one — see `docs/decisions/PROJECT_LOG.md` and
 `eval/qwen_finetune_runs.md`'s Run 2). Rescoring the *same* `real_predictions.json` (no
 regeneration) with the fixed parser recovers all 7 previously-unparseable pages — **0/15 parse
 failures now, down from 7/15**. The aggregate numbers get *worse*, not better, as a result: mean
@@ -381,7 +381,7 @@ comprehensive-failure signature the Colab real-doc eval already found — narrow
   training-run problem (Unsloth's own `FastVisionModel.get_peft_model` handled this fine during
   training) — purely a local-inference deployment gap.
 - **Fix: merge once, in Colab, deploy the merged checkpoint.** Added a "Merge for local inference"
-  section to `scripts/colab_gemma4_e2b_finetune.ipynb` that loads the adapter via
+  section to `tools/colab_gemma4_e2b_finetune.ipynb` that loads the adapter via
   `FastVisionModel.from_pretrained` (Unsloth, where LoRA attachment works) and calls
   `push_to_hub_merged(..., save_method="merged_16bit")`, producing a plain, non-PEFT checkpoint at
   `Soxavin/gemma4-e2b-ardb-merged-v5-e3`. `gemma_ardb_engine.py`'s `base_model_id` now points there;

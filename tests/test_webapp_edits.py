@@ -1,5 +1,5 @@
-"""Unit tests for webapp.edits — bulk find/replace across table cells."""
-from webapp import edits
+"""Unit tests for apps.api.edits — bulk find/replace across table cells."""
+from apps.api import edits
 
 
 def test_replace_in_grid_counts_all_occurrences():

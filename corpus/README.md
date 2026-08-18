@@ -14,9 +14,9 @@ the eval ground truth stays separate in `eval/datasets/real/` (also local-only).
 Target: **≥40 docs / ≥100 pages** total. Check progress + classification any time:
 
 ```bash
-uv run python scripts/collect_documents.py corpus/
+uv run python tools/collect_documents.py corpus/
 # or download from a URL list first (one URL per line):
-uv run python scripts/collect_documents.py corpus/ardb_daily/ --urls urls.txt
+uv run python tools/collect_documents.py corpus/ardb_daily/ --urls urls.txt
 ```
 
 Heed the `khmer_layer_suspect` warnings in the report: those docs' numbers are usable

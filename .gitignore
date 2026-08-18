@@ -28,26 +28,26 @@ inspect_report.json
 predictions.json
 
 # CRNN training-experiment run artifacts (checkpoints, metrics, plots)
-experiments/khmer_crnn/runs/
+research/khmer_crnn/runs/
 
-# Promoted fine-tuned weights (large, regenerable via experiments/kiri_finetune/)
+# Promoted fine-tuned weights (large, regenerable via research/kiri_finetune/)
 models/
 # Fine-tuning artifacts (Tracks A/B): trainsets contain real-doc crops — never commit
-experiments/kiri_finetune/trainset*/
-experiments/kiri_finetune/run*/
-experiments/kiri_finetune/*.log
-experiments/layout_yolo/runs/
-experiments/layout_yolo/*.pt
-experiments/layout_yolo/data_local.yaml
+research/kiri_finetune/trainset*/
+research/kiri_finetune/run*/
+research/kiri_finetune/*.log
+research/layout_yolo/runs/
+research/layout_yolo/*.pt
+research/layout_yolo/data_local.yaml
 # derived from real pages (recall_taxonomy output)
-scripts/_recall_taxonomy_output.json
+tools/eval/_recall_taxonomy_output.json
 
 # Presentation materials — kept on disk, not tracked in the repo
 docs/presentations/
 
-# React frontend
-frontend/node_modules/
-frontend/dist/
+# React frontend (apps/web)
+apps/web/node_modules/
+apps/web/dist/
 
 # Secrets — API keys live in the environment or a local .env, never committed
 .env

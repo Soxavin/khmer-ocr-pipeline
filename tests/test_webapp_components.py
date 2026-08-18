@@ -1,5 +1,5 @@
-"""Unit tests for webapp.components — unified confidence palette, SVG overlay, conf view."""
-from webapp import components as C
+"""Unit tests for apps.api.components — unified confidence palette, SVG overlay, conf view."""
+from apps.api import components as C
 
 
 def test_conf_color_buckets():

@@ -6,7 +6,7 @@ on most real documents (eval/qwen_finetune_runs.md). Unlike a normal
 experimental engine (whose risk is being slower or narrower), this one's risk
 is unreliable OUTPUT — that is the point: the user wants to see the actual
 garbled/failed generation live, not read about it in eval logs. See
-webapp/api.py's _ENGINES entry (`trial: True`) and the "Trial" chip in
+apps/api/api.py's _ENGINES entry (`trial: True`) and the "Trial" chip in
 SettingsDrawer.tsx for how this is surfaced honestly rather than hidden.
 
 Runs on top of `unsloth/Qwen3.5-0.8B`, in the same isolated-subprocess pattern

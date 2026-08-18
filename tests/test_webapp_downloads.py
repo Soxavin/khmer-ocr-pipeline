@@ -1,15 +1,15 @@
-"""Unit tests for webapp.downloads — edit-folding into JSON/TXT/CSV/XLSX/zip exports."""
+"""Unit tests for apps.api.downloads — edit-folding into JSON/TXT/CSV/XLSX/zip exports."""
 import io
 import json
 import zipfile
 from types import SimpleNamespace
 
-from webapp.downloads import (
+from apps.api.downloads import (
     final_tables, patched_document_json, text_report, nonempty_tables,
     json_bytes, zip_bundle,
 )
-from webapp.settings import Settings
-from webapp.state import Document
+from apps.api.settings import Settings
+from apps.api.state import Document
 
 
 def _doc():

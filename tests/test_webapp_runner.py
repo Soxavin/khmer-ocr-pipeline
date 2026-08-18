@@ -1,4 +1,4 @@
-"""Tests for webapp.runner — pipeline driving and run cancellation.
+"""Tests for apps.api.runner — pipeline driving and run cancellation.
 
 Cancellation contract: setting `doc.progress.cancel_requested` stops the run at
 the next stage boundary AND mid-OCR (the per-page callback aborts), partial
@@ -11,9 +11,9 @@ import asyncio
 from contextlib import ExitStack
 from unittest.mock import patch
 
-from webapp.runner import run_pipeline
-from webapp.settings import Settings
-from webapp.state import Document
+from apps.api.runner import run_pipeline
+from apps.api.settings import Settings
+from apps.api.state import Document
 
 
 def _doc() -> Document:
@@ -25,8 +25,8 @@ def _run_with(stubs: dict, doc: Document, s: Settings | None = None) -> bool:
     async def main():
         with ExitStack() as stack:
             for name, fn in stubs.items():
-                stack.enter_context(patch(f"webapp.runner.{name}", fn))
-            stack.enter_context(patch("webapp.runner.clear_device_cache"))
+                stack.enter_context(patch(f"apps.api.runner.{name}", fn))
+            stack.enter_context(patch("apps.api.runner.clear_device_cache"))
             return await run_pipeline(doc, s or Settings())
     return asyncio.run(main())
 

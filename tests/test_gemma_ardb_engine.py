@@ -148,7 +148,7 @@ def test_gemma_ardb_is_registered():
 
 
 def test_gemma_ardb_present_in_api_engines_as_experimental():
-    from webapp.api import _ENGINES
+    from apps.api.api import _ENGINES
     entry = next(e for e in _ENGINES if e["key"] == "gemma_ardb")
     assert entry["group"] == "local"
     assert entry.get("experimental") is True

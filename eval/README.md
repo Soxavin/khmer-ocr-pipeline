@@ -214,9 +214,9 @@ Lev(i,j) = max(i,j)                          if min(i,j) == 0
 
 > **⚠ Raw isolates the model, but does NOT decide which engine to ship.** Engines respond to preprocessing
 > very differently, so a raw ranking can invert under production conditions. **For engine selection, run
-> `scripts/eval_document.py --preprocess`** to match the live pipeline. In the doc-level A/B this flipped the
+> `tools/eval_document.py --preprocess`** to match the live pipeline. In the doc-level A/B this flipped the
 > result — raw favoured the hybrid, but *preprocessed* Surya wins decisively and hits the exact GT
-> dimensions (see `docs/PROJECT_LOG.md` §2.25). Raw stays the default for now so older numbers stay
+> dimensions (see `docs/decisions/PROJECT_LOG.md` §2.25). Raw stays the default for now so older numbers stay
 > reproducible.
 
 ---
@@ -349,8 +349,8 @@ uv run python -m khmer_pipeline.evaluation.run_benchmark --data-dir eval/dataset
 
 Separate from the eval-GT modules above (§8), these `khmer_pipeline.datagen` modules produce
 **training** data for other tracks (layout detection, recognition/SFT fine-tuning), not
-evaluation ground truth. Most are driven by a `scripts/*.py` or `scripts/*.ipynb` wrapper —
-see `scripts/README.md` for the full script index.
+evaluation ground truth. Most are driven by a `tools/*.py` or `tools/*.ipynb` wrapper —
+see `tools/README.md` for the full script index.
 
 | Module | Purpose |
 |--------|---------|

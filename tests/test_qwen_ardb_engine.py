@@ -1,6 +1,6 @@
 """Tests for the Qwen3.5-0.8B ARDB fine-tune engine (qwen_ardb_engine.py).
 
-Now exposed in the UI (webapp/api.py's _ENGINES) specifically BECAUSE it's
+Now exposed in the UI (apps/api/api.py's _ENGINES) specifically BECAUSE it's
 unreliable: every tested config fails on most real documents, and the point is
 to show that failure live, not hide it. Contract differs from
 gemma_ardb_engine.py in one deliberate way: on an unparseable-JSON page, the
@@ -171,7 +171,7 @@ def test_qwen_ardb_is_registered():
 
 
 def test_qwen_ardb_present_in_api_engines_as_trial():
-    from webapp.api import _ENGINES
+    from apps.api.api import _ENGINES
     entry = next(e for e in _ENGINES if e["key"] == "qwen_ardb")
     assert entry["group"] == "local"
     assert entry.get("experimental") is True

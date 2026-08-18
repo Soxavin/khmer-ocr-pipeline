@@ -27,15 +27,15 @@ ExportResult`):
 | 4 | **Post-process** | Deterministic Khmer text normalization (optional Qwen2.5-VL fallback) |
 | 5 | **Export** | Document JSON + per-table CSV / Excel; multi-page tables stitched into one |
 
-**Review workspace (React, primary — `frontend/` served at `/app`):** a three-zone analyst UI — document
+**Review workspace (React, primary — `apps/web/` served at `/app`):** a three-zone analyst UI — document
 queue left, zoomable page image center, **editable tables** right. Upload → run (live stage progress, ETA,
 ■ Stop) → review → export Excel / CSV / JSON / zip. Review tools: per-cell **confidence tints**, an
 **Issues (N)** triage panel that jumps straight to low-confidence cells (`n`/`p`), **two-way
 image↔table linking**, undo/redo, row insert/delete, edited-vs-original **diff view**, **✓ verify**
 tracking per table, **find & replace across all tables** (Ctrl-F), and batch "Run all" / "Export all".
 Bundled Noto Sans Khmer with adjustable text size keeps stacked Khmer subscripts legible. The REST API
-(`webapp/api.py`) rides the same process as the pipeline, so models load once. The **NiceGUI** UI
-(`webapp/main.py`, port 8600 at `/`) remains as a fallback; the single-file **Streamlit** app (`app.py`)
+(`apps/api/api.py`) rides the same process as the pipeline, so models load once. The **NiceGUI** UI
+(`apps/api/main.py`, port 8600 at `/`) remains as a fallback; the single-file **Streamlit** app (`app.py`)
 is legacy.
 
 **Swappable engines:** Surya (default), Tesseract-`khm`, and a structure-aware **hybrid** (SLANet grid +
@@ -57,7 +57,7 @@ uv sync                                  # install dependencies (pyproject.toml 
 
 # --- Review UI (analyst tool) ---
 source setup-metal-macos.sh              # configure the Surya Metal backend (sets env vars)
-uv run python -m webapp.main            # one process serves BOTH UIs (no separate frontend server):
+uv run python -m apps.api.main            # one process serves BOTH UIs (no separate frontend server):
                                         #   React workspace (primary)  → http://localhost:8600/app
                                         #   NiceGUI UI (fallback)      → http://localhost:8600/
 # After changing frontend code: `cd frontend && npm run build`, then hard-refresh the
@@ -126,8 +126,8 @@ model beats Surya:
 | Qwen2.5-VL-7B (4-bit, local) | 2.271 (collapsed) |
 
 — which points future work at fine-tuning a Khmer recognizer. Full methodology and the dated decision log
-(including the preprocessing revision, §2.25) are in [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) and
-[`docs/REPORT.md`](docs/REPORT.md).
+(including the preprocessing revision, §2.25) are in [`docs/decisions/PROJECT_LOG.md`](docs/decisions/PROJECT_LOG.md) and
+[`docs/report/REPORT.md`](docs/report/REPORT.md).
 
 ---
 
@@ -135,19 +135,20 @@ model beats Surya:
 
 | Path | What it is |
 |------|------------|
-| [`frontend/`](frontend/) | React review workspace (primary UI, served at `/app`) — Vite + TypeScript + AG Grid |
-| [`webapp/`](webapp/) | FastAPI REST layer (`api.py`) + NiceGUI fallback UI (`uv run python -m webapp.main` serves both) |
-| [`app.py`](app.py) | Older Streamlit review UI (legacy) |
+| [`apps/web/`](apps/web/) | React review workspace (primary UI, served at `/app`) — Vite + TypeScript + AG Grid |
+| [`apps/api/`](apps/api/) | FastAPI REST layer (`api.py`) + NiceGUI fallback UI (`uv run python -m apps.api.main` serves both) |
+| [`apps/legacy/`](apps/legacy/) | Older Streamlit UIs — `app.py` (review) and `lab.py` (engine comparison) |
 | [`src/khmer_pipeline/`](src/khmer_pipeline/) | The pipeline package — the 5 stages, swappable engines, synthetic-data generators, and the evaluation code |
-| [`scripts/`](scripts/) | Research & evaluation one-offs — see [`scripts/README.md`](scripts/README.md) |
-| [`docs/REPORT.md`](docs/REPORT.md) | Evaluation report (the write-up) |
-| [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) | R&D decision log (why things were built this way) |
-| [`docs/`](docs/) | Also: `OPERATIONS.md`, `GLOSSARY.md`, `figures/`, and `superpowers/` (per-stage design specs/plans) |
+| [`tools/`](tools/) | Research & evaluation one-offs — see [`tools/README.md`](tools/README.md) |
+| [`docs/report/REPORT.md`](docs/report/REPORT.md) | Evaluation report (the write-up) |
+| [`docs/decisions/PROJECT_LOG.md`](docs/decisions/PROJECT_LOG.md) | R&D decision log (why things were built this way) |
+| [`docs/`](docs/) | Grouped: `architecture/`, `operations/`, `decisions/` (incl. `superpowers/` specs), `report/` |
+| [`research/`](research/) | Training/experiment trail — layout YOLO, Kiri fine-tune, CRNN, crop-scale |
 | [`eval/`](eval/) | Evaluation harness + [`eval/README.md`](eval/README.md) (datasets/runs are gitignored) |
 | [`tests/`](tests/) | pytest suite, mirroring `src/khmer_pipeline/` 1:1 |
-| [`fonts/`](fonts/) | Khmer fonts for synthetic data (OFL-licensed) |
+| [`assets/fonts/`](assets/fonts/) | Khmer fonts for synthetic data (OFL-licensed) |
 | `sample_data/` | **Gitignored** — real financial documents are never committed |
-| [`CONTEXT.md`](CONTEXT.md) | Architecture deep-dive (stages, engine-swap design, memory management) |
+| [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md) | Architecture deep-dive (stages, engine-swap design, memory management) |
 | `setup-metal-macos.sh` / `stop-metal-macos.sh` | Start/stop the Surya Metal backend |
 
 ---
@@ -156,5 +157,5 @@ model beats Surya:
 
 - **Local-first / privacy:** all models run on-device; sensitive documents are never sent to a cloud
   service, and real data stays out of git (`sample_data/`, `eval/datasets/`, `eval/runs/` are ignored).
-- **Architecture & conventions:** see [`CONTEXT.md`](CONTEXT.md) for how the stages fit together and how
+- **Architecture & conventions:** see [`docs/architecture/CONTEXT.md`](docs/architecture/CONTEXT.md) for how the stages fit together and how
   to swap engines.

@@ -13,7 +13,7 @@ environment.
 NOTE: no Qwen ARDB config has passed real-document evaluation yet (see
 eval/qwen_finetune_runs.md) — this script and qwen_ardb_engine.py are built
 and tested end-to-end, but the engine is intentionally NOT exposed in
-webapp/api.py's _ENGINES, so it is not selectable from the UI. Flip it on by
+apps/api/api.py's _ENGINES, so it is not selectable from the UI. Flip it on by
 adding one entry there once a config is named.
 """
 from __future__ import annotations

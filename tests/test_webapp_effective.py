@@ -1,7 +1,7 @@
-"""What the run's 'Auto' choices actually resolved to (webapp/effective.py)."""
+"""What the run's 'Auto' choices actually resolved to (apps/api/effective.py)."""
 from types import SimpleNamespace
 
-from webapp.effective import effective_dpi, effective_engine
+from apps.api.effective import effective_dpi, effective_engine
 
 
 def test_router_fallback_note_names_the_engine_that_ran():

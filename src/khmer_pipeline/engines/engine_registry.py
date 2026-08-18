@@ -22,10 +22,10 @@ _OCR_ENGINES: dict[str, OCREngine] = {
     "gemini": run_gemini,  # cloud (opt-in); never selected by `auto`
     # Both fine-tune engines are always registered (reachable via get_ocr_engine
     # for CLI/direct/test use) regardless of whether the UI can select them —
-    # see webapp/api.py's _ENGINES for the actual UI-visibility gate. Neither is
+    # see apps/api/api.py's _ENGINES for the actual UI-visibility gate. Neither is
     # ever selected by `auto`.
     "gemma_ardb": run_gemma_ardb,
-    "qwen_ardb": run_qwen_ardb,  # not in webapp _ENGINES yet — no config has passed real-doc eval
+    "qwen_ardb": run_qwen_ardb,  # not in apps.api _ENGINES yet — no config has passed real-doc eval
 }
 
 

@@ -1,15 +1,15 @@
 # Qwen3.5-0.8B / ARDB fine-tune — run log
 
-Durable record of each Colab training run for `scripts/colab_qwen35_finetune.ipynb`, so
+Durable record of each Colab training run for `tools/colab_qwen35_finetune.ipynb`, so
 results can be cited/compared later without scrolling back through chat history. Append a
 new entry per full run — never edit past entries' results, only add corrections as notes if
 a bug is later found to have affected them. Mirrors `eval/gemma_finetune_runs.md`'s
 convention; the two stay separate files (not merged) since they track different models, but
-`scripts/plot_run_metrics.py` can combine both CSVs into one comparison chart.
+`tools/plot_run_metrics.py` can combine both CSVs into one comparison chart.
 
 ## Why this model is being fine-tuned despite a known base-model limitation
 
-`docs/PROJECT_LOG.md` §2.104 documents a controlled isolation test (base checkpoint, zero
+`docs/decisions/PROJECT_LOG.md` §2.104 documents a controlled isolation test (base checkpoint, zero
 training steps): Qwen3.5-0.8B generates fluent **Thai** script instead of Khmer, on both a
 plain-text translation prompt and this notebook's real image+instruction task. This is a
 pretraining-time gap in the base model, not something a LoRA fine-tune on our dataset is
@@ -24,7 +24,7 @@ positive number.
 
 ## Training setup decisions — why, not just what
 
-Non-default choices in `scripts/colab_qwen35_finetune.ipynb`'s config not already covered by
+Non-default choices in `tools/colab_qwen35_finetune.ipynb`'s config not already covered by
 `eval/gemma_finetune_runs.md`'s shared reasoning (install cell structure, `max_steps`
 sentinel, per-row progress printing, adapter-push-before-eval ordering — all identical
 patterns, see that file). Qwen-specific choices:
@@ -64,7 +64,7 @@ patterns, see that file). Qwen-specific choices:
 ## v3 — first trial, `Soxavin/ardb-sft-v3` (2026-08-03)
 
 **Base-model probes (before any training)**: both probes generated fluent Thai instead of
-Khmer at zero training steps — see `docs/PROJECT_LOG.md` §2.104 for the full transcript and
+Khmer at zero training steps — see `docs/decisions/PROJECT_LOG.md` §2.104 for the full transcript and
 diagnosis. Reverted the project's production fine-tune target to Gemma 4 E2B as a result.
 Adapter kept at `Soxavin/qwen35-ardb-lora-v3` as the documented finding, not deleted.
 
@@ -114,7 +114,7 @@ letterhead lines were emitted under `"Text"` rather than the expected `"Page-Fur
 category the model wasn't confident distinguishing from generic prose here.
 
 **Plausible contributors, not yet isolated**: `max_length=2048` (this model's real, Unsloth-
-enforced ceiling — see `docs/PROJECT_LOG.md` §2.107) truncates the longest Table targets
+enforced ceiling — see `docs/decisions/PROJECT_LOG.md` §2.107) truncates the longest Table targets
 (~4000 chars) during training itself, which the model never sees complete; combined with half
 the gradient updates of Gemma's "3 epochs," undertraining relative to Gemma is a more likely
 primary explanation than the base-model Thai gap alone, though that gap is also confirmed still
@@ -129,14 +129,14 @@ not L4 — the L4 session stopped partway through and was abandoned, so this is 
 a resumption. Training: 271.8s, peak reserved memory 6.443 GB / 79.251 GB (LoRA-only: 4.324 GB;
 the 79.251 GB total confirms A100, vs. Run 1's L4 22.034 GB); loss dropped cleanly 0.604 → ~0.007-
 0.02, same shape as every other run (full per-step curve in `eval/loss_history.csv`, `qwen/v5-
-run2` — see `docs/figures/finetune_eval/loss_by_run.png`: notably, Qwen's loss sits roughly an order of
+run2` — see `docs/report/figures/finetune_eval/loss_by_run.png`: notably, Qwen's loss sits roughly an order of
 magnitude above Gemma's for most of training at this *same* step count, only converging close by
 step 78, a first real signal for "undertrained relative to Gemma" independent of the eval numbers
 below; the loss values are close to but not identical to an earlier same-config attempt, expected
 GPU-to-GPU floating-point variation, not a discrepancy worth chasing). Adapter pushed to
 `Soxavin/qwen35-ardb-lora-v5-e3-ga2` (overwrites the abandoned L4 attempt at the same repo).
 
-**Eval** (scored with the bracket-repair-capable parser, see `docs/PROJECT_LOG.md` and the eval
+**Eval** (scored with the bracket-repair-capable parser, see `docs/decisions/PROJECT_LOG.md` and the eval
 cell's `_try_repair_json` — not yet with the `no_repeat_ngram_size`/timing speed fixes, which are
 generation-time only and don't affect these results): **7/9 (78%) JSON parse failures — worse
 than Run 1's 5/9 (56%) despite matching Gemma's step count**, and `recovered via bracket-repair
@@ -187,8 +187,8 @@ worth re-testing once the bracket-repair fix is re-run against this same adapter
 parse-failure rate (excluding the format bug) is still unknown.
 
 **Real-doc eval, same adapter (`Soxavin/qwen35-ardb-lora-v5-e3-ga2`)** (2026-08-05) — scored via
-`scripts/colab_eval_real.ipynb` (generation, with the `no_repeat_ngram_size`/timing speed fixes
-already applied) + `scripts/eval_finetune_real.py` (scoring, with the generalized bracket-repair
+`tools/colab_eval_real.ipynb` (generation, with the `no_repeat_ngram_size`/timing speed fixes
+already applied) + `tools/eval_finetune_real.py` (scoring, with the generalized bracket-repair
 parser) against `eval/datasets/real`'s 15 real, hand-verified ARDB pages — tracked in
 `eval/real_doc_eval.csv` alongside Gemma's same-format entry.
 

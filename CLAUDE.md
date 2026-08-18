@@ -1,11 +1,11 @@
 # Khmer OCR Pipeline — Project Rules
 
-See `CONTEXT.md` for architecture/data-flow orientation.
+See `docs/architecture/CONTEXT.md` for architecture/data-flow orientation.
 
 ## Workflow
-- After any change to `src/khmer_pipeline/**/*.py` or `app.py`, run:
+- After any change to `src/khmer_pipeline/**/*.py` or `apps/**/*.py`, run:
   ```bash
-  uv run pytest -q --tb=short && python3 -m py_compile app.py $(find src/khmer_pipeline -name '*.py')
+  uv run pytest -q --tb=short && python3 -m py_compile $(find src/khmer_pipeline apps -name '*.py')
   ```
 - This project uses `uv` for dependency management — use `uv add <pkg>`,
   not pip/poetry, and pin upper bounds for ML libraries (e.g.
@@ -38,27 +38,27 @@ See `CONTEXT.md` for architecture/data-flow orientation.
 - New `PreprocessConfig` flags / pipeline options follow the established
   pattern: dataclass field with a default, `--no-<flag>` CLI argument in
   `pipeline.py`, and a UI control. The **primary UI is the React workspace**
-  (`frontend/`, served at `/app`) — add the field to `webapp/settings.py`'s
+  (`apps/web/`, served at `/app`) — add the field to `apps/api/settings.py`'s
   `Settings` (the API validates run payloads against its fields and it feeds
-  `/api/meta` defaults), a control in `frontend/src/components/run/
+  `/api/meta` defaults), a control in `apps/web/src/components/run/
   SettingsDrawer.tsx`, and (if it affects output) to `Settings.settings_key`.
   Iterate with `./dev.sh` (backend + Vite hot reload at :5173/app/, no rebuild
   per edit); run `./dev.sh build` when :8600/app must serve the new bundle.
   Mirror the flag in the NiceGUI
-  fallback (`webapp/main.py` widget) and the legacy Streamlit `app.py` only if
+  fallback (`apps/api/main.py` widget) and the legacy Streamlit `apps/legacy/app.py` only if
   you're touching them anyway.
 - Pipeline issues (low OCR confidence, phantom table cells, OCR/table
   failures, etc.) are surfaced via `warnings.warn(...)`, collected into
-  `SuryaResult.warnings`, and already displayed in both `app.py`
+  `SuryaResult.warnings`, and already displayed in both `apps/legacy/app.py`
   (`st.warning`) and `pipeline.py` (`WARNING:` prefix). Don't add new
   ad-hoc UI plumbing for warnings — extend this mechanism.
 - Stage 3 (OCR) and Stage 4 (correction) execution functions are swapped via
-  `engines/engine_registry.py` (see CONTEXT.md "Engine Swappability"). Orchestrators
-  (`pipeline.py`, `app.py`) must import `ACTIVE_OCR_ENGINE` /
+  `engines/engine_registry.py` (see docs/architecture/CONTEXT.md "Engine Swappability"). Orchestrators
+  (`pipeline.py`, `apps/legacy/app.py`) must import `ACTIVE_OCR_ENGINE` /
   `ACTIVE_CORRECTION_ENGINE` from there, never `run_surya`/`postprocess`
   directly. State-checking helpers (`models_loaded`, `preload_models`,
   `qwen_loaded`) are still imported directly from `engines/surya.py`/`postprocess.py`.
-- Multi-page results in `app.py` use the established pagination
+- Multi-page results in `apps/legacy/app.py` use the established pagination
   pattern: `st.session_state.current_page_idx` (clamped to
   `[0, total_pages - 1]`, reset on new file upload), a "Jump to page"
   `st.selectbox`, and Previous/Next `st.button`s, each calling
@@ -68,11 +68,11 @@ See `CONTEXT.md` for architecture/data-flow orientation.
 ## Testing
 - TDD: extend/add tests in `tests/test_<module>.py` mirroring
   `src/khmer_pipeline/<module>.py` *before* implementing.
-- There is no `test_app.py` — UI-only changes in `app.py` are verified
+- There is no `test_app.py` — UI-only changes in `apps/legacy/app.py` are verified
   manually by running the Streamlit app, not via unit tests.
 
 ## Things not to do
 - Don't add error handling, fallbacks, or feature flags for scenarios
   that can't occur — trust the dataclass contracts in `models.py`.
 - Don't refactor or restructure unrelated code as part of a feature
-  change (e.g. don't reorganize `app.py` while adding a sidebar option).
+  change (e.g. don't reorganize `apps/legacy/app.py` while adding a sidebar option).

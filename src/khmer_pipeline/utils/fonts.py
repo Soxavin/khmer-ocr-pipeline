@@ -2,13 +2,13 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-# Vendored OFL Khmer fonts (see fonts/MANIFEST.txt). Embedded as base64 data URIs
-# so synthetic-data generation is fully offline and deterministic — no live
-# fonts.googleapis.com dependency. Works with Playwright's about:blank origin
+# Vendored OFL Khmer fonts (see assets/fonts/MANIFEST.txt). Embedded as base64
+# data URIs so synthetic-data generation is fully offline and deterministic — no
+# live fonts.googleapis.com dependency. Works with Playwright's about:blank origin
 # (page.set_content) without any file-access flags.
 # parents[3] = repo root (this file lives at src/khmer_pipeline/utils/fonts.py;
 # the restructure that added utils/ silently broke the old parents[2])
-_FONTS_DIR = Path(__file__).resolve().parents[3] / "fonts"
+_FONTS_DIR = Path(__file__).resolve().parents[3] / "assets" / "fonts"
 
 # family -> (filename, css font-weight descriptor). Variable fonts cover a range.
 _FONT_FILES: dict[str, tuple[str, str]] = {

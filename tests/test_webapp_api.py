@@ -1,8 +1,8 @@
-"""Tests for webapp.api — the REST layer serving the React frontend.
+"""Tests for apps.api.api — the REST layer serving the React frontend.
 
 Routes are registered on `nicegui.app` (a FastAPI subclass), so a plain
 TestClient works without running the UI. Model-touching calls are stubbed;
-the handlers themselves are thin translation over the tested webapp modules.
+the handlers themselves are thin translation over the tested apps.api modules.
 """
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client():
     from nicegui import app
-    import webapp.api  # noqa: F401 — registers routes on import
-    from webapp import registry
+    import apps.api.api  # noqa: F401 — registers routes on import
+    from apps.api import registry
     registry.clear()
     registry.run_lock = asyncio.Lock()  # fresh lock: no leakage between tests
     # No context manager: NiceGUI's lifespan handlers need the full ui.run
@@ -36,8 +36,8 @@ def client():
 def _completed_doc(doc_id="abc123def456"):
     """A Document as it looks after a successful run — enough structure for the
     overview / page / image / export handlers, no real pipeline objects."""
-    from webapp import registry
-    from webapp.state import Document
+    from apps.api import registry
+    from apps.api.state import Document
     doc = Document(upload_name="report.pdf", upload_bytes=b"%PDF-x",
                    upload_id=doc_id, doc_page_count=1)
     doc_json = {
@@ -79,7 +79,7 @@ def _upload(client, name="doc.pdf", data=b"%PDF-fake"):
 # ---------------------------------------------------------------------------
 
 def test_meta_lists_engines_and_defaults(client):
-    with patch("webapp.api.llama_server_running", return_value=False):
+    with patch("apps.api.api.llama_server_running", return_value=False):
         r = client.get("/api/meta")
     assert r.status_code == 200
     body = r.json()
@@ -99,11 +99,11 @@ def test_suggest_unknown_document_404s(client):
 
 
 def test_suggest_ingests_lazily_and_caches(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     flat = np.full((50, 50, 3), 128, dtype=np.uint8)
     fake_ingest = SimpleNamespace(page_images=[flat])
-    with patch("webapp.api.ingest", return_value=fake_ingest) as m:
+    with patch("apps.api.api.ingest", return_value=fake_ingest) as m:
         r1 = client.get(f"/api/documents/{doc_id}/suggest")
         r2 = client.get(f"/api/documents/{doc_id}/suggest")
     assert r1.status_code == 200
@@ -117,12 +117,12 @@ def test_suggest_ingests_lazily_and_caches(client):
 
 
 def test_suggest_returns_suggestions_for_high_contrast_pages(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     # Smooth 0→255 gradient: well contrasted (normalise off) but not sharp.
     row = np.arange(256, dtype=np.uint8).reshape(1, 256)
     img = np.stack([np.tile(row, (256, 1))] * 3, axis=2)
-    with patch("webapp.api.ingest", return_value=SimpleNamespace(page_images=[img])):
+    with patch("apps.api.api.ingest", return_value=SimpleNamespace(page_images=[img])):
         body = client.get(f"/api/documents/{doc_id}/suggest").json()
     # Grayscale gradient: normalise off (well contrasted) + removal off (no stamp colour, §2.101).
     assert body["suggested"] == {"normalise": False, "remove_stamps": False}
@@ -130,9 +130,9 @@ def test_suggest_returns_suggestions_for_high_contrast_pages(client):
 
 
 def test_suggest_unreadable_document_yields_empty_suggestion(client):
-    with patch("webapp.api._probe_pages", return_value=0):
+    with patch("apps.api.api._probe_pages", return_value=0):
         doc_id = _upload(client).json()["documents"][0]["id"]
-    with patch("webapp.api.ingest", side_effect=ValueError("bad pdf")):
+    with patch("apps.api.api.ingest", side_effect=ValueError("bad pdf")):
         r = client.get(f"/api/documents/{doc_id}/suggest")
     assert r.status_code == 200
     assert r.json()["suggested"] == {}
@@ -143,7 +143,7 @@ def test_suggest_unreadable_document_yields_empty_suggestion(client):
 # ---------------------------------------------------------------------------
 
 def test_upload_registers_document(client):
-    with patch("webapp.api._probe_pages", return_value=3):
+    with patch("apps.api.api._probe_pages", return_value=3):
         r = _upload(client)
     assert r.status_code == 200
     docs = r.json()["documents"]
@@ -154,7 +154,7 @@ def test_upload_registers_document(client):
 
 
 def test_upload_dedupes_by_content(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         _upload(client)
         _upload(client)  # identical bytes → same id, no duplicate
     r = client.get("/api/documents")
@@ -162,7 +162,7 @@ def test_upload_dedupes_by_content(client):
 
 
 def test_list_and_delete(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     assert client.delete(f"/api/documents/{doc_id}").status_code == 200
     assert client.get("/api/documents").json()["documents"] == []
@@ -170,7 +170,7 @@ def test_list_and_delete(client):
 
 
 def test_clear_all(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         _upload(client, "a.pdf", b"%PDF-a")
         _upload(client, "b.pdf", b"%PDF-b")
     assert client.delete("/api/documents").status_code == 200
@@ -182,7 +182,7 @@ def test_status_of_unknown_document_404s(client):
 
 
 def test_status_reports_idle_document(client):
-    with patch("webapp.api._probe_pages", return_value=2):
+    with patch("apps.api.api._probe_pages", return_value=2):
         doc_id = _upload(client).json()["documents"][0]["id"]
     r = client.get(f"/api/documents/{doc_id}/status")
     assert r.status_code == 200
@@ -202,7 +202,7 @@ def test_run_unknown_document_404s(client):
 
 
 def test_run_rejects_bad_settings(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     assert client.post(f"/api/documents/{doc_id}/run",
                        json={"ocr_engine_key": "banana"}).status_code == 400
@@ -213,8 +213,8 @@ def test_run_rejects_bad_settings(client):
 
 
 def test_run_409_when_lock_held(client):
-    from webapp import registry
-    with patch("webapp.api._probe_pages", return_value=1):
+    from apps.api import registry
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     asyncio.run(registry.run_lock.acquire())
     try:
@@ -225,9 +225,9 @@ def test_run_409_when_lock_held(client):
 
 
 def test_run_accepted_when_free(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
-    with patch("webapp.api.run_pipeline", new=AsyncMock(return_value=True)):
+    with patch("apps.api.api.run_pipeline", new=AsyncMock(return_value=True)):
         r = client.post(f"/api/documents/{doc_id}/run", json={"ocr_engine_key": "surya"})
     assert r.status_code == 202
     assert r.json()["started"] is True
@@ -236,10 +236,10 @@ def test_run_accepted_when_free(client):
 def test_execute_run_releases_lock_and_stores_settings():
     """Lock is released in ALL outcomes (success / cancel / crash) — a stopped run
     must never leave the registry locked."""
-    import webapp.api as api
-    from webapp import registry
-    from webapp.settings import Settings
-    from webapp.state import Document
+    import apps.api.api as api
+    from apps.api import registry
+    from apps.api.settings import Settings
+    from apps.api.state import Document
     registry.clear()
     registry.run_lock = asyncio.Lock()
     doc = Document("d.pdf", b"x", "id1", 1)
@@ -247,7 +247,7 @@ def test_execute_run_releases_lock_and_stores_settings():
 
     async def go(result):
         await registry.run_lock.acquire()
-        with patch("webapp.api.run_pipeline", new=AsyncMock(return_value=result)):
+        with patch("apps.api.api.run_pipeline", new=AsyncMock(return_value=result)):
             await api._execute_run(doc, Settings())
 
     asyncio.run(go(True))
@@ -262,7 +262,7 @@ def test_execute_run_releases_lock_and_stores_settings():
 
     async def crash():
         await registry.run_lock.acquire()
-        with patch("webapp.api.run_pipeline", new=AsyncMock(side_effect=RuntimeError("boom"))):
+        with patch("apps.api.api.run_pipeline", new=AsyncMock(side_effect=RuntimeError("boom"))):
             await api._execute_run(doc, Settings())
 
     asyncio.run(crash())
@@ -272,9 +272,9 @@ def test_execute_run_releases_lock_and_stores_settings():
 
 
 def test_cancel_sets_flag_on_active_run(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
-    from webapp import registry
+    from apps.api import registry
     doc = registry.get(doc_id)
     doc.progress.active = True
     r = client.post(f"/api/documents/{doc_id}/cancel")
@@ -284,7 +284,7 @@ def test_cancel_sets_flag_on_active_run(client):
 
 
 def test_cancel_idle_is_noop(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     r = client.post(f"/api/documents/{doc_id}/cancel")
     assert r.status_code == 200
@@ -297,7 +297,7 @@ def test_cancel_idle_is_noop(client):
 # ---------------------------------------------------------------------------
 
 def test_overview_requires_results(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         doc_id = _upload(client).json()["documents"][0]["id"]
     assert client.get(f"/api/documents/{doc_id}/overview").status_code == 409
 
@@ -366,12 +366,12 @@ def test_page_image_revalidates_with_etag(client):
 
 
 def test_preview_image_revalidates_with_etag(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         r = _upload(client, "raw.pdf", b"%PDF-raw")
     doc_id = r.json()["documents"][0]["id"]
     fake = SimpleNamespace(page_images=[np.zeros((8, 8, 3), dtype=np.uint8)])
     url = f"/api/documents/{doc_id}/preview/0"
-    with patch("webapp.api.ingest", return_value=fake):
+    with patch("apps.api.api.ingest", return_value=fake):
         first = client.get(url)
         assert first.status_code == 200
         etag = first.headers.get("etag")
@@ -393,8 +393,8 @@ def test_processed_image_available_mid_run_before_results(client):
     """Preprocessing finishes at stage 2, long before the run ends. Gating the
     processed rendition behind full results makes the grid show raw previews for the
     whole run even though the cleaned pages already exist."""
-    from webapp import registry
-    from webapp.state import Document
+    from apps.api import registry
+    from apps.api.state import Document
     doc = Document(upload_name="a.pdf", upload_bytes=b"%PDF", upload_id="midrun1", doc_page_count=2)
     doc.preprocess_result = SimpleNamespace(page_images=[np.zeros((4, 4, 3), dtype=np.uint8)])
     doc.run_page_indices = [1]  # a page-scoped run: result 0 IS document page 1
@@ -410,8 +410,8 @@ def test_processed_image_available_mid_run_before_results(client):
 def test_status_reports_processed_page_mapping(client):
     """Result index != document page number for a page-scoped run, so the frontend
     needs the mapping to address the right rendition."""
-    from webapp import registry
-    from webapp.state import Document
+    from apps.api import registry
+    from apps.api.state import Document
     doc = Document(upload_name="a.pdf", upload_bytes=b"%PDF", upload_id="midrun2", doc_page_count=3)
     registry.add(doc)
     assert client.get("/api/documents/midrun2/status").json()["processed_pages"] == []
@@ -440,7 +440,7 @@ def test_export_zip_reflects_edits(client):
         # own stitched CSV naming; per-page ids appear only with combine=false.
         assert "report_table1.csv" in names
         assert "X" in zf.read("report_table1.csv").decode("utf-8-sig")
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         empty_id = _upload(client, "e.pdf", b"%PDF-e").json()["documents"][0]["id"]
     assert client.get(f"/api/documents/{empty_id}/export/zip").status_code == 409
 
@@ -576,7 +576,7 @@ def test_lowconf_reflects_edits_and_requires_results(client):
     doc.edited_tables["p1_t1"] = [["A", "fixed"]]
     issues = client.get(f"/api/documents/{doc.upload_id}/lowconf").json()["issues"]
     assert issues[0]["text"] == "fixed"
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         empty_id = _upload(client, "n.pdf", b"%PDF-n").json()["documents"][0]["id"]
     assert client.get(f"/api/documents/{empty_id}/lowconf").status_code == 409
 
@@ -634,7 +634,7 @@ def test_export_single_formats(client):
 
 def _two_page_doc():
     """A doc whose one logical table is split across two pages — the ARDB shape."""
-    from webapp import registry
+    from apps.api import registry
     doc = _completed_doc("twopage00001")
     img = np.zeros((4, 4, 3), dtype=np.uint8)
     header = [{"row": 0, "col": 0, "text": "ID"}, {"row": 0, "col": 1, "text": "Item"}]
@@ -693,7 +693,7 @@ def test_export_combined_reflects_edits(client):
 
 def test_export_all_zip_bundles_done_documents(client):
     doc = _completed_doc()
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         _upload(client, "pending.pdf", b"%PDF-p")  # queued doc: excluded
     r = client.get("/api/export/all.zip")
     assert r.status_code == 200
@@ -722,7 +722,7 @@ def test_frontend_cache_headers(client):
     the content-hashed assets are immutable and cache forever."""
     from pathlib import Path
 
-    import webapp.api as api
+    import apps.api.api as api
 
     dist = Path(api.__file__).resolve().parent.parent / "frontend" / "dist"
     if not dist.is_dir():
@@ -740,11 +740,11 @@ def test_frontend_cache_headers(client):
 def test_preview_image_before_run(client):
     """A queued document's pages are viewable pre-run: /preview/{n} lazily ingests
     once, caches on the doc, and serves PNG; bad page index 404s."""
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         r = _upload(client, "raw.pdf", b"%PDF-raw")
     doc_id = r.json()["documents"][0]["id"]
     fake = SimpleNamespace(page_images=[np.zeros((8, 8, 3), dtype=np.uint8)])
-    with patch("webapp.api.ingest", return_value=fake) as ing:
+    with patch("apps.api.api.ingest", return_value=fake) as ing:
         assert client.get(f"/api/documents/{doc_id}/preview/0").headers["content-type"] == "image/png"
         assert client.get(f"/api/documents/{doc_id}/preview/0").status_code == 200
         ing.assert_called_once()  # cached after the first render
@@ -752,17 +752,17 @@ def test_preview_image_before_run(client):
 
 
 def test_preview_unreadable_upload_422(client):
-    with patch("webapp.api._probe_pages", return_value=1):
+    with patch("apps.api.api._probe_pages", return_value=1):
         r = _upload(client, "junk.pdf", b"not a pdf at all")
     doc_id = r.json()["documents"][0]["id"]
-    with patch("webapp.api.ingest", side_effect=ValueError("boom")):
+    with patch("apps.api.api.ingest", side_effect=ValueError("boom")):
         assert client.get(f"/api/documents/{doc_id}/preview/0").status_code == 422
 
 
 def test_settings_list_scope():
     """Grid page selection: 'list' scope carries disjoint 1-based pages; indices are
     sorted, deduped, 0-based, clamped; empty list defensively means all pages."""
-    from webapp.settings import Settings
+    from apps.api.settings import Settings
     s = Settings(page_scope="list", page_list=[5, 2, 3, 2])
     assert s.page_indices(10) == [1, 2, 4]
     assert s.page_indices(3) == [1, 2]  # page 5 clamped away
@@ -777,7 +777,7 @@ def test_settings_range_scope_never_addresses_a_missing_page():
     """Settings outlive the document they were set on, so a range can point past
     this document's end. Every index handed to ingest must be a page that exists —
     `range(start, max(start + 1, end))` previously forced a phantom index through."""
-    from webapp.settings import Settings
+    from apps.api.settings import Settings
     # 1-page document carrying a stale 3-5 range: the only real page is 0.
     assert Settings(page_scope="range", page_start=3, page_end=5).page_indices(1) == [0]
     # A range running off the end keeps just the pages that exist.
@@ -789,7 +789,7 @@ def test_settings_range_scope_never_addresses_a_missing_page():
 
 
 def test_run_payload_accepts_list_scope():
-    from webapp.api import _settings_from
+    from apps.api.api import _settings_from
     s = _settings_from({"page_scope": "list", "page_list": [2, 4]})
     assert s.page_indices(9) == [1, 3]
 
@@ -817,7 +817,7 @@ def test_failed_doc_still_reports_error_status(client):
 def test_status_exposes_what_auto_resolved_to(client):
     """'Auto' has to report its outcome, or the drawer states a choice it can't back."""
     doc_id = _upload(client).json()["documents"][0]["id"]
-    from webapp import registry
+    from apps.api import registry
 
     body = client.get(f"/api/documents/{doc_id}/status").json()
     assert body["effective_engine"] is None and body["effective_dpi"] is None
@@ -836,7 +836,7 @@ def test_status_exposes_what_auto_resolved_to(client):
 def test_status_exposes_sub_step(client):
     """The OCR sub-step reaches the UI so a long stage can narrate itself."""
     doc_id = _upload(client).json()["documents"][0]["id"]
-    from webapp.api import registry
+    from apps.api.api import registry
     registry.get(doc_id).progress.step = "tables"
     body = client.get(f"/api/documents/{doc_id}/status").json()
     assert body["step"] == "tables"
@@ -851,8 +851,8 @@ def _doc_for_capture(client, tmp_path, monkeypatch):
     plus an analyst edit of that cell. Returns (doc_id, table_id)."""
     import numpy as np
     from types import SimpleNamespace
-    from webapp import api as api_mod
-    from webapp.api import registry
+    from apps.api import api as api_mod
+    from apps.api.api import registry
 
     doc_id = _upload(client).json()["documents"][0]["id"]
     doc = registry.get(doc_id)
@@ -901,7 +901,7 @@ def test_reverifying_the_same_table_does_not_duplicate(client, tmp_path, monkeyp
 
 def test_capture_failure_never_breaks_the_save(client, tmp_path, monkeypatch):
     """An analyst's verification must land even if capture explodes."""
-    from webapp import api as api_mod
+    from apps.api import api as api_mod
     doc_id, tid = _doc_for_capture(client, tmp_path, monkeypatch)
 
     def boom(**kwargs):
@@ -910,7 +910,7 @@ def test_capture_failure_never_breaks_the_save(client, tmp_path, monkeypatch):
 
     r = client.put(f"/api/documents/{doc_id}/review/{tid}", json={"verified": True})
     assert r.status_code == 200 and r.json()["verified"] is True
-    from webapp.api import registry
+    from apps.api.api import registry
     assert registry.get(doc_id).reviewed[tid] is True
 
 
@@ -920,8 +920,8 @@ def test_auto_engine_is_offered_and_accepted(client):
     assert "auto" in {e["key"] for e in engines}
     doc_id = _upload(client).json()["documents"][0]["id"]
     # A run payload naming it must pass validation (api.py `_settings_from`).
-    from webapp.settings import Settings
-    from webapp.api import _settings_from
+    from apps.api.settings import Settings
+    from apps.api.api import _settings_from
     assert _settings_from({"ocr_engine_key": "auto"}).ocr_engine_key == "auto"
     assert Settings().ocr_engine_key == "auto"  # the out-of-the-box default
     assert doc_id
@@ -936,8 +936,8 @@ def test_auto_engine_is_first_in_the_picker(client):
 def test_dpi_accepts_auto_and_rejects_garbage(client):
     """`dpi` may be "auto" or a positive int; anything else is a 400, not a crash
     deep in ingest (dpi/72)."""
-    from webapp.api import _settings_from
-    from webapp.state import Document
+    from apps.api.api import _settings_from
+    from apps.api.state import Document
     assert _settings_from({"dpi": "auto"}).dpi == "auto"
     assert _settings_from({"dpi": 300}).dpi == 300
     doc_id = _upload(client).json()["documents"][0]["id"]

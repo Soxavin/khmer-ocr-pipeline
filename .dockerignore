@@ -5,7 +5,14 @@ __pycache__
 sample_data/
 eval/datasets/
 eval/runs/
-docs/figures/
+docs/report/figures/
 .pytest_cache
 .claude
 scratchpad
+.uv-cache
+.venv-challengers
+# The frontend is built in the Dockerfile's stage 1.
+apps/web/node_modules/
+apps/web/dist/
+research/
+tools/

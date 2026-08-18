@@ -210,7 +210,7 @@ def test_gemini_is_registered():
 
 
 def test_api_engines_are_grouped_and_gemini_is_cloud():
-    from webapp.api import _ENGINES
+    from apps.api.api import _ENGINES
     assert all("group" in e for e in _ENGINES)
     gemini = next(e for e in _ENGINES if e["key"] == "gemini")
     assert gemini["group"] == "cloud"
