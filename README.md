@@ -4,13 +4,17 @@ A **local-first OCR pipeline** that turns Khmer-language financial documents (PD
 market-price bulletins and government budget reports) into **analyst-reviewable structured data** —
 JSON, CSV, and Excel.
 
-It pairs an automated extraction pipeline with a Streamlit review tool so a data analyst can correct the
+It pairs an automated extraction pipeline with a React review workspace so a data analyst can correct the
 machine's output before exporting. Everything runs **on-device** (no cloud APIs) so sensitive financial
 documents never leave the machine.
 
 > Personal internship R&D project (GDDE, Cambodia). It explores the best
 > on-device workflow for Khmer table extraction; the evaluation harness backs the findings rather than
 > being the goal itself.
+>
+> **This is the `release/minimal` branch** — the runtime, its tests, and the evaluation harness that
+> reproduces the reported accuracy numbers. The research trail (`experiments/`), the dataset factory
+> (`src/khmer_pipeline/datagen/`, `scripts/`), and the legacy Streamlit UIs live on `main`.
 
 ---
 
@@ -35,11 +39,13 @@ image↔table linking**, undo/redo, row insert/delete, edited-vs-original **diff
 tracking per table, **find & replace across all tables** (Ctrl-F), and batch "Run all" / "Export all".
 Bundled Noto Sans Khmer with adjustable text size keeps stacked Khmer subscripts legible. The REST API
 (`webapp/api.py`) rides the same process as the pipeline, so models load once. The **NiceGUI** UI
-(`webapp/main.py`, port 8600 at `/`) remains as a fallback; the single-file **Streamlit** app (`app.py`)
-is legacy.
+(`webapp/main.py`, port 8600 at `/`) remains as a fallback.
 
-**Swappable engines:** Surya (default), Tesseract-`khm`, and a structure-aware **hybrid** (SLANet grid +
-Surya row-strip recognition) for dense fragmented tables — selected via the `OCR_ENGINE` env var.
+**Swappable engines**, selected via the `OCR_ENGINE` env var: `surya` (default), `surya_kiri`,
+`surya_kiri_vlm`, `auto` (confidence circuit-breaker), `hybrid` (SLANet grid + Surya row-strip
+recognition, for dense fragmented tables), `tesseract`, `gemini`, and the ARDB fine-tune trial engines
+`gemma_ardb` / `qwen_ardb`. The fine-tune engines run inference out-of-process via
+`uv run --isolated`, so they add no dependencies to this install.
 
 ---
 
@@ -68,8 +74,6 @@ uv run python -m webapp.main            # one process serves BOTH UIs (no separa
                                         # Reuses an already-running :8600 backend instead of restarting it
                                         # (a restart reloads the multi-GB models AND drops uploaded documents).
 ./dev.sh build                          # rebuild dist/ so http://localhost:8600/app serves the new bundle
-uv run streamlit run app.py             # (legacy) older single-file Streamlit review UI
-uv run streamlit run lab.py             # (optional) researcher lab — compare engines + inspect pipeline stages
 
 # --- Command line (batch) ---
 uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-deskew] [--no-qwen]
@@ -137,15 +141,13 @@ model beats Surya:
 |------|------------|
 | [`frontend/`](frontend/) | React review workspace (primary UI, served at `/app`) — Vite + TypeScript + AG Grid |
 | [`webapp/`](webapp/) | FastAPI REST layer (`api.py`) + NiceGUI fallback UI (`uv run python -m webapp.main` serves both) |
-| [`app.py`](app.py) | Older Streamlit review UI (legacy) |
-| [`src/khmer_pipeline/`](src/khmer_pipeline/) | The pipeline package — the 5 stages, swappable engines, synthetic-data generators, and the evaluation code |
-| [`scripts/`](scripts/) | Research & evaluation one-offs — see [`scripts/README.md`](scripts/README.md) |
+| [`src/khmer_pipeline/`](src/khmer_pipeline/) | The pipeline package — the 5 stages, swappable engines, and the evaluation code |
 | [`docs/REPORT.md`](docs/REPORT.md) | Evaluation report (the write-up) |
 | [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) | R&D decision log (why things were built this way) |
-| [`docs/`](docs/) | Also: `OPERATIONS.md`, `GLOSSARY.md`, `figures/`, and `superpowers/` (per-stage design specs/plans) |
+| [`docs/`](docs/) | Also: `OPERATIONS.md`, `GLOSSARY.md`, `figures/` |
 | [`eval/`](eval/) | Evaluation harness + [`eval/README.md`](eval/README.md) (datasets/runs are gitignored) |
 | [`tests/`](tests/) | pytest suite, mirroring `src/khmer_pipeline/` 1:1 |
-| [`fonts/`](fonts/) | Khmer fonts for synthetic data (OFL-licensed) |
+| [`fonts/`](fonts/) | Khmer fonts used for rendering and evaluation (OFL-licensed) |
 | `sample_data/` | **Gitignored** — real financial documents are never committed |
 | [`CONTEXT.md`](CONTEXT.md) | Architecture deep-dive (stages, engine-swap design, memory management) |
 | `setup-metal-macos.sh` / `stop-metal-macos.sh` | Start/stop the Surya Metal backend |

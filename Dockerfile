@@ -1,3 +1,15 @@
+# ---- Stage 1: build the React workspace -------------------------------------
+# frontend/dist is gitignored, and webapp/api.py:730 only mounts /app when that
+# directory exists — so without this stage the image would start cleanly and
+# silently serve no primary UI.
+FROM node:22-slim AS frontend-build
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: runtime --------------------------------------------------------
 FROM python:3.11-slim
 
 # System deps: Tesseract (+Khmer), OpenCV runtime libs, curl for uv
@@ -17,10 +29,13 @@ RUN uv sync --no-install-project
 
 # App code
 COPY src/ ./src/
-COPY app.py lab.py ./
+COPY webapp/ ./webapp/
 COPY fonts/ ./fonts/
+# Built React bundle from stage 1 — webapp/api.py mounts it at /app.
+COPY --from=frontend-build /build/dist ./frontend/dist
 RUN uv sync
 
-EXPOSE 8501
+EXPOSE 8600
 # No SURYA_INFERENCE_BACKEND -> Surya uses the torch backend; device.py picks CUDA/CPU.
-CMD ["uv", "run", "streamlit", "run", "app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
+# NiceGUI's ui.run() already binds 0.0.0.0, so no host argument is needed here.
+CMD ["uv", "run", "python", "-m", "webapp.main"]

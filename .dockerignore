@@ -9,3 +9,9 @@ docs/figures/
 .pytest_cache
 .claude
 scratchpad
+.uv-cache
+.venv-challengers
+# The frontend is built in the Dockerfile's stage 1; keeping these out of the
+# build context avoids shipping ~217M of node_modules and a stale local bundle.
+frontend/node_modules/
+frontend/dist/

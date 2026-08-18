@@ -1,5 +1,15 @@
 # eval/ — Evaluation Artifacts
 
+> **Branch note (`release/minimal`).** This branch carries the *scoring* half of the
+> harness — `khmer_pipeline.evaluation.*` (`run_benchmark`, `analyze_benchmark`,
+> `visualize_benchmark`, `evaluate_structure`, `gt_provenance`) — so the reported
+> accuracy numbers can be reproduced against existing datasets.
+>
+> The *dataset-production* half is on `main`: sections below that invoke
+> `khmer_pipeline.datagen.*` or `scripts/` refer to modules not present here. Restore
+> them with `git checkout main -- src/khmer_pipeline/datagen scripts` if you need to
+> build new datasets rather than score against existing ones.
+
 ## 1. Purpose & Layout
 
 All benchmark inputs and outputs live under `eval/`. One run = one folder.

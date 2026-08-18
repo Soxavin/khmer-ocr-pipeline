@@ -1,10 +1,21 @@
 """Shared parsing for the ARDB fine-tune engines (Gemma, Qwen): both models were
-fine-tuned on the same unified instruction/output contract (see
-`datagen/build_ardb_unified_sft.py`'s `_UNIFIED_INSTRUCTION`) — one JSON array of
+fine-tuned on the same unified instruction/output contract — one JSON array of
 `{"box_2d": [y1, x1, y2, x2] (0-1000 grid), "label": ..., "text": ...}` per page
 region. What differs between the two models is only the Table region's `text`
 format (Gemma: HTML, matching `surya.py`'s existing parser; Qwen: markdown pipe
 tables), so only the markdown grid parser is new here — JSON repair is shared.
+
+The training-time instruction is reproduced verbatim below. It originates in the
+dataset factory (`datagen/build_ardb_unified_sft.py`'s `_UNIFIED_INSTRUCTION`),
+which is NOT present on this branch — the adapters on the Hub were trained
+against exactly this string, so the inference prompts in `gemma_ardb_infer.py`
+and `qwen_ardb_infer.py` must keep matching it or the models silently degrade:
+
+    Extract every layout region on this page. Output a JSON list of objects,
+    each {"box_2d": [y1, x1, y2, x2], "label": category, "text": ...} (text is
+    the region's transcribed content, or an empty string if it has none, e.g. a
+    photo), with box_2d normalized to a 0-1000 grid. Categories: Table, Text,
+    Section-Header, Page-Furniture, Picture.
 """
 from __future__ import annotations
 

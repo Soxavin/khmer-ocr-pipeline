@@ -7,7 +7,6 @@ dependencies = [
     "pymupdf>=1.24",
     "numpy>=1.26",
     "pillow>=10.0",
-    "streamlit>=1.35",
     "opencv-python-headless>=4.8",
     "surya-ocr>=0.20.0,<0.21",
     "bleach>=6.0",
@@ -27,21 +26,16 @@ dev = [
     "pytest>=8.0",
     "matplotlib>=3.8,<4.0",
 ]
-# Eval/datagen-only deps kept out of the core local-first pipeline: playwright
-# (synthetic-doc rendering) and openai (optional cloud LLM judge — contradicts
-# the local-first stance). Installed by CI's `uv sync --all-extras`.
+# Cloud-API deps kept out of the core local-first pipeline: openai (optional LLM
+# judge in evaluation/, and gt_provenance) and google-genai (the Gemini engine) —
+# both contradict the local-first stance, so neither is a core dependency.
+# Installed by CI's `uv sync --all-extras`.
+#
+# playwright was dropped on this branch: its only consumer was the dataset
+# factory's synthetic-document renderer, which lives on `main`, not here.
 eval-extras = [
     "google-genai>=1.0,<2.0",
     "openai>=1.0,<2.0",
-    "playwright>=1.44,<2.0",
-]
-# Isolated group for the from-scratch CRNN training experiment
-# (experiments/khmer_crnn/). Kept out of the core pipeline env — only
-# install with `uv sync --extra experiments` when running that trainer.
-experiments = [
-    "torchvision>=0.27,<0.28",
-    "datasets>=5.0,<6.0",
-    "psutil>=7.2,<8.0",
 ]
 
 [build-system]

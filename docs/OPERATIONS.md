@@ -14,12 +14,13 @@ the `llama-server` process **stays alive** for the session.
 
 ### Start
 ```bash
-source setup-metal-macos.sh      # sets env + reports the llama-server binary
-uv run streamlit run app.py      # or: uv run python -m khmer_pipeline.pipeline ...
+source setup-metal-macos.sh          # sets env + reports the llama-server binary
+uv run python -m webapp.main         # React workspace at :8600/app, NiceGUI at :8600/
+                                     # or: uv run python -m khmer_pipeline.pipeline ...
 ```
 
 ### Status
-The Streamlit sidebar shows **🟢 OCR backend running** / **⚪ OCR backend not detected**.
+The UI header shows **🟢 OCR backend running** / **⚪ OCR backend not detected**.
 From a shell: `pgrep -f llama-server`.
 
 ### Stop / crash recovery
@@ -37,9 +38,9 @@ Use the stop script when you're done, or if a previous run was orphaned.
 PyTorch (Surya, via llama-server) and MLX (Qwen, opt-in) share the 24 GB unified
 memory. `clear_device_cache()` is called after each stage to release caches.
 
-- The Streamlit app shows a soft "large job" warning when a job exceeds
-  `_MEMORY_WARN_PAGES` (in `app.py`), as **effective pages = page_count × (DPI / 200)**.
-  Current value: **25**. This is a "this will take a while" heads-up, **not** a measured
+- The app shows a soft "large job" warning when a job exceeds
+  `_MEMORY_WARN_PAGES` (in `webapp/main.py`), as **effective pages = page_count × (DPI / 200)**.
+  Current value: **15**. This is a "this will take a while" heads-up, **not** a measured
   memory ceiling.
 - **Measured result (2026-06-23):** a **10-page born-digital PDF at 300 DPI**
   (`CambodiaBudgetExecutioninApr-2024.pdf`, effective ≈ 15) completed in **~7 min** with
@@ -71,13 +72,21 @@ Update `_MEMORY_WARN_PAGES` and the measured result above only if the numbers sh
 
 ## Reproducible synthetic data (offline fonts)
 
+> **Not on this branch.** The synthetic generators live in
+> `src/khmer_pipeline/datagen/` on `main`; `release/minimal` carries the runtime,
+> its tests, and the scoring half of the eval harness. The `fonts/` they depend on
+> are still here, so `git checkout main -- src/khmer_pipeline/datagen` restores the
+> capability if you need to regenerate datasets.
+
 The synthetic generators render HTML with **vendored OFL Khmer fonts** embedded as
 base64 `@font-face` (see `fonts/` and `fonts/MANIFEST.txt`) — no live
 `fonts.googleapis.com` dependency, so datasets regenerate deterministically offline:
+
 ```bash
 uv run python -m khmer_pipeline.datagen.generate_synthetic_tables --output-dir eval/datasets/synthetic_tables
 uv run python -m khmer_pipeline.datagen.generate_synthetic_documents --output-dir eval/datasets/synthetic_documents
 ```
+
 The generators abort (rather than emit a fallback-font image) if a font fails to load.
 
 ## Two deployment lanes (Mac native vs Docker)

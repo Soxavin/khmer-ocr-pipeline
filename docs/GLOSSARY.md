@@ -201,9 +201,10 @@ src/khmer_pipeline/
   engines/table_stitch.py   # the (default-off) fragmentation stitcher experiments
   model_config.py           # model names + tunable thresholds
   evaluation/run_benchmark.py / analyze_benchmark.py / visualize_benchmark.py    # evaluation
-app.py                      # the Streamlit web UI
+webapp/                     # FastAPI REST layer + NiceGUI fallback UI
+frontend/                   # React review workspace (primary UI, served at /app)
 eval/                       # datasets + benchmark runs + eval/README.md
-docs/                       # PROJECT_LOG, OPERATIONS, FINAL_SPRINT_PLAN, this GLOSSARY
+docs/                       # PROJECT_LOG, OPERATIONS, REPORT, this GLOSSARY
 fonts/                      # vendored Khmer fonts (for reproducible synthetic data)
 setup-metal-macos.sh / stop-metal-macos.sh   # start/stop the OCR backend
 ```
@@ -211,7 +212,7 @@ setup-metal-macos.sh / stop-metal-macos.sh   # start/stop the OCR backend
 ## 9. Common commands
 ```bash
 source setup-metal-macos.sh                      # start the OCR backend (do this first)
-uv run streamlit run app.py                      # launch the web UI
+uv run python -m webapp.main                     # launch the web UI (:8600/app)
 uv run python -m khmer_pipeline.evaluation.run_benchmark    # run the benchmark
 uv run python -m khmer_pipeline.evaluation.analyze_benchmark   # summarize the latest run
 uv run pytest -q                                 # run the test suite

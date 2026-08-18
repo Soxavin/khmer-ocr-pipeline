@@ -3,9 +3,8 @@
 Khmer-language document OCR pipeline for GDDE financial documents
 (e.g. ARDB forms). Entry points: a **React review workspace** (`frontend/`,
 primary — served at `http://localhost:8600/app` by `uv run python -m
-webapp.main`, which also serves the **NiceGUI fallback UI** at `/`), an older
-Streamlit UI (`app.py`, legacy), and a CLI batch processor
-(`src/khmer_pipeline/pipeline.py`).
+webapp.main`, which also serves the **NiceGUI fallback UI** at `/`) and a CLI
+batch processor (`src/khmer_pipeline/pipeline.py`).
 
 > For the *why* behind major design decisions (the table-cell redesign, the
 > evaluation framework, benchmark results), see `docs/PROJECT_LOG.md`.
@@ -17,7 +16,7 @@ Streamlit UI (`app.py`, legacy), and a CLI batch processor
 - `surya-ocr` (pinned `>=0.20.0,<0.21`) — layout detection, OCR, table recognition. Device is auto-selected by `utils/device.py` (`configure_runtime()` sets `TORCH_DEVICE` → CUDA on NVIDIA, MPS on Apple Silicon, else CPU). On Apple Silicon, `setup-metal-macos.sh` opts into the faster built-in llamacpp Metal backend (`SURYA_INFERENCE_BACKEND=llamacpp`), which `utils/device.py` respects. `mlx-lm` is a Mac-only (marker-gated) dependency; see `Dockerfile` for the Linux/GPU lane.
 - `mlx-lm` + `transformers` (pinned, see pyproject.toml) — Qwen2.5-7B-Instruct-4bit text correction
 - React 19 + Vite + TypeScript + Tailwind 4 + AG Grid community + TanStack Query (`frontend/`) — primary review workspace, served at `/app` from the built `frontend/dist` (build: `cd frontend && npm run build`, or `./dev.sh build`; dev: `./dev.sh` starts backend + Vite HMR at :5173/app/, proxying `/api` to :8600)
-- NiceGUI (pinned `>=2.0,<3.0`) — fallback review UI (`webapp/main.py`) AND the FastAPI host for the REST layer (`webapp/api.py` registers routes on `nicegui.app`, a FastAPI subclass — one process, models load once); Streamlit >=1.35 — legacy UI (`app.py`)
+- NiceGUI (pinned `>=2.0,<3.0`) — fallback review UI (`webapp/main.py`) AND the FastAPI host for the REST layer (`webapp/api.py` registers routes on `nicegui.app`, a FastAPI subclass — one process, models load once)
 - pytest — tests
 
 ## Pipeline architecture
@@ -76,7 +75,7 @@ grid-shape agreement. Its floor is plain Surya (every fallback keeps Surya's tex
 Surya's structure holds it beats both other engines (ARDB p3: CellAcc 0.98+, NumAcc 1.0).
 Slowest engine (the table VLM runs).
 
-**Rule:** orchestrators (`pipeline.py`, `app.py`) must only import execution
+**Rule:** orchestrators (`pipeline.py`, `webapp/runner.py`) must only import execution
 functions (`ACTIVE_OCR_ENGINE`, `ACTIVE_CORRECTION_ENGINE`) from
 `engines/engine_registry.py`, never directly from `engines/surya.py`/`postprocess.py`.
 State-checking helpers (`models_loaded`, `preload_models`, `qwen_loaded`) are
@@ -96,7 +95,7 @@ need to swap models.
 (MLX/Qwen), each best-effort/wrapped in try/except. On Apple Silicon, Surya 0.20+
 delegates to a C++ `llama-server` process that manages its own VRAM, so
 `torch.mps.empty_cache()` is not called there.
-Called after every stage in both `pipeline.py` and `app.py`, and also
+Called after every stage in both `pipeline.py` and `webapp/runner.py`, and also
 after any page in `postprocess()` where `qwen_used` is true. Exists to
 avoid OOM on 24GB unified-memory Macs during multi-stage ML inference —
 call it after any new heavy model invocation you add.
@@ -134,7 +133,7 @@ Khmer rendering: bundled Noto Sans Khmer (`frontend/src/assets/fonts/`, OFL),
 ## UI (`webapp/main.py`, NiceGUI — fallback)
 
 Modular NiceGUI app; presentation layer only — it imports and calls the same
-pipeline functions as `app.py` (nothing pipeline-side changed). Run with
+pipeline functions the CLI does (nothing pipeline-side changed). Run with
 `uv run python -m webapp.main` (port 8600). Modules: `settings.py` (`Settings`
 dataclass + `settings_key` re-run guard + page-range logic), `state.py`
 (`Document` per uploaded file + `AppState` session holding shared `Settings` +
@@ -142,8 +141,8 @@ a document list — enables **batch upload**; plus a thread-safe `Progress`),
 `runner.py` (drives the 5 stages via **`nicegui.run.io_bound`** — a thread pool,
 so the multi-GB Surya/Qwen models stay loaded in-process; `clear_device_cache()`
 between stages; **not** `run.cpu_bound`, which would fork+reload them),
-`tables.py`/`downloads.py`/`edits.py` (pure, unit-tested ports of app.py's
-two-scope table build, JSON edit-patch, exports, and bulk find/replace),
+`tables.py`/`downloads.py`/`edits.py` (pure, unit-tested two-scope table build,
+JSON edit-patch, exports, and bulk find/replace),
 `components.py` (unified confidence palette used by BOTH the image overlay and
 cell tinting, SVG overlay builder, `table_bbox_index`), `main.py` (the page).
 
@@ -158,32 +157,6 @@ the hybrid engine discards SLANet cell boxes in `_build_table`), so linking is
 table-level by necessity, not per-cell. UI-only; verified by running the app +
 the `tests/test_webapp_*.py` unit tests (no browser tests).
 
-## UI (`app.py`, Streamlit — legacy)
-
-Single-file Streamlit app. Flow: sidebar config (Primary settings + a
-collapsed Advanced expander) -> file upload -> "Run Extraction" button ->
-runs all 5 stages (with `clear_device_cache()` after each, results cached
-into `st.session_state` incrementally per stage) -> paginated
-**side-by-side review** (page image + editable tables) -> downloads
-(patched JSON + per-table CSV / Excel / zip). When per-cell confidence
-exists (surya_kiri), each table also gets a collapsed read-only
-**"🔍 Confidence view"** (cells tinted by the `CELL_CONF_LOW`/`CELL_CONF_MID`
-buckets from `model_config.py`); tables always render without it too —
-never gate display on optional data.
-
-Results are cached in `st.session_state` keyed by a `settings_key`
-string so re-renders don't re-run the pipeline. Once results exist, the
-UI shows **one page at a time** via `st.session_state.current_page_idx`:
-a "Jump to page" selectbox plus Previous/Next buttons (`st.rerun()` on
-change), clamped to `[0, total_pages - 1]`. `current_page_idx` is reset
-(`st.session_state.pop(...)`) whenever a new file is uploaded. Per-page
-widget keys (`edit_{i}`, `edited_text_{i}`) are unchanged, so edits made
-on a page persist when navigating away and back.
-
-All `st.image`/`st.button`/`st.download_button` calls use `width="stretch"`
-(installed Streamlit is 1.58, which supports `width=` on all of these) —
-**do not use the deprecated `use_container_width=True`**.
-
 ## CLI (`pipeline.py`)
 
 ```bash
@@ -192,7 +165,7 @@ uv run python -m khmer_pipeline.pipeline input.pdf output/ [--dpi 200] [--no-des
 Same 5 stages, writes `<name>_extracted.json` + per-table CSVs to
 `output/`, prints `WARNING:`-prefixed lines for anything in
 `SuryaResult.warnings`. Calls `clear_device_cache()` after preprocess,
-Surya, and postprocess (same as `app.py`).
+Surya, and postprocess.
 
 ## Benchmark runner (`evaluation/run_benchmark.py`)
 
@@ -210,9 +183,10 @@ definitions.
 ## Where to look for X
 
 - **Add/tune a preprocessing step** -> `preprocess.py` (`PreprocessConfig`
-  field + `_preprocess_image` step order) + sidebar checkbox in `app.py` +
-  CLI flag in `pipeline.py`. Follow the existing pattern (see `deskew`,
-  `normalise_table_backgrounds`).
+  field + `_preprocess_image` step order) + a control in
+  `frontend/src/components/run/SettingsDrawer.tsx` and the matching field in
+  `webapp/settings.py` + CLI flag in `pipeline.py`. Follow the existing
+  pattern (see `deskew`, `normalise_table_backgrounds`).
 - **Change OCR/layout/table model** -> `model_config.py` (checkpoints) +
   `engines/surya.py` (call sites).
 - **Change correction rules / Qwen behavior** -> `postprocess.py`.
@@ -221,15 +195,17 @@ definitions.
 - **UI changes** -> `frontend/` (React, primary; iterate with `./dev.sh` for
   hot reload, `./dev.sh build` when :8600/app must serve the new bundle)
   + `webapp/api.py` if the server must expose new data (TDD in
-  `tests/test_webapp_api.py`); `webapp/main.py` (NiceGUI fallback) or `app.py`
-  (Streamlit legacy) only when keeping them in sync matters.
+  `tests/test_webapp_api.py`); `webapp/main.py` (NiceGUI fallback) only when
+  keeping it in sync matters.
 - **Tests** mirror `src/khmer_pipeline/` 1:1 in `tests/` (e.g.
   `preprocess.py` <-> `tests/test_preprocess.py`).
 
 ## Further history
 
-`docs/superpowers/plans/` and `docs/superpowers/specs/` contain the
-design docs and implementation plans for each stage (stages 1-6 +
-batch region OCR) — useful for "why was this built this way" context.
+`docs/PROJECT_LOG.md` is the dated decision log — the primary "why was this
+built this way" reference. `docs/REPORT.md` is the evaluation write-up.
 
-See `CLAUDE.md` for coding conventions.
+The per-stage design specs and plans (`docs/superpowers/`), the coding-convention
+file (`CLAUDE.md`), and the research trail (`experiments/`, `scripts/`) are on
+`main` — this branch carries only what is needed to run, test, and evaluate the
+application.
