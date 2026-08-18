@@ -33,6 +33,18 @@ SCOPE_OPTIONS: dict[str, str] = {
     "single": "Single page",
     "range": "Page range",
 }
+# The overlay_mode domain was previously a bare string pair repeated in four
+# places (this module's field comment, main.py's radio, components.py's docstring
+# and the React settings test) with no shared constant and no test -- the same
+# shape as the engine/DPI maps before they 500'd the page.
+OVERLAY_MODE_OPTIONS: dict[str, str] = {
+    "Region type": "Region type",
+    "Confidence": "Confidence",
+}
+EXTRACTION_MODE_OPTIONS: dict[object, str] = {
+    False: "Full extraction (text + tables)",
+    True: "Tables only",
+}
 
 
 def with_current(options: dict, value: object) -> dict:

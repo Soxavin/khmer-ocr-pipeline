@@ -4,6 +4,7 @@ import type { DocSummary } from '../../api/types'
 import { ConfirmPopover } from '../ConfirmPopover'
 import { useT, type Key } from '../../i18n.tsx'
 import { btnCls, btnSmCls, ICON, ICON_SM, iconBtnCls } from '../../ui'
+import { ACCEPT_ATTR } from '../../lib/uploads'
 
 /** Which destructive action is awaiting confirmation, and where to anchor it. */
 type PendingConfirm =
@@ -157,7 +158,7 @@ export const QueueRail = memo(function QueueRail(props: {
           ref={fileInput}
           type="file"
           multiple
-          accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff"
+          accept={ACCEPT_ATTR}
           className="hidden"
           onChange={(e) => {
             if (e.target.files?.length) onUpload(Array.from(e.target.files))
