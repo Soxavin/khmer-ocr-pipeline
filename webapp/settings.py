@@ -9,6 +9,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Option maps for the NiceGUI fallback UI's selects. They live here, beside the
+# dataclass whose values they constrain, so a default can never drift out of its
+# own option set unnoticed (tests/test_webapp_settings_options.py asserts the
+# pairing). NiceGUI's ui.select raises ValueError when the bound value is absent
+# from the options, which renders as a 500 on the whole page -- so "every default
+# is selectable" is a correctness requirement, not a cosmetic one.
+ENGINE_OPTIONS: dict[str, str] = {
+    "auto": "Automatic (recommended — picks per document)",
+    "surya": "Surya (fast — best all-round)",
+    "surya_kiri": "Surya + Kiri (Khmer-text-heavy tables, slower)",
+    "surya_kiri_vlm": "Surya + Kiri VLM (Surya structure + Kiri Khmer — slowest)",
+    "gemini": "Cloud (Gemini) — sends the page image to Google",
+}
+DPI_OPTIONS: dict[object, str] = {
+    "auto": "Automatic (200, or 300 for faint scans)",
+    150: "150 — fastest",
+    200: "200",
+    300: "300 — faint or low-resolution scans",
+}
+SCOPE_OPTIONS: dict[str, str] = {
+    "all": "All pages",
+    "single": "Single page",
+    "range": "Page range",
+}
+
+
+def with_current(options: dict, value: object) -> dict:
+    """`options`, guaranteed to contain `value`, for binding to a ui.select.
+
+    `Settings` is shared with the React workspace, which can legitimately hold
+    values this fallback UI does not enumerate -- a Labs engine (`gemma_ardb`),
+    or `page_scope="list"`, which has no NiceGUI widget. ui.select would raise
+    ValueError on those and 500 the page. Surfacing the value as an extra entry
+    keeps the fallback usable and honest about where the value came from."""
+    if value in options:
+        return options
+    return {**options, value: f"{value} — set in the main workspace"}
+
 
 
 @dataclass
@@ -42,6 +80,16 @@ class Settings:
 
     show_layout: bool = True
     overlay_mode: str = "Region type"  # "Region type" | "Confidence"
+
+    @property
+    def dpi_estimate(self) -> int:
+        """A concrete DPI to size a job with, even when `dpi` is "auto".
+
+        The real value is chosen per document at ingest (`resolve_auto_dpi`), which
+        needs the file bytes; a UI cost estimate must not re-open the PDF on every
+        refresh. 200 is resolve_auto_dpi's clean-document choice and the right basis
+        for a rough "this will take a while" heads-up."""
+        return 200 if self.dpi == "auto" else int(self.dpi)
 
     @property
     def invalid_range(self) -> bool:
