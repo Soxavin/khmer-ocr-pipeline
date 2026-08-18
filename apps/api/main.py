@@ -24,16 +24,15 @@ from khmer_pipeline.export import grid_to_csv, tables_to_xlsx
 
 from .runner import run_pipeline
 from .state import AppState
+from .settings import DPI_OPTIONS, ENGINE_OPTIONS, SCOPE_OPTIONS, with_current
 from . import tables, components, downloads, edits
 from . import api  # registers /api routes on nicegui.app (must precede ui.run)
 
-_ENGINE_OPTIONS = {
-    "surya": "Surya (fast — best all-round)",
-    "surya_kiri": "Surya + Kiri (Khmer-text-heavy tables, slower)",
-    "surya_kiri_vlm": "Surya + Kiri VLM (Surya structure + Kiri Khmer — slowest)",
-}
-_DPI_OPTIONS = [150, 200, 300]
-_SCOPE_OPTIONS = {"all": "All pages", "single": "Single page", "range": "Page range"}
+# Option maps live in settings.py, beside the dataclass they constrain — see the
+# note there on why "every default is selectable" is a correctness requirement.
+_ENGINE_OPTIONS = ENGINE_OPTIONS
+_DPI_OPTIONS = DPI_OPTIONS
+_SCOPE_OPTIONS = SCOPE_OPTIONS
 _MEMORY_WARN_PAGES = 15
 
 
@@ -87,8 +86,8 @@ def index() -> None:
         ui.checkbox("Convert Khmer numerals").bind_value(s, "convert_numerals")
 
         with ui.expansion("⚙️ Advanced engine settings").classes("w-full"):
-            ui.select(_DPI_OPTIONS, value=s.dpi, label="Scan quality (DPI)").bind_value(s, "dpi").classes("w-full")
-            scope = ui.select(_SCOPE_OPTIONS, value=s.page_scope, label="Pages").bind_value(s, "page_scope").classes("w-full")
+            ui.select(with_current(_DPI_OPTIONS, s.dpi), value=s.dpi, label="Scan quality (DPI)").bind_value(s, "dpi").classes("w-full")
+            scope = ui.select(with_current(_SCOPE_OPTIONS, s.page_scope), value=s.page_scope, label="Pages").bind_value(s, "page_scope").classes("w-full")
             with ui.row().bind_visibility_from(scope, "value", value="single"):
                 ui.number("Page", value=1, min=1, format="%d").bind_value(s, "page_num")
             with ui.row().bind_visibility_from(scope, "value", value="range"):
@@ -103,7 +102,7 @@ def index() -> None:
             ui.checkbox("Normalise colored table backgrounds").bind_value(s, "normalise_table_backgrounds")
 
             ui.label("Extraction").classes("font-medium mt-2")
-            ui.select(_ENGINE_OPTIONS, value=s.ocr_engine_key, label="OCR engine").bind_value(s, "ocr_engine_key").classes("w-full")
+            ui.select(with_current(_ENGINE_OPTIONS, s.ocr_engine_key), value=s.ocr_engine_key, label="OCR engine").bind_value(s, "ocr_engine_key").classes("w-full")
             ui.select({False: "Full extraction (text + tables)", True: "Tables only"},
                       value=s.tables_only, label="Extraction mode").bind_value(s, "tables_only").classes("w-full")
 
@@ -144,7 +143,7 @@ def index() -> None:
         pages = d.doc_page_count if d.doc_page_count else "?"
         ui.label(f"File: {d.upload_name}  ·  {kb} KB  ·  {pages} page(s)")
         est = len(s.page_indices(d.doc_page_count) or range(d.doc_page_count or 1))
-        if est * (s.dpi / 200.0) > _MEMORY_WARN_PAGES:
+        if est * (s.dpi_estimate / 200.0) > _MEMORY_WARN_PAGES:
             ui.label("⚠️ Large job — processing may take several minutes; consider a smaller page range.").classes("text-amber-600 text-sm")
 
     file_info()
